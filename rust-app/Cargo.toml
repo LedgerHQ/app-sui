@@ -60,7 +60,7 @@ overflow-checks = false
 
 [package.metadata.nanos]
 name = "Sui"
-api_level = "1"
+api_level = "5"
 path = ["44'/784'"]
 curve = ["ed25519"]
 flags = "0"
