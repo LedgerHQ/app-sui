@@ -198,7 +198,7 @@ dependencies = [
 [[package]]
 name = "nanos_ui"
 version = "0.2.0"
-source = "git+https://github.com/LedgerHQ/ledger-nanos-ui.git#c7fe3dff2417f9a118ad176d578c5c1ee07e83cd"
+source = "git+https://github.com/LedgerHQ/ledger-nanos-ui.git#6977cef7770c8c52738defe898fed6e274047498"
 dependencies = [
  "include_gif",
  "nanos_sdk",
