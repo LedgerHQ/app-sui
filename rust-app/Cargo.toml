@@ -45,8 +45,8 @@ test = false
 path = "bin-src/main.rs"
 
 [patch."https://github.com/LedgerHQ/ledger-nanos-sdk.git".nanos_sdk]
-git = "https://github.com/alamgu/ledger-nanos-sdk.git"
-branch = "relocating-loader-w-fixes"
+git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git"
+branch = "xch/sui-deploy"
 
 [profile.dev]
 # We need this to ensure stack usage is minimal even on speculos

@@ -188,7 +188,7 @@ dependencies = [
 [[package]]
 name = "nanos_sdk"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-nanos-sdk.git?branch=relocating-loader-w-fixes#94ded0075046753e42447da2a111c336dea8439f"
+source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=xch/sui-deploy#da519d3efffab11242b64e9d75b4547b4561ae44"
 dependencies = [
  "cc",
  "num-traits",
