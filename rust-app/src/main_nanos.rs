@@ -2,10 +2,17 @@ use crate::implementation::*;
 use crate::interface::*;
 use crate::menu::*;
 use crate::settings::*;
+use crate::swap;
 
 use alamgu_async_block::*;
 
 use ledger_device_sdk::io;
+use ledger_device_sdk::libcall;
+use ledger_device_sdk::libcall::swap::SwapResult;
+use ledger_device_sdk::libcall::swap::{
+    get_check_address_params, get_printable_amount_params, sign_tx_params, swap_return,
+};
+use ledger_device_sdk::libcall::LibCallCommand;
 use ledger_device_sdk::uxapp::{UxEvent, BOLOS_UX_OK};
 use ledger_log::{info, trace};
 use ledger_prompts_ui::{handle_menu_button_event, show_menu};
@@ -129,5 +136,36 @@ impl<T> core::ops::Deref for SingleThreaded<T> {
 impl<T> core::ops::DerefMut for SingleThreaded<T> {
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
+    }
+}
+
+pub fn lib_main(arg0: u32) {
+    let cmd = libcall::get_command(arg0);
+
+    match cmd {
+        LibCallCommand::SwapCheckAddress => {
+            let mut params = get_check_address_params(arg0);
+            let is_matched = swap::check_address(&mut params).unwrap();
+
+            swap_return(SwapResult::CheckAddressResult(
+                &mut params,
+                is_matched as i32,
+            ));
+        }
+        LibCallCommand::SwapGetPrintableAmount => {
+            let mut params = get_printable_amount_params(arg0);
+            let amount_str = swap::get_printable_amount(&mut params).unwrap();
+
+            swap_return(SwapResult::PrintableAmountResult(
+                &mut params,
+                amount_str.as_str(),
+            ));
+        }
+        LibCallCommand::SwapSignTransaction => {
+            let mut params = sign_tx_params(arg0);
+            let res = swap::sign_transaction(&mut params).unwrap();
+
+            swap_return(SwapResult::CreateTxResult(&mut params, res));
+        }
     }
 }

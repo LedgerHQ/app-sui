@@ -4,3 +4,8 @@ Cargo.nix
 
 result
 result-*
+
+rust-app/build
+build
+rust-app/target-rust-analyzer
+.vscode

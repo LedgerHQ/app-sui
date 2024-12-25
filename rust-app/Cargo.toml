@@ -27,12 +27,11 @@ speculos = [ "ledger_device_sdk/speculos", "ledger-log/speculos", "ledger-log/lo
 extra_debug = ["ledger-log/log_trace"]
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = "1.7.1"
-ledger_secure_sdk_sys = "1.2.0"
+ledger_device_sdk = "1.19.0"
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.7.1"
+version = "1.19.0"
 features = [ "speculos" ]
 
 [[bin]]
