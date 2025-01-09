@@ -15,6 +15,16 @@ use core::cell::RefCell;
 use core::pin::Pin;
 use pin_cell::*;
 
+// Trick to manage pin code
+use core::convert::TryFrom;
+struct Temp {}
+impl TryFrom<io::ApduHeader> for Temp {
+    type Error = io::StatusWords;
+    fn try_from(_header: io::ApduHeader) -> Result<Self, Self::Error> {
+        Ok(Self {})
+    }
+}
+
 #[allow(dead_code)]
 pub fn app_main() {
     let comm: SingleThreaded<RefCell<io::Comm>> = SingleThreaded(RefCell::new(io::Comm::new()));
@@ -116,7 +126,8 @@ pub fn app_main() {
             }
             io::Event::Ticker => {
                 if UxEvent::Event.request() != BOLOS_UX_OK {
-                    UxEvent::block();
+                    let mut c = comm.borrow_mut();
+                    UxEvent::block_and_get_event::<Temp>(&mut c);
                     // Redisplay application menu here
                     menu(states.borrow(), &idle_menu, &busy_menu);
                 }
