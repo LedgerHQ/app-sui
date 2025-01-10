@@ -1,5 +1,3 @@
-use ledger_prompts_ui::{PromptWrite, ScrollerError};
-
 // A couple type ascription functions to help the compiler along.
 pub const fn mkfn<A, B, C>(q: fn(&A, &mut B) -> C) -> fn(&A, &mut B) -> C {
     q
@@ -12,42 +10,6 @@ const fn mkvfn<A>(q: fn(&A,&mut Option<()>)->Option<()>) -> fn(&A,&mut Option<()
 q
 }
 */
-
-#[cfg(not(target_os = "nanos"))]
-#[inline(never)]
-pub fn scroller<F: for<'b> Fn(&mut PromptWrite<'b, 16>) -> Result<(), ScrollerError>>(
-    title: &str,
-    prompt_function: F,
-) -> Option<()> {
-    ledger_prompts_ui::write_scroller_three_rows(false, title, prompt_function)
-}
-
-#[cfg(target_os = "nanos")]
-#[inline(never)]
-pub fn scroller<F: for<'b> Fn(&mut PromptWrite<'b, 16>) -> Result<(), ScrollerError>>(
-    title: &str,
-    prompt_function: F,
-) -> Option<()> {
-    ledger_prompts_ui::write_scroller(false, title, prompt_function)
-}
-
-#[cfg(not(target_os = "nanos"))]
-#[inline(never)]
-pub fn scroller_paginated<F: for<'b> Fn(&mut PromptWrite<'b, 16>) -> Result<(), ScrollerError>>(
-    title: &str,
-    prompt_function: F,
-) -> Option<()> {
-    ledger_prompts_ui::write_scroller_three_rows(true, title, prompt_function)
-}
-
-#[cfg(target_os = "nanos")]
-#[inline(never)]
-pub fn scroller_paginated<F: for<'b> Fn(&mut PromptWrite<'b, 16>) -> Result<(), ScrollerError>>(
-    title: &str,
-    prompt_function: F,
-) -> Option<()> {
-    ledger_prompts_ui::write_scroller(true, title, prompt_function)
-}
 
 use core::future::Future;
 use core::pin::*;
@@ -62,4 +24,29 @@ impl<F: Future> Future for NoinlineFut<F> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> core::task::Poll<Self::Output> {
         self.project().0.poll(cx)
     }
+}
+
+use arrayvec::ArrayString;
+
+pub fn get_amount_in_decimals(amount: u64) -> (u64, ArrayString<12>) {
+    let factor_pow = 9;
+    let factor = u64::pow(10, factor_pow);
+    let quotient = amount / factor;
+    let remainder = amount % factor;
+    let mut remainder_str: ArrayString<12> = ArrayString::new();
+    {
+        // Make a string for the remainder, containing at lease one zero
+        // So 1 SUI will be displayed as "1.0"
+        let mut rem = remainder;
+        for i in 0..factor_pow {
+            let f = u64::pow(10, factor_pow - i - 1);
+            let r = rem / f;
+            let _ = remainder_str.try_push(char::from(b'0' + r as u8));
+            rem %= f;
+            if rem == 0 {
+                break;
+            }
+        }
+    }
+    (quotient, remainder_str)
 }

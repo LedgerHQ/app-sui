@@ -4,3 +4,6 @@ Cargo.nix
 
 result
 result-*
+
+__pycache__
+snapshots-tmp

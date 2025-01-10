@@ -1,0 +1,29 @@
+[unstable]
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.nanosplus]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+]
+
+[target.nanos]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+]
+
+[target.nanox]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+]
+
+[alias]
+tt = "test --features extra_debug"
+br = "build --release"
+stackcheck = "stack-sizes --release --bin sui --target=thumbv6m-none-eabi"

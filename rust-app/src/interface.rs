@@ -8,29 +8,29 @@ use num_enum::TryFromPrimitive;
 // Payload for a public key request
 pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
-pub type SignParameters = (IntentMessage<true>, Bip32Key);
+pub type SignParameters = (IntentMessage, Bip32Key);
 
 // Sui Types
-pub type IntentMessage<const PROMPT: bool> = (Intent, TransactionData<PROMPT>);
+pub type IntentMessage = (Intent, TransactionData);
 
-pub struct TransactionData<const PROMPT: bool>;
+pub struct TransactionData;
 
-pub type TransactionDataV1<const PROMPT: bool> = (
-    TransactionKind<PROMPT>,
+pub type TransactionDataV1 = (
+    TransactionKind,
     SuiAddress,            // sender
-    GasData<PROMPT>,       // gas_data
+    GasData,               // gas_data
     TransactionExpiration, // expiration
 );
 
-pub struct TransactionKind<const PROMPT: bool>;
+pub struct TransactionKind;
 
-pub struct ProgrammableTransaction<const PROMPT: bool>;
+pub struct ProgrammableTransaction;
 
 pub struct CommandSchema;
 pub struct ArgumentSchema;
 pub struct CallArgSchema;
 
-pub type GasData<const PROMPT: bool> = (
+pub type GasData = (
     Vec<ObjectRef, { usize::MAX }>, // payment
     SuiAddress,                     // owner
     Amount,                         // price
@@ -73,6 +73,41 @@ pub type AppId = ULEB128;
 // TODO: confirm if 33 is indeed ok for all uses of SHA3_256_HASH
 #[allow(non_camel_case_types)]
 pub type SHA3_256_HASH = Array<Byte, 33>;
+
+pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
+
+#[allow(dead_code)]
+pub struct SuiPubKeyAddress(ledger_device_sdk::ecc::ECPublicKey<65, 'E'>, SuiAddressRaw);
+
+use arrayvec::ArrayVec;
+use ledger_crypto_helpers::common::{Address, HexSlice};
+use ledger_crypto_helpers::eddsa::ed25519_public_key_bytes;
+use ledger_crypto_helpers::hasher::{Blake2b, Hasher};
+use ledger_device_sdk::io::SyscallError;
+
+impl Address<SuiPubKeyAddress, ledger_device_sdk::ecc::ECPublicKey<65, 'E'>> for SuiPubKeyAddress {
+    fn get_address(
+        key: &ledger_device_sdk::ecc::ECPublicKey<65, 'E'>,
+    ) -> Result<Self, SyscallError> {
+        let key_bytes = ed25519_public_key_bytes(key);
+        let mut tmp = ArrayVec::<u8, 33>::new();
+        let _ = tmp.try_push(0); // SIGNATURE_SCHEME_TO_FLAG['ED25519']
+        let _ = tmp.try_extend_from_slice(key_bytes);
+        let mut hasher: Blake2b = Hasher::new();
+        hasher.update(&tmp);
+        let hash: [u8; SUI_ADDRESS_LENGTH] = hasher.finalize();
+        Ok(SuiPubKeyAddress(key.clone(), hash))
+    }
+    fn get_binary_address(&self) -> &[u8] {
+        &self.1
+    }
+}
+
+impl core::fmt::Display for SuiPubKeyAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "0x{}", HexSlice(&self.1))
+    }
+}
 
 #[repr(u8)]
 #[derive(Debug, TryFromPrimitive)]

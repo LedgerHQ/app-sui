@@ -45,7 +45,7 @@ impl Menu for IdleMenuWithSettings {
             ShowVersion => self.idle_menu = AppMain,
             Settings(None) => self.idle_menu = ShowVersion,
             Settings(Some(Back)) => {
-                if self.settings.get() == 1 {
+                if self.settings.get_blind_sign() {
                     self.idle_menu = Settings(Some(DisableBlindSigning))
                 } else {
                     self.idle_menu = Settings(Some(EnableBlindSigning))
@@ -63,7 +63,7 @@ impl Menu for IdleMenuWithSettings {
             ShowVersion => self.idle_menu = Settings(None),
             Settings(None) => self.idle_menu = Exit,
             Settings(Some(Back)) => {
-                if self.settings.get() == 1 {
+                if self.settings.get_blind_sign() {
                     self.idle_menu = Settings(Some(DisableBlindSigning))
                 } else {
                     self.idle_menu = Settings(Some(EnableBlindSigning))
@@ -81,7 +81,7 @@ impl Menu for IdleMenuWithSettings {
             AppMain => None,
             ShowVersion => None,
             Settings(None) => {
-                if self.settings.get() == 1 {
+                if self.settings.get_blind_sign() {
                     self.idle_menu = Settings(Some(DisableBlindSigning))
                 } else {
                     self.idle_menu = Settings(Some(EnableBlindSigning))
@@ -89,12 +89,12 @@ impl Menu for IdleMenuWithSettings {
                 None
             }
             Settings(Some(EnableBlindSigning)) => {
-                self.settings.set(&1);
+                self.settings.set_blind_sign(true);
                 self.idle_menu = Settings(Some(DisableBlindSigning));
                 None
             }
             Settings(Some(DisableBlindSigning)) => {
-                self.settings.set(&0);
+                self.settings.set_blind_sign(false);
                 self.idle_menu = Settings(Some(EnableBlindSigning));
                 None
             }

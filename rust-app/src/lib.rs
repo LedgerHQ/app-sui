@@ -2,9 +2,10 @@
 #![allow(incomplete_features)]
 #![feature(stmt_expr_attributes)]
 #![feature(adt_const_params)]
-#![feature(str_internals)]
 #![feature(type_alias_impl_trait)]
-#![feature(const_mut_refs)]
+#![cfg_attr(not(version("1.83")), feature(const_mut_refs))]
+// Hack to fix build with nightly-2024-11-22
+#![cfg_attr(version("1.84"), feature(generic_const_exprs))]
 #![feature(try_blocks)]
 #![cfg_attr(all(target_family = "bolos", test), no_main)]
 #![cfg_attr(target_family = "bolos", feature(custom_test_frameworks))]
@@ -36,16 +37,28 @@ pub mod interface;
 pub mod utils;
 
 #[cfg(target_family = "bolos")]
+pub mod handle_apdu;
+
+#[cfg(target_family = "bolos")]
 pub mod implementation;
 
 #[cfg(target_family = "bolos")]
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 pub mod menu;
 
 #[cfg(target_family = "bolos")]
 pub mod settings;
 
 #[cfg(target_family = "bolos")]
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
 pub mod main_nanos;
+
+#[cfg(target_family = "bolos")]
+pub mod ui;
+
+#[cfg(target_family = "bolos")]
+#[cfg(any(target_os = "stax", target_os = "flex"))]
+pub mod main_stax;
 
 #[cfg(all(target_family = "bolos", test))]
 use core::panic::PanicInfo;

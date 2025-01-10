@@ -1,7 +1,8 @@
-use crate::implementation::*;
+use crate::handle_apdu::*;
 use crate::interface::*;
 use crate::menu::*;
 use crate::settings::*;
+use crate::ui::UserInterface;
 
 use alamgu_async_block::*;
 
@@ -20,15 +21,25 @@ pub fn app_main() {
 
     let hostio_state: SingleThreaded<RefCell<HostIOState>> =
         SingleThreaded(RefCell::new(HostIOState::new(unsafe {
-            core::mem::transmute(&comm.0)
+            core::mem::transmute::<
+                &core::cell::RefCell<ledger_device_sdk::io::Comm>,
+                &core::cell::RefCell<ledger_device_sdk::io::Comm>,
+            >(&comm.0)
         })));
-    let hostio: SingleThreaded<HostIO> =
-        SingleThreaded(HostIO(unsafe { core::mem::transmute(&hostio_state.0) }));
+    let hostio: SingleThreaded<HostIO> = SingleThreaded(HostIO(unsafe {
+        core::mem::transmute::<
+            &core::cell::RefCell<alamgu_async_block::HostIOState>,
+            &core::cell::RefCell<alamgu_async_block::HostIOState>,
+        >(&hostio_state.0)
+    }));
     let states_backing: SingleThreaded<PinCell<Option<APDUsFuture>>> =
         SingleThreaded(PinCell::new(None));
     let states: SingleThreaded<Pin<&PinCell<Option<APDUsFuture>>>> =
         SingleThreaded(Pin::static_ref(unsafe {
-            core::mem::transmute(&states_backing.0)
+            core::mem::transmute::<
+                &pin_cell::PinCell<core::option::Option<APDUsFuture>>,
+                &pin_cell::PinCell<core::option::Option<APDUsFuture>>,
+            >(&states_backing.0)
         }));
 
     let mut idle_menu = IdleMenuWithSettings {
@@ -64,7 +75,7 @@ pub fn app_main() {
                     PinMut::as_mut(&mut states.0.borrow_mut()),
                     ins,
                     *hostio,
-                    |io, ins| handle_apdu_async(io, ins, idle_menu.settings),
+                    |io, ins| handle_apdu_async(io, ins, idle_menu.settings, UserInterface {}),
                 );
                 match poll_rv {
                     Ok(()) => {
@@ -112,22 +123,5 @@ pub fn app_main() {
                 //trace!("Ignoring ticker event");
             }
         }
-    }
-}
-
-// We are single-threaded in fact, albeit with nontrivial code flow. We don't need to worry about
-// full atomicity of the below globals.
-struct SingleThreaded<T>(T);
-unsafe impl<T> Send for SingleThreaded<T> {}
-unsafe impl<T> Sync for SingleThreaded<T> {}
-impl<T> core::ops::Deref for SingleThreaded<T> {
-    type Target = T;
-    fn deref(&self) -> &T {
-        &self.0
-    }
-}
-impl<T> core::ops::DerefMut for SingleThreaded<T> {
-    fn deref_mut(&mut self) -> &mut T {
-        &mut self.0
     }
 }

@@ -1,8 +1,8 @@
 {
-  "owner": "alamgu",
-  "repo": "ledger-nanos-sdk",
-  "branch": "alamgu-branch",
+  "owner": "LedgerHQ",
+  "repo": "ledger-device-rust-sdk",
+  "branch": "master",
   "private": false,
-  "rev": "52edd548d7456a844b3919969b330e1e21b8e2fa",
-  "sha256": "1dnlav7883wi7y7m4lhjj9gx4nypa99iwa2acnbydq55pdd1mn6y"
+  "rev": "e9f89626ea509528f29df74ef775c1a989693450",
+  "sha256": "0n4v9ibwnkp22dmsdsiyz4hfd7jb83ccfjsv25vbmlcir4s5ppg0"
 }

@@ -295,6 +295,8 @@ rec {
   nanos = appForDevice "nanos";
   nanosplus = appForDevice "nanosplus";
   nanox = appForDevice "nanox";
+  flex = appForDevice "flex";
+  stax = appForDevice "stax";
 
   cargoFmtCheck = pkgs.stdenv.mkDerivation {
     pname = "cargo-fmt-${appName}";

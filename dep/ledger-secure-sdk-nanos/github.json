@@ -1,7 +1,7 @@
 {
   "owner": "LedgerHQ",
-  "repo": "nanos-secure-sdk",
+  "repo": "ledger-secure-sdk",
   "private": false,
-  "rev": "62dd047774b5e8a6b4e6158b493ee029453b5bae",
-  "sha256": "0y0czagzcrhjb5sfwzf6z2alk6227r3j3pgfc8aasg46zxisfrrz"
+  "rev": "36dd2110ad6349ab84da7bf9d33ecba5df9c4a19",
+  "sha256": "08icfqc82xxhzsy3r3zzbljas9v9fyjw6fcr3cgw7a8h7ybj2f4s"
 }
