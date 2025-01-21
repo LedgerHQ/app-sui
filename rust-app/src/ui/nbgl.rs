@@ -77,7 +77,11 @@ impl UserInterface {
 
         let success = NbglReview::new()
             .glyph(&APP_ICON)
-            .titles("Review transaction to transfer SUI", "", "Sign transaction to transfer SUI")
+            .titles(
+                "Review transaction to transfer SUI",
+                "",
+                "Sign transaction to transfer SUI",
+            )
             .show(&tx_fields);
         if success {
             Some(())
