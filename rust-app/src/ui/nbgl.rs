@@ -83,6 +83,9 @@ impl UserInterface {
                 "Sign transaction to transfer SUI",
             )
             .show(&tx_fields);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
         if success {
             Some(())
         } else {
