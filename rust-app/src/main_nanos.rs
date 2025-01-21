@@ -106,7 +106,7 @@ pub fn app_main() {
             }
             io::Event::Ticker => {
                 if UxEvent::Event.request() != BOLOS_UX_OK {
-                    UxEvent::block_and_get_event::<Dummy>(&mut comm);
+                    UxEvent::block_and_get_event::<Dummy>(&mut comm.borrow_mut());
                     // Redisplay application menu here
                     menu(states.borrow(), &idle_menu, &busy_menu);
                 }
