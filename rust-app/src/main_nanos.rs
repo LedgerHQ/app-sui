@@ -139,12 +139,22 @@ pub fn app_main(ctx: &RunCtx) {
             }
             io::Event::Ticker => {
                 if UxEvent::Event.request() != BOLOS_UX_OK {
-                    UxEvent::block();
+                    UxEvent::block_and_get_event::<Dummy>(&mut comm.borrow_mut());
                     // Redisplay application menu here
                     menu(states.borrow(), &idle_menu, &busy_menu);
                 }
                 //trace!("Ignoring ticker event");
             }
         }
+    }
+}
+
+// Trick to manage pin code
+use core::convert::TryFrom;
+struct Dummy {}
+impl TryFrom<io::ApduHeader> for Dummy {
+    type Error = io::StatusWords;
+    fn try_from(_header: io::ApduHeader) -> Result<Self, Self::Error> {
+        Ok(Self {})
     }
 }
