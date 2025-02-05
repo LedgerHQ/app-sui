@@ -14,6 +14,7 @@ jobs:
       #uses: LedgerHQ/app-exchange/.github/workflows/reusable_swap_functional_tests.yml@develop
       uses: hoodieshq/app-exchange/.github/workflows/reusable_swap_functional_tests.yml@bn-sui-swap-support
       with:
+        repo_for_exchange: 'hoodieshq/app-exchange' # REMOVE
         branch_for_exchange: 'bn-sui-swap-support' # REMOVE 
         branch_for_sui: ${{ github.ref }}
         test_filter: '"SUI or sui or Sui"'
