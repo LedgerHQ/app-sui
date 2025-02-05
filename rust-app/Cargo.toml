@@ -63,7 +63,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos",
 name = "Sui"
 path = ["44'/784'"]
 curve = ["ed25519"]
-flags = "0"
+flags = "0x800"
 
 [package.metadata.ledger.nanox]
 icon = "sui-small.gif"
