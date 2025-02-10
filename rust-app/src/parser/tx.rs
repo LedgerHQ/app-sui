@@ -3,7 +3,7 @@ use crate::parser::common::*;
 use arrayvec::ArrayVec;
 use core::future::Future;
 use ledger_device_sdk::io::SyscallError;
-use ledger_log::trace;
+use ledger_log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
@@ -80,7 +80,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                     let length =
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
-                    trace!("CallArgSchema: Pure: length: {}", length);
+                    info!("CallArgSchema: Pure: length: {}", length);
                     match length {
                         8 => CallArg::Amount(
                             <DefaultInterp as AsyncParser<Amount, BS>>::parse(
@@ -110,11 +110,11 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             .await;
                     match enum_variant {
                         0 => {
-                            trace!("CallArgSchema: ObjectArg: ImmOrOwnedObject");
+                            info!("CallArgSchema: ObjectArg: ImmOrOwnedObject");
                             object_ref_parser().parse(input).await;
                         }
                         1 => {
-                            trace!("CallArgSchema: ObjectArg: SharedObject");
+                            info!("CallArgSchema: ObjectArg: SharedObject");
                             <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
                                 SharedObject,
                                 BS,
@@ -135,7 +135,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                     CallArg::ObjectArg
                 }
                 _ => {
-                    trace!("CallArgSchema: Unknown enum: {}", enum_variant);
+                    info!("CallArgSchema: Unknown enum: {}", enum_variant);
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -171,7 +171,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
                 1 => {
-                    trace!("CommandSchema: TransferObject");
+                    info!("CommandSchema: TransferObject");
                     let v1 = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, TRANSFER_OBJECT_ARRAY_LENGTH>,
                         BS,
@@ -185,7 +185,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                     Command::TransferObject(v1, v2)
                 }
                 2 => {
-                    trace!("CommandSchema: SplitCoins");
+                    info!("CommandSchema: SplitCoins");
                     let v1 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
@@ -199,7 +199,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                     Command::SplitCoins(v1, v2)
                 }
                 _ => {
-                    trace!("CommandSchema: Unknown enum: {}", enum_variant);
+                    info!("CommandSchema: Unknown enum: {}", enum_variant);
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -234,25 +234,25 @@ impl<BS: Clone + Readable> AsyncParser<ArgumentSchema, BS> for DefaultInterp {
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
                 0 => {
-                    trace!("ArgumentSchema: GasCoin");
+                    info!("ArgumentSchema: GasCoin");
                     Argument::GasCoin
                 }
                 1 => {
-                    trace!("ArgumentSchema: Input");
+                    info!("ArgumentSchema: Input");
                     Argument::Input(
                         <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
                             .await,
                     )
                 }
                 2 => {
-                    trace!("ArgumentSchema: Result");
+                    info!("ArgumentSchema: Result");
                     Argument::Result(
                         <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
                             .await,
                     )
                 }
                 3 => {
-                    trace!("ArgumentSchema: NestedResult");
+                    info!("ArgumentSchema: NestedResult");
                     Argument::NestedResult(
                         <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
                             .await,
@@ -296,7 +296,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                 let length =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
 
-                trace!("ProgrammableTransaction: Inputs: {}", length);
+                info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
                     let arg = <DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
                         &DefaultInterp,
@@ -366,7 +366,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
             {
                 let length =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                trace!("ProgrammableTransaction: Commands: {}", length);
+                info!("ProgrammableTransaction: Commands: {}", length);
                 for _ in 0..length {
                     let c = <DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
                         &DefaultInterp,
@@ -387,7 +387,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                             match recipient_input {
                                 Argument::Input(inp_index) => {
                                     if Some(inp_index as u32) != recipient_index {
-                                        trace!("TransferObject recipient mismatch");
+                                        info!("TransferObject recipient mismatch");
                                         reject_on::<()>(
                                             core::file!(),
                                             core::line!(),
@@ -482,7 +482,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind 
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
                 0 => {
-                    trace!("TransactionKind: ProgrammableTransaction");
+                    info!("TransactionKind: ProgrammableTransaction");
                     <ProgrammableTransaction as AsyncParser<ProgrammableTransaction, BS>>::parse(
                         &ProgrammableTransaction,
                         input,
@@ -490,7 +490,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind 
                     .await
                 }
                 _ => {
-                    trace!("TransactionKind: {}", enum_variant);
+                    info!("TransactionKind: {}", enum_variant);
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -518,10 +518,10 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
                 0 => {
-                    trace!("TransactionExpiration: None");
+                    info!("TransactionExpiration: None");
                 }
                 1 => {
-                    trace!("TransactionExpiration: Epoch");
+                    info!("TransactionExpiration: Epoch");
                     <DefaultInterp as AsyncParser<EpochId, BS>>::parse(&DefaultInterp, input).await;
                 }
                 _ => {
@@ -562,7 +562,7 @@ const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRef, BS, Ou
 
 const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
     Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| {
-        trace!("Intent Ok");
+        info!("Intent Ok");
         Some(())
     })
 }
@@ -597,7 +597,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionData, BS> for TransactionData 
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
                 0 => {
-                    trace!("TransactionData: V1");
+                    info!("TransactionData: V1");
                     transaction_data_v1_parser().parse(input).await
                 }
                 _ => {
