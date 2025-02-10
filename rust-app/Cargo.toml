@@ -30,14 +30,14 @@ extra_debug = ["ledger-log/log_trace"]
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = "1.20.1"
-ledger_secure_sdk_sys = "1.6.4"
+ledger_device_sdk = "1.20.3"
+ledger_secure_sdk_sys = "1.6.6"
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.20.1"
+version = "1.20.3"
 features = [ "speculos" ]
 
 [[bin]]
