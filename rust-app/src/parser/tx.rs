@@ -14,18 +14,18 @@ use ledger_parser_combinators::endianness::*;
 use ledger_parser_combinators::interp::*;
 
 // Tx Schema
-pub type IntentMessage = (Intent, TransactionData);
+pub type IntentMessage = (Intent, TransactionDataSchema);
 
-pub struct TransactionData;
+pub struct TransactionDataSchema;
 
 pub type TransactionDataV1 = (
-    TransactionKind,
+    TransactionKindSchema,
     SuiAddress,            // sender
     GasDataSchema,         // gas_data
     TransactionExpiration, // expiration
 );
 
-pub struct TransactionKind;
+pub struct TransactionKindSchema;
 
 pub struct ProgrammableTransactionSchema;
 
@@ -505,12 +505,14 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
     }
 }
 
-impl HasOutput<TransactionKind> for TransactionKind {
+pub struct TransactionKindParser;
+
+impl HasOutput<TransactionKindSchema> for TransactionKindParser {
     type Output =
         <ProgrammableTransactionParser as HasOutput<ProgrammableTransactionSchema>>::Output;
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind {
+impl<BS: Clone + Readable> AsyncParser<TransactionKindSchema, BS> for TransactionKindParser {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
@@ -612,7 +614,7 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
 }
 
 type TransactionDataV1Output = (
-    <TransactionKind as HasOutput<TransactionKind>>::Output,
+    <TransactionKindParser as HasOutput<TransactionKindSchema>>::Output,
     GasData,
 );
 
@@ -620,7 +622,7 @@ const fn transaction_data_v1_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output> {
     Action(
         (
-            TransactionKind,
+            TransactionKindParser,
             DefaultInterp,
             gas_data_parser(),
             DefaultInterp,
@@ -629,11 +631,13 @@ const fn transaction_data_v1_parser<BS: Clone + Readable>(
     )
 }
 
-impl HasOutput<TransactionData> for TransactionData {
+pub struct TransactionDataParser;
+
+impl HasOutput<TransactionDataSchema> for TransactionDataParser {
     type Output = TransactionDataV1Output;
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionData, BS> for TransactionData {
+impl<BS: Clone + Readable> AsyncParser<TransactionDataSchema, BS> for TransactionDataParser {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
@@ -660,8 +664,10 @@ impl<BS: Clone + Readable> AsyncParser<TransactionData, BS> for TransactionData 
     }
 }
 
-pub const fn tx_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<IntentMessage, BS, Output = <TransactionData as HasOutput<TransactionData>>::Output>
-{
-    Action((intent_parser(), TransactionData), |(_, d)| Some(d))
+pub const fn tx_parser<BS: Clone + Readable>() -> impl AsyncParser<
+    IntentMessage,
+    BS,
+    Output = <TransactionDataParser as HasOutput<TransactionDataSchema>>::Output,
+> {
+    Action((intent_parser(), TransactionDataParser), |(_, d)| Some(d))
 }
