@@ -1,6 +1,7 @@
+use core::future::Future;
+use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
 use ledger_parser_combinators::endianness::*;
-use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
 // Schema
@@ -28,3 +29,22 @@ pub type SHA3_256_HASH = Array<Byte, 33>;
 // Parsed data
 pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
 pub type ObjectDigest = <DefaultInterp as HasOutput<ObjectDigestSchema>>::Output;
+
+pub type CoinData = ([u8; 32], u64);
+pub type ObjectData = CoinData;
+
+pub trait HasObjectData {
+    fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c>;
+
+    type State<'c>: Future<Output = Option<ObjectData>>
+    where
+        Self: 'c;
+}
+
+impl HasObjectData for () {
+    type State<'c> = impl Future<Output = Option<ObjectData>> + 'c;
+
+    fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, _: &'a ObjectDigest) -> Self::State<'c> {
+        async move { None }
+    }
+}
