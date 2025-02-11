@@ -35,9 +35,9 @@ pub struct CallArgSchema;
 
 pub type GasData = (
     Vec<ObjectRefSchema, { usize::MAX }>, // payment
-    SuiAddress,                     // owner
-    Amount,                         // price
-    Amount,                         // budget
+    SuiAddress,                           // owner
+    Amount,                               // price
+    Amount,                               // budget
 );
 
 pub struct TransactionExpiration;
@@ -119,12 +119,12 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         1 => {
                             info!("CallArgSchema: ObjectRef: SharedObject");
                             <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
-                                    SharedObject,
+                                SharedObject,
                                 BS,
-                                >>::parse(
+                            >>::parse(
                                 &(DefaultInterp, DefaultInterp, DefaultInterp), input
                             )
-                                .await;
+                            .await;
                             CallArg::Other
                         }
                         _ => {
@@ -157,6 +157,10 @@ pub const SPLIT_COIN_ARRAY_LENGTH: usize = 8;
 pub enum Command {
     TransferObject(ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>, Argument),
     SplitCoins(Argument, ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>),
+}
+
+pub enum CommandResult {
+    SplitCoinAmounts(ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
 }
 
 impl HasOutput<CommandSchema> for DefaultInterp {
@@ -290,10 +294,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
         BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
-            let mut recipient_addr = None;
-            let mut recipient_index = None;
-            let mut inputs:  BTreeMap <u16, CallArg> = BTreeMap::new();
-            let mut amounts: ArrayVec<(u64, u32), SPLIT_COIN_ARRAY_LENGTH> = ArrayVec::new();
+            let mut inputs: BTreeMap<u16, CallArg> = BTreeMap::new();
 
             // Handle inputs
             {
@@ -307,12 +308,12 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                         &DefaultInterp,
                         input,
                     )
-                        .await;
+                    .await;
                     match arg {
-                        CallArg::Other => {},
+                        CallArg::Other => {}
                         _ => {
                             inputs.insert(i, arg);
-                        },
+                        }
                     }
                 }
             }
@@ -326,46 +327,41 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                 .await;
             }
 
-            let recipient = match recipient_addr {
-                Some(addr) => addr,
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            };
-
-            let mut verified_recipient = false;
+            let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
+            let mut recipient_addr = None;
             let mut total_amount: u64 = 0;
             // Handle commands
             {
-                let length =
+                let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+                let length = u16::try_from(length_u32).expect("u16 expected");
                 info!("ProgrammableTransaction: Commands: {}", length);
-                for _ in 0..length {
+                for command_ix in 0..length {
                     let c = <DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
                     )
                     .await;
                     match c {
-                        Command::TransferObject(_nested_results, recipient_input) => {
-                            if verified_recipient {
-                                // Reject more than one TransferObject(s)
-                                reject_on::<()>(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await;
-                            }
+                        Command::TransferObject(coins, recipient_input) => {
                             match recipient_input {
-                                Argument::Input(inp_index) => {
-                                    if Some(inp_index as u32) != recipient_index {
-                                        info!("TransferObject recipient mismatch");
+                                Argument::Input(inp_index) => match inputs.get(&inp_index) {
+                                    Some(CallArg::RecipientAddress(addr)) => match recipient_addr {
+                                        Some(addr_) => {
+                                            if *addr != addr_ {
+                                                info!("TransferObject multiple recipients");
+                                                reject_on::<()>(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await;
+                                            }
+                                        }
+                                        None => recipient_addr = Some(addr.clone()),
+                                    },
+                                    _ => {
+                                        info!("TransferObject invalid inp_index");
                                         reject_on::<()>(
                                             core::file!(),
                                             core::line!(),
@@ -373,8 +369,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                                         )
                                         .await;
                                     }
-                                    verified_recipient = true;
-                                }
+                                },
                                 _ => {
                                     reject_on(
                                         core::file!(),
@@ -384,35 +379,41 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                                     .await
                                 }
                             }
-                        }
-                        Command::SplitCoins(coin, input_indices) => {
-                            match coin {
-                                Argument::GasCoin => {}
-                                _ => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            }
-                            for arg in &input_indices {
-                                match arg {
-                                    Argument::Input(inp_index) => {
-                                        for (amt, ix) in &amounts {
-                                            if *ix == (*inp_index as u32) {
-                                                match total_amount.checked_add(*amt) {
-                                                    Some(t) => total_amount = t,
-                                                    None => {
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::InvalidParameter as u16,
-                                                        )
-                                                        .await
-                                                    }
+                            // set total_amount
+                            for coin in &coins {
+                                match coin {
+                                    Argument::NestedResult(command_ix, coin_ix) => {
+                                        if let Some(amt) =
+                                            command_results.get(command_ix).and_then(|result| {
+                                                let CommandResult::SplitCoinAmounts(coin_amounts) =
+                                                    result;
+                                                coin_amounts.get(*coin_ix as usize)
+                                            })
+                                        {
+                                            total_amount += amt;
+                                        } else {
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    }
+                                    Argument::Result(command_ix) => {
+                                        match command_results.get(command_ix) {
+                                            Some(CommandResult::SplitCoinAmounts(coin_amounts)) => {
+                                                for amt in coin_amounts {
+                                                    total_amount += amt;
                                                 }
+                                            }
+                                            _ => {
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
                                             }
                                         }
                                     }
@@ -427,18 +428,63 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                                 }
                             }
                         }
+                        Command::SplitCoins(coin, amounts) => {
+                            match coin {
+                                Argument::GasCoin => {}
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                            let mut coin_amounts = ArrayVec::<u64, SPLIT_COIN_ARRAY_LENGTH>::new();
+                            for arg in &amounts {
+                                match arg {
+                                    Argument::Input(inp_index) => match inputs.get(&inp_index) {
+                                        Some(CallArg::Amount(amt)) => {
+                                            coin_amounts.push(*amt);
+                                        }
+                                        _ => {
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    },
+                                    _ => {
+                                        info!("SplitCoins amount not fetched from inputs");
+                                        reject_on(
+                                            core::file!(),
+                                            core::line!(),
+                                            SyscallError::NotSupported as u16,
+                                        )
+                                        .await
+                                    }
+                                }
+                            }
+                            command_results
+                                .insert(command_ix, CommandResult::SplitCoinAmounts(coin_amounts));
+                        }
                     }
                 }
             }
 
-            if !verified_recipient {
-                reject_on::<()>(
-                    core::file!(),
-                    core::line!(),
-                    SyscallError::NotSupported as u16,
-                )
-                .await;
-            }
+            let recipient = match recipient_addr {
+                Some(addr) => addr,
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
 
             (recipient, total_amount)
         }
@@ -534,8 +580,12 @@ const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS
     )
 }
 
-const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRefSchema, BS, Output = ObjectDigest> {
-    Action((DefaultInterp, DefaultInterp, DefaultInterp), |(_,_,d)| Some(d))
+const fn object_ref_parser<BS: Readable>(
+) -> impl AsyncParser<ObjectRefSchema, BS, Output = ObjectDigest> {
+    Action(
+        (DefaultInterp, DefaultInterp, DefaultInterp),
+        |(_, _, d)| Some(d),
+    )
 }
 
 const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
