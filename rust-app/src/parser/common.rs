@@ -1,13 +1,15 @@
 use ledger_parser_combinators::core_parsers::*;
 use ledger_parser_combinators::endianness::*;
+use ledger_parser_combinators::async_parser::*;
+use ledger_parser_combinators::interp::*;
 
 // Schema
-pub type ObjectRef = (ObjectID, SequenceNumber, ObjectDigest);
+pub type ObjectRefSchema = (ObjectID, SequenceNumber, ObjectDigestSchema);
 
 pub type AccountAddress = SuiAddress;
 pub type ObjectID = AccountAddress;
 pub type SequenceNumber = U64LE;
-pub type ObjectDigest = SHA3_256_HASH;
+pub type ObjectDigestSchema = SHA3_256_HASH;
 
 pub const SUI_ADDRESS_LENGTH: usize = 32;
 pub type SuiAddress = Array<Byte, SUI_ADDRESS_LENGTH>;
@@ -25,3 +27,4 @@ pub type SHA3_256_HASH = Array<Byte, 33>;
 
 // Parsed data
 pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
+pub type ObjectDigest = <DefaultInterp as HasOutput<ObjectDigestSchema>>::Output;

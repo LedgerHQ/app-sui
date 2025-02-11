@@ -1,6 +1,9 @@
 use crate::parser::common::*;
 
+extern crate alloc;
+use alloc::collections::BTreeMap;
 use arrayvec::ArrayVec;
+use core::convert::TryFrom;
 use core::future::Future;
 use ledger_device_sdk::io::SyscallError;
 use ledger_log::info;
@@ -31,7 +34,7 @@ pub struct ArgumentSchema;
 pub struct CallArgSchema;
 
 pub type GasData = (
-    Vec<ObjectRef, { usize::MAX }>, // payment
+    Vec<ObjectRefSchema, { usize::MAX }>, // payment
     SuiAddress,                     // owner
     Amount,                         // price
     Amount,                         // budget
@@ -46,7 +49,7 @@ pub type SharedObject = (
     bool,           // mutable
 );
 
-pub type Coins = Vec<ObjectRef, { usize::MAX }>;
+pub type Coins = Vec<ObjectRefSchema, { usize::MAX }>;
 
 pub type Intent = (IntentVersion, IntentScope, AppId);
 pub type IntentVersion = ULEB128;
@@ -58,8 +61,8 @@ pub type AppId = ULEB128;
 pub enum CallArg {
     RecipientAddress(SuiAddressRaw),
     Amount(u64),
-    OtherPure,
-    ObjectArg,
+    ObjectRef(ObjectDigest),
+    Other,
 }
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
@@ -100,7 +103,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             for _ in 0..length {
                                 let _: [u8; 1] = input.read().await;
                             }
-                            CallArg::OtherPure
+                            CallArg::Other
                         }
                     }
                 }
@@ -110,18 +113,19 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             .await;
                     match enum_variant {
                         0 => {
-                            info!("CallArgSchema: ObjectArg: ImmOrOwnedObject");
-                            object_ref_parser().parse(input).await;
+                            info!("CallArgSchema: ObjectRef: ImmOrOwnedObject");
+                            CallArg::ObjectRef(object_ref_parser().parse(input).await)
                         }
                         1 => {
-                            info!("CallArgSchema: ObjectArg: SharedObject");
+                            info!("CallArgSchema: ObjectRef: SharedObject");
                             <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
-                                SharedObject,
+                                    SharedObject,
                                 BS,
-                            >>::parse(
+                                >>::parse(
                                 &(DefaultInterp, DefaultInterp, DefaultInterp), input
                             )
-                            .await;
+                                .await;
+                            CallArg::Other
                         }
                         _ => {
                             reject_on(
@@ -132,7 +136,6 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             .await
                         }
                     }
-                    CallArg::ObjectArg
                 }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
@@ -289,12 +292,14 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
         async move {
             let mut recipient_addr = None;
             let mut recipient_index = None;
+            let mut inputs:  BTreeMap <u16, CallArg> = BTreeMap::new();
             let mut amounts: ArrayVec<(u64, u32), SPLIT_COIN_ARRAY_LENGTH> = ArrayVec::new();
 
             // Handle inputs
             {
-                let length =
+                let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+                let length = u16::try_from(length_u32).expect("u16 expected");
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
@@ -302,44 +307,17 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                         &DefaultInterp,
                         input,
                     )
-                    .await;
+                        .await;
                     match arg {
-                        CallArg::RecipientAddress(addr) => match recipient_addr {
-                            None => {
-                                recipient_addr = Some(addr);
-                                recipient_index = Some(i);
-                            }
-                            // Reject on multiple RecipientAddress(s)
-                            _ => {
-                                reject_on(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await
-                            }
+                        CallArg::Other => {},
+                        _ => {
+                            inputs.insert(i, arg);
                         },
-                        CallArg::Amount(amt) =>
-                        {
-                            #[allow(clippy::single_match)]
-                            match amounts.try_push((amt, i)) {
-                                Err(_) => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
                     }
                 }
             }
 
-            if recipient_index.is_none() || amounts.is_empty() {
+            if inputs.is_empty() {
                 reject_on::<()>(
                     core::file!(),
                     core::line!(),
@@ -540,7 +518,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
 const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS, Output = u64> {
     Action(
         (
-            SubInterp(object_ref_parser()),
+            SubInterp(Action(object_ref_parser(), |_| Some(()))),
             DefaultInterp,
             DefaultInterp,
             DefaultInterp,
@@ -556,8 +534,8 @@ const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS
     )
 }
 
-const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRef, BS, Output = ()> {
-    Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| Some(()))
+const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRefSchema, BS, Output = ObjectDigest> {
+    Action((DefaultInterp, DefaultInterp, DefaultInterp), |(_,_,d)| Some(d))
 }
 
 const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
