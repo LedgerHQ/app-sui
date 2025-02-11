@@ -27,7 +27,7 @@ pub type TransactionDataV1 = (
 
 pub struct TransactionKind;
 
-pub struct ProgrammableTransaction;
+pub struct ProgrammableTransactionSchema;
 
 pub struct CommandSchema;
 pub struct ArgumentSchema;
@@ -283,14 +283,18 @@ impl<BS: Clone + Readable> AsyncParser<ArgumentSchema, BS> for DefaultInterp {
     }
 }
 
-impl HasOutput<ProgrammableTransaction> for ProgrammableTransaction {
+pub struct ProgrammableTransactionParser;
+
+impl HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser {
     type Output = (
         <DefaultInterp as HasOutput<Recipient>>::Output,
         <DefaultInterp as HasOutput<Amount>>::Output,
     );
 }
 
-impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for ProgrammableTransaction {
+impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
+    for ProgrammableTransactionParser
+{
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
@@ -495,7 +499,8 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
 }
 
 impl HasOutput<TransactionKind> for TransactionKind {
-    type Output = <ProgrammableTransaction as HasOutput<ProgrammableTransaction>>::Output;
+    type Output =
+        <ProgrammableTransactionParser as HasOutput<ProgrammableTransactionSchema>>::Output;
 }
 
 impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind {
@@ -510,10 +515,10 @@ impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind 
             match enum_variant {
                 0 => {
                     info!("TransactionKind: ProgrammableTransaction");
-                    <ProgrammableTransaction as AsyncParser<ProgrammableTransaction, BS>>::parse(
-                        &ProgrammableTransaction,
-                        input,
-                    )
+                    <ProgrammableTransactionParser as AsyncParser<
+                        ProgrammableTransactionSchema,
+                        BS,
+                    >>::parse(&ProgrammableTransactionParser, input)
                     .await
                 }
                 _ => {
