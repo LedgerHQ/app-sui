@@ -21,7 +21,7 @@ pub struct TransactionData;
 pub type TransactionDataV1 = (
     TransactionKind,
     SuiAddress,            // sender
-    GasData,               // gas_data
+    GasDataSchema,         // gas_data
     TransactionExpiration, // expiration
 );
 
@@ -33,7 +33,7 @@ pub struct CommandSchema;
 pub struct ArgumentSchema;
 pub struct CallArgSchema;
 
-pub type GasData = (
+pub type GasDataSchema = (
     Vec<ObjectRefSchema, { usize::MAX }>, // payment
     SuiAddress,                           // owner
     Amount,                               // price
@@ -55,6 +55,9 @@ pub type Intent = (IntentVersion, IntentScope, AppId);
 pub type IntentVersion = ULEB128;
 pub type IntentScope = ULEB128;
 pub type AppId = ULEB128;
+
+// Parsed data
+pub type GasData = u64;
 
 // Tx Parsers
 
@@ -561,7 +564,8 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
     }
 }
 
-const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS, Output = u64> {
+const fn gas_data_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<GasDataSchema, BS, Output = GasData> {
     Action(
         (
             SubInterp(Action(object_ref_parser(), |_| Some(()))),
@@ -595,7 +599,10 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
     })
 }
 
-type TransactionDataV1Output = (<TransactionKind as HasOutput<TransactionKind>>::Output, u64);
+type TransactionDataV1Output = (
+    <TransactionKind as HasOutput<TransactionKind>>::Output,
+    GasData,
+);
 
 const fn transaction_data_v1_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output> {
