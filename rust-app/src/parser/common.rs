@@ -41,6 +41,19 @@ pub trait HasObjectData {
         Self: 'c;
 }
 
+impl<T: HasObjectData> HasObjectData for Option<T> {
+    type State<'c> = impl Future<Output = Option<ObjectData>> + 'c where T: 'c;
+
+    fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c> {
+        async move {
+            match self {
+                Some(s) => s.get_object_data(digest).await,
+                None => None,
+            }
+        }
+    }
+}
+
 impl HasObjectData for () {
     type State<'c> = impl Future<Output = Option<ObjectData>> + 'c;
 
