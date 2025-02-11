@@ -1,6 +1,6 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::tx::tx_parser;
+use crate::parser::tx::{tx_parser, ProgrammableTransaction};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
@@ -116,7 +116,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     if known_txn {
         let mut txn = input[0].clone();
-        let ((recipient, total_amount), gas_budget) = tx_parser().parse(&mut txn).await;
+        let (
+            ProgrammableTransaction::TransferSuiTx {
+                recipient,
+                amount: total_amount,
+            },
+            gas_budget,
+        ) = tx_parser().parse(&mut txn).await;
 
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;

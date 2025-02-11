@@ -285,11 +285,15 @@ impl<BS: Clone + Readable> AsyncParser<ArgumentSchema, BS> for DefaultInterp {
 
 pub struct ProgrammableTransactionParser;
 
+pub enum ProgrammableTransaction {
+    TransferSuiTx {
+        recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
+        amount: <DefaultInterp as HasOutput<Amount>>::Output,
+    },
+}
+
 impl HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser {
-    type Output = (
-        <DefaultInterp as HasOutput<Recipient>>::Output,
-        <DefaultInterp as HasOutput<Amount>>::Output,
-    );
+    type Output = ProgrammableTransaction;
 }
 
 impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
@@ -493,7 +497,10 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
                 }
             };
 
-            (recipient, total_amount)
+            ProgrammableTransaction::TransferSuiTx {
+                recipient: recipient,
+                amount: total_amount,
+            }
         }
     }
 }
