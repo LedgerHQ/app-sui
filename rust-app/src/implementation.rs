@@ -1,5 +1,6 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
+use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest};
 use crate::parser::tx::{tx_parser, ProgrammableTransaction};
 use crate::settings::*;
 use crate::swap;
@@ -8,15 +9,17 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::ArrayVec;
-use ledger_crypto_helpers::common::{try_option, Address};
+use ledger_crypto_helpers::common::{try_option, Address, HexSlice};
 use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::{StatusWords, SyscallError};
-use ledger_log::trace;
+use ledger_log::{info, trace};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
 use core::convert::TryFrom;
+use core::convert::TryInto;
+use core::future::Future;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
 pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
@@ -97,7 +100,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         }
     });
 
-    let mut input = match io.get_params::<2>() {
+    let mut input = match io.get_params::<3>() {
         Some(v) => v,
         None => reject(SyscallError::InvalidParameter as u16).await,
     };
@@ -107,9 +110,10 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     let known_txn = {
         let mut txn = input[0].clone();
+        let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
         NoinlineFut(async move {
             trace!("Beginning tx_parse");
-            TryFuture(tx_parser(()).parse(&mut txn)).await
+            TryFuture(tx_parser(object_data_source).parse(&mut txn)).await
         })
         .await
     };
@@ -193,4 +197,68 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     // Does nothing if not a swap mode
     ctx.set_swap_sign_success();
+}
+
+#[derive(Clone)]
+struct WithObjectData {
+    bs: ByteStream,
+}
+
+impl HasObjectData for WithObjectData {
+    type State<'c> = impl Future<Output = Option<ObjectData>> + 'c;
+
+    fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c> {
+        async move {
+            let mut bs = self.bs.clone();
+            let objects_count: Option<usize> =
+                TryFuture(bs.read()).await.map(|v| usize::from_le_bytes(v));
+
+            match objects_count {
+                None => None,
+                Some(0) => None,
+                Some(c) => {
+                    info!("get_object_data: objects_count {}", c);
+                    for _ in 0..c {
+                        let length = usize::from_le_bytes(bs.read().await);
+                        let mut obj_start_bs = bs.clone();
+                        let mut hasher: Blake2b = Hasher::new();
+                        let salt = b"Object::";
+                        hasher.update(salt);
+                        {
+                            const CHUNK_SIZE: usize = 128;
+                            let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
+                            for _ in 0..chunks {
+                                let b: [u8; CHUNK_SIZE] = bs.read().await;
+                                hasher.update(&b);
+                            }
+                            for _ in 0..rem {
+                                let b: [u8; 1] = bs.read().await;
+                                hasher.update(&b);
+                            }
+                        }
+                        let hash: HexHash<32> = hasher.finalize();
+
+                        if hash.0 == digest[1..33] {
+                            info!(
+                                "get_object_data: found object with digest {}",
+                                HexSlice(digest)
+                            );
+                            // Found object, now try to parse
+                            // TODO: make balance from digest
+                            return Some((
+                                [0; 32],
+                                u64::from_le_bytes(digest[0..8].try_into().unwrap()),
+                            ));
+                            // return TryFuture(object_parser().parse(&mut obj_start_bs)).await
+                        }
+                    }
+                    info!(
+                        "get_object_data: did not found object with digest {}",
+                        HexSlice(digest)
+                    );
+                    None
+                }
+            }
+        }
+    }
 }
