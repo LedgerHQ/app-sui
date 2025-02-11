@@ -108,23 +108,21 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     let known_txn = {
         let mut txn = input[0].clone();
         NoinlineFut(async move {
-            trace!("Beginning check parse");
-            TryFuture(tx_parser().parse(&mut txn)).await.is_some()
+            trace!("Beginning tx_parse");
+            TryFuture(tx_parser().parse(&mut txn)).await
         })
         .await
     };
 
-    if known_txn {
-        let mut txn = input[0].clone();
-        let (
-            ProgrammableTransaction::TransferSuiTx {
-                recipient,
-                amount: total_amount,
-                includes_gas_coin,
-            },
-            gas_budget,
-        ) = tx_parser().parse(&mut txn).await;
-
+    if let Some((
+        ProgrammableTransaction::TransferSuiTx {
+            recipient,
+            amount: total_amount,
+            includes_gas_coin,
+        },
+        gas_budget,
+    )) = known_txn
+    {
         if includes_gas_coin {
             reject::<()>(SyscallError::NotSupported as u16).await;
         }
@@ -169,7 +167,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
         }
         let hash: HexHash<32> = hasher.finalize();
-        if !known_txn {
+        if known_txn.is_none() {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {
                 reject::<()>(StatusWords::UserCancelled as u16).await;
