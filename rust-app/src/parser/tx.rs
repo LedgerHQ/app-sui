@@ -33,11 +33,12 @@ pub struct CommandSchema;
 pub struct ArgumentSchema;
 pub struct CallArgSchema;
 
+pub const MAX_GAS_COIN_COUNT: usize = 32;
 pub type GasDataSchema = (
-    Vec<ObjectRefSchema, { usize::MAX }>, // payment
-    SuiAddress,                           // owner
-    Amount,                               // price
-    Amount,                               // budget
+    Vec<ObjectRefSchema, MAX_GAS_COIN_COUNT>, // payment
+    SuiAddress,                               // owner
+    Amount,                                   // price
+    Amount,                                   // budget
 );
 
 pub struct TransactionExpiration;
@@ -57,7 +58,9 @@ pub type IntentScope = ULEB128;
 pub type AppId = ULEB128;
 
 // Parsed data
-pub type GasData = u64;
+
+// Gas Budget + total gas coin amount (if known)
+pub type GasData = (u64, Option<u64>);
 
 // Tx Parsers
 
@@ -582,22 +585,38 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
     }
 }
 
-const fn gas_data_parser<BS: Clone + Readable>(
+const fn gas_data_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
+    object_data_source: OD,
 ) -> impl AsyncParser<GasDataSchema, BS, Output = GasData> {
-    Action(
+    FutAction(
         (
-            SubInterp(Action(object_ref_parser(), |_| Some(()))),
+            SubInterp(object_ref_parser()),
             DefaultInterp,
             DefaultInterp,
             DefaultInterp,
         ),
-        |(_, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
-            // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
-            // gas price. We only care about the total, not the price or amount in isolation , so we
-            // just ignore that field.
-            //
-            // C.F. https://github.com/MystenLabs/sui/pull/8676
-            Some(gas_budget)
+        {
+            move |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
+                let object_data_source = object_data_source.clone();
+                async move {
+                    let mut total_amount: Option<u64> = Some(0);
+                    for digest in coins {
+                        if let Some(amt0) = total_amount {
+                            let coin_data = object_data_source.get_object_data(&digest).await;
+                            match coin_data {
+                                Some((_, amt)) => total_amount = Some(amt0 + amt),
+                                _ => total_amount = None,
+                            }
+                        }
+                    }
+                    // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
+                    // gas price. We only care about the total, not the price or amount in isolation , so we
+                    // just ignore that field.
+                    //
+                    // C.F. https://github.com/MystenLabs/sui/pull/8676
+                    Some((gas_budget, total_amount))
+                }
+            }
         },
     )
 }
@@ -622,30 +641,35 @@ type TransactionDataV1Output = (
     GasData,
 );
 
-const fn transaction_data_v1_parser<BS: Clone + Readable>(
+const fn transaction_data_v1_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
+    object_data_source: OD,
 ) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output> {
     Action(
         (
             TransactionKindParser,
             DefaultInterp,
-            gas_data_parser(),
+            gas_data_parser(object_data_source),
             DefaultInterp,
         ),
         |(v, _, gas_budget, _)| Some((v, gas_budget)),
     )
 }
 
-pub struct TransactionDataParser;
+pub struct TransactionDataParser<OD> {
+    object_data_source: OD,
+}
 
-impl HasOutput<TransactionDataSchema> for TransactionDataParser {
+impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
     type Output = TransactionDataV1Output;
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionDataSchema, BS> for TransactionDataParser {
+impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDataSchema, BS>
+    for TransactionDataParser<OD>
+{
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c;
+        BS: 'c, OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let enum_variant =
@@ -653,7 +677,9 @@ impl<BS: Clone + Readable> AsyncParser<TransactionDataSchema, BS> for Transactio
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    transaction_data_v1_parser().parse(input).await
+                    transaction_data_v1_parser(self.object_data_source.clone())
+                        .parse(input)
+                        .await
                 }
                 _ => {
                     reject_on(
@@ -668,10 +694,18 @@ impl<BS: Clone + Readable> AsyncParser<TransactionDataSchema, BS> for Transactio
     }
 }
 
-pub const fn tx_parser<BS: Clone + Readable>() -> impl AsyncParser<
+pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
+    object_data_source: OD,
+) -> impl AsyncParser<
     IntentMessage,
     BS,
-    Output = <TransactionDataParser as HasOutput<TransactionDataSchema>>::Output,
+    Output = <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
 > {
-    Action((intent_parser(), TransactionDataParser), |(_, d)| Some(d))
+    Action(
+        (
+            intent_parser(),
+            TransactionDataParser { object_data_source },
+        ),
+        |(_, d)| Some(d),
+    )
 }

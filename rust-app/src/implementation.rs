@@ -109,7 +109,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         let mut txn = input[0].clone();
         NoinlineFut(async move {
             trace!("Beginning tx_parse");
-            TryFuture(tx_parser().parse(&mut txn)).await
+            TryFuture(tx_parser(()).parse(&mut txn)).await
         })
         .await
     };
@@ -117,15 +117,21 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     if let Some((
         ProgrammableTransaction::TransferSuiTx {
             recipient,
-            amount: total_amount,
+            amount,
             includes_gas_coin,
         },
-        gas_budget,
+        (gas_budget, gas_coin_amount),
     )) = known_txn
     {
-        if includes_gas_coin {
-            reject::<()>(SyscallError::NotSupported as u16).await;
-        }
+        let total_amount = if includes_gas_coin {
+            if let Some(amt) = gas_coin_amount {
+                amount + amt
+            } else {
+                reject::<u64>(SyscallError::NotSupported as u16).await
+            }
+        } else {
+            amount
+        };
 
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;
