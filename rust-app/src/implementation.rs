@@ -120,9 +120,14 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             ProgrammableTransaction::TransferSuiTx {
                 recipient,
                 amount: total_amount,
+                includes_gas_coin,
             },
             gas_budget,
         ) = tx_parser().parse(&mut txn).await;
+
+        if includes_gas_coin {
+            reject::<()>(SyscallError::NotSupported as u16).await;
+        }
 
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;

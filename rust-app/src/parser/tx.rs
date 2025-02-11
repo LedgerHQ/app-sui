@@ -289,6 +289,7 @@ pub enum ProgrammableTransaction {
     TransferSuiTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
+        includes_gas_coin: bool,
     },
 }
 
@@ -341,6 +342,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
             let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
             let mut recipient_addr = None;
             let mut total_amount: u64 = 0;
+            let mut includes_gas_coin: bool = false;
             // Handle commands
             {
                 let length_u32 =
@@ -393,6 +395,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
                             // set total_amount
                             for coin in &coins {
                                 match coin {
+                                    Argument::GasCoin => includes_gas_coin = true,
                                     Argument::NestedResult(command_ix, coin_ix) => {
                                         if let Some(amt) =
                                             command_results.get(command_ix).and_then(|result| {
@@ -498,8 +501,9 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
             };
 
             ProgrammableTransaction::TransferSuiTx {
-                recipient: recipient,
+                recipient,
                 amount: total_amount,
+                includes_gas_coin,
             }
         }
     }
