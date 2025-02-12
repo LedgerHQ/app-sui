@@ -159,14 +159,21 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
 
 pub const TRANSFER_OBJECT_ARRAY_LENGTH: usize = 8;
 pub const SPLIT_COIN_ARRAY_LENGTH: usize = 8;
+pub const MERGE_COIN_ARRAY_LENGTH: usize = 8;
 
 pub enum Command {
     TransferObject(ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>, Argument),
     SplitCoins(Argument, ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>),
+    MergeCoins(Argument, ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>),
 }
 
 pub enum CommandResult {
     SplitCoinAmounts(ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
+    MergedCoin {
+        coin_id: CoinID,
+        amount: u64,
+        includes_gas_coin: bool,
+    },
 }
 
 impl HasOutput<CommandSchema> for DefaultInterp {
@@ -210,6 +217,20 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                     >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
                     Command::SplitCoins(v1, v2)
+                }
+                3 => {
+                    info!("CommandSchema: MergeCoins");
+                    let v1 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
+                        &DefaultInterp,
+                        input,
+                    )
+                    .await;
+                    let v2 = <SubInterp<DefaultInterp> as AsyncParser<
+                        Vec<ArgumentSchema, MERGE_COIN_ARRAY_LENGTH>,
+                        BS,
+                    >>::parse(&SubInterp(DefaultInterp), input)
+                    .await;
+                    Command::MergeCoins(v1, v2)
                 }
                 _ => {
                     info!("CommandSchema: Unknown enum: {}", enum_variant);
@@ -435,7 +456,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                         if let Some(amt) =
                                             command_results.get(command_ix).and_then(|result| {
                                                 let CommandResult::SplitCoinAmounts(coin_amounts) =
-                                                    result;
+                                                    result
+                                                else {
+                                                    todo!()
+                                                };
                                                 coin_amounts.get(*coin_ix as usize)
                                             })
                                         {
@@ -510,6 +534,147 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             }
                             command_results
                                 .insert(command_ix, CommandResult::SplitCoinAmounts(coin_amounts));
+                        }
+                        Command::MergeCoins(dest_coin, coins) => {
+                            let mut total_amount_2: u64 = 0;
+                            let mut includes_gas_coin_2: bool = false;
+                            let coin_id = match dest_coin {
+                                Argument::GasCoin => {
+                                    includes_gas_coin_2 = true;
+                                    SUI_COIN_ID
+                                }
+                                Argument::Input(input_ix) => match inputs.get(&input_ix) {
+                                    Some(CallArg::ObjectRef(digest)) => {
+                                        info!("MergeCoins trying object_data_source");
+                                        let coin_data =
+                                            self.object_data_source.get_object_data(&digest).await;
+                                        match coin_data {
+                                            Some((id, amt)) => {
+                                                total_amount_2 += amt;
+                                                id
+                                            }
+                                            _ => {
+                                                info!("MergeCoins Coin Object not found");
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        info!("MergeCoins input refers to non ObjectRef");
+                                        reject_on(
+                                            core::file!(),
+                                            core::line!(),
+                                            SyscallError::NotSupported as u16,
+                                        )
+                                        .await
+                                    }
+                                },
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            };
+                            for coin in &coins {
+                                match coin {
+                                    Argument::GasCoin => includes_gas_coin_2 = true,
+                                    Argument::Input(input_ix) => match inputs.get(input_ix) {
+                                        Some(CallArg::ObjectRef(digest)) => {
+                                            info!("MergeCoins trying object_data_source");
+                                            let coin_data = self
+                                                .object_data_source
+                                                .get_object_data(&digest)
+                                                .await;
+                                            match coin_data {
+                                                Some((id, amt)) => {
+                                                    if id != coin_id {
+                                                        info!("MergeCoins mismatch in coin_id(s)");
+                                                        reject_on(
+                                                            core::file!(),
+                                                            core::line!(),
+                                                            SyscallError::NotSupported as u16,
+                                                        )
+                                                        .await
+                                                    }
+                                                    total_amount_2 += amt;
+                                                }
+                                                _ => {
+                                                    info!("MergeCoins Coin Object not found");
+                                                    reject_on(
+                                                        core::file!(),
+                                                        core::line!(),
+                                                        SyscallError::NotSupported as u16,
+                                                    )
+                                                    .await
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            info!("MergeCoins input refers to non ObjectRef");
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    },
+                                    Argument::NestedResult(command_ix, coin_ix) => {
+                                        if let Some(amt) =
+                                            command_results.get(command_ix).and_then(|result| {
+                                                let CommandResult::SplitCoinAmounts(coin_amounts) =
+                                                    result
+                                                else {
+                                                    todo!()
+                                                };
+                                                coin_amounts.get(*coin_ix as usize)
+                                            })
+                                        {
+                                            total_amount_2 += amt;
+                                        } else {
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    }
+                                    Argument::Result(command_ix) => {
+                                        match command_results.get(command_ix) {
+                                            Some(CommandResult::SplitCoinAmounts(coin_amounts)) => {
+                                                for amt in coin_amounts {
+                                                    total_amount_2 += amt;
+                                                }
+                                            }
+                                            _ => {
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            command_results.insert(
+                                command_ix,
+                                CommandResult::MergedCoin {
+                                    coin_id,
+                                    amount: total_amount_2,
+                                    includes_gas_coin: includes_gas_coin_2,
+                                },
+                            );
                         }
                     }
                 }
