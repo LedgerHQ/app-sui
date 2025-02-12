@@ -105,6 +105,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         None => reject(SyscallError::InvalidParameter as u16).await,
     };
 
+    info!("input length {}", input.len());
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
@@ -112,7 +113,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         let mut txn = input[0].clone();
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
         NoinlineFut(async move {
-            trace!("Beginning tx_parse");
+            info!("Beginning tx_parse");
             TryFuture(tx_parser(object_data_source).parse(&mut txn)).await
         })
         .await
@@ -127,6 +128,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         (gas_budget, gas_coin_amount),
     )) = known_txn
     {
+        info!("known_txn, 0x{}, {}, {}", HexSlice(&recipient), amount, includes_gas_coin);
         let total_amount = if includes_gas_coin {
             if let Some(amt) = gas_coin_amount {
                 amount + amt
