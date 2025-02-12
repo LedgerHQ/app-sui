@@ -77,8 +77,15 @@ impl UserInterface {
 
         let success = NbglReview::new()
             .glyph(&APP_ICON)
-            .titles("Transfer SUI", "", "Sign Transaction?")
+            .titles(
+                "Review transaction to transfer SUI",
+                "",
+                "Sign transaction to transfer SUI",
+            )
             .show(&tx_fields);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
         if success {
             Some(())
         } else {
@@ -96,7 +103,7 @@ impl UserInterface {
         let success = NbglReview::new()
             .glyph(&APP_ICON)
             .blind()
-            .titles("Blind Sign Transaction", "", "Sign Transaction?")
+            .titles("Review transaction", "", "Sign transaction")
             .show(&tx_fields);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
