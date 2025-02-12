@@ -157,7 +157,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
     }
 }
 
-pub const TRANSFER_OBJECT_ARRAY_LENGTH: usize = 1;
+pub const TRANSFER_OBJECT_ARRAY_LENGTH: usize = 8;
 pub const SPLIT_COIN_ARRAY_LENGTH: usize = 8;
 
 pub enum Command {
@@ -286,7 +286,9 @@ impl<BS: Clone + Readable> AsyncParser<ArgumentSchema, BS> for DefaultInterp {
     }
 }
 
-pub struct ProgrammableTransactionParser;
+pub struct ProgrammableTransactionParser<OD> {
+    object_data_source: OD,
+}
 
 pub enum ProgrammableTransaction {
     TransferSuiTx {
@@ -296,17 +298,17 @@ pub enum ProgrammableTransaction {
     },
 }
 
-impl HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser {
+impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
     type Output = ProgrammableTransaction;
 }
 
-impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
-    for ProgrammableTransactionParser
+impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTransactionSchema, BS>
+    for ProgrammableTransactionParser<OD>
 {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c;
+        BS: 'c, OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut inputs: BTreeMap<u16, CallArg> = BTreeMap::new();
@@ -399,6 +401,36 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
                             for coin in &coins {
                                 match coin {
                                     Argument::GasCoin => includes_gas_coin = true,
+                                    Argument::Input(input_ix) => match inputs.get(input_ix) {
+                                        Some(CallArg::ObjectRef(digest)) => {
+                                            info!("TransferObject trying object_data_source");
+                                            let coin_data = self
+                                                .object_data_source
+                                                .get_object_data(&digest)
+                                                .await;
+                                            match coin_data {
+                                                Some((_, amt)) => total_amount += amt,
+                                                _ => {
+                                                    info!("TransferObject Coin Object not found");
+                                                    reject_on(
+                                                        core::file!(),
+                                                        core::line!(),
+                                                        SyscallError::NotSupported as u16,
+                                                    )
+                                                    .await
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            info!("TransferObject input refers to non ObjectRef");
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    },
                                     Argument::NestedResult(command_ix, coin_ix) => {
                                         if let Some(amt) =
                                             command_results.get(command_ix).and_then(|result| {
@@ -433,14 +465,6 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
                                                 .await
                                             }
                                         }
-                                    }
-                                    _ => {
-                                        reject_on(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await
                                     }
                                 }
                             }
@@ -512,18 +536,22 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransactionSchema, BS>
     }
 }
 
-pub struct TransactionKindParser;
-
-impl HasOutput<TransactionKindSchema> for TransactionKindParser {
-    type Output =
-        <ProgrammableTransactionParser as HasOutput<ProgrammableTransactionSchema>>::Output;
+pub struct TransactionKindParser<OD> {
+    object_data_source: OD,
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionKindSchema, BS> for TransactionKindParser {
+impl<OD> HasOutput<TransactionKindSchema> for TransactionKindParser<OD> {
+    type Output =
+        <ProgrammableTransactionParser<OD> as HasOutput<ProgrammableTransactionSchema>>::Output;
+}
+
+impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKindSchema, BS>
+    for TransactionKindParser<OD>
+{
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c;
+        BS: 'c, OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let enum_variant =
@@ -531,10 +559,15 @@ impl<BS: Clone + Readable> AsyncParser<TransactionKindSchema, BS> for Transactio
             match enum_variant {
                 0 => {
                     info!("TransactionKind: ProgrammableTransaction");
-                    <ProgrammableTransactionParser as AsyncParser<
+                    <ProgrammableTransactionParser<OD> as AsyncParser<
                         ProgrammableTransactionSchema,
                         BS,
-                    >>::parse(&ProgrammableTransactionParser, input)
+                    >>::parse(
+                        &ProgrammableTransactionParser {
+                            object_data_source: self.object_data_source.clone(),
+                        },
+                        input,
+                    )
                     .await
                 }
                 _ => {
@@ -636,17 +669,20 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
     })
 }
 
-type TransactionDataV1Output = (
-    <TransactionKindParser as HasOutput<TransactionKindSchema>>::Output,
+type TransactionDataV1Output<OD> = (
+    <TransactionKindParser<OD> as HasOutput<TransactionKindSchema>>::Output,
     GasData,
 );
 
 const fn transaction_data_v1_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
-) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output> {
+    object_data_source2: OD,
+) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output<OD>> {
     Action(
         (
-            TransactionKindParser,
+            TransactionKindParser {
+                object_data_source: object_data_source2,
+            },
             DefaultInterp,
             gas_data_parser(object_data_source),
             DefaultInterp,
@@ -660,7 +696,7 @@ pub struct TransactionDataParser<OD> {
 }
 
 impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
-    type Output = TransactionDataV1Output;
+    type Output = TransactionDataV1Output<OD>;
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDataSchema, BS>
@@ -677,9 +713,12 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    transaction_data_v1_parser(self.object_data_source.clone())
-                        .parse(input)
-                        .await
+                    transaction_data_v1_parser(
+                        self.object_data_source.clone(),
+                        self.object_data_source.clone(),
+                    )
+                    .parse(input)
+                    .await
                 }
                 _ => {
                     reject_on(
