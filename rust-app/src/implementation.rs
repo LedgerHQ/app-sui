@@ -110,10 +110,6 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
-    // TODO: Figure out why this hack is necessary to make things work on speculos
-    let mut txn = input[0].clone();
-    TryFuture(tx_parser(()).parse(&mut txn)).await;
-
     let known_txn = {
         let mut txn = input[0].clone();
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
@@ -227,23 +223,34 @@ impl HasObjectData for WithObjectData {
                     info!("get_object_data: objects_count {}", c);
                     for _ in 0..c {
                         let length = usize::from_le_bytes(bs.read().await);
-                        let mut obj_start_bs = bs.clone();
-                        let mut hasher: Blake2b = Hasher::new();
-                        let salt = b"Object::";
-                        hasher.update(salt);
-                        {
-                            const CHUNK_SIZE: usize = 128;
-                            let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
-                            for _ in 0..chunks {
-                                let b: [u8; CHUNK_SIZE] = bs.read().await;
-                                hasher.update(&b);
-                            }
-                            for _ in 0..rem {
-                                let b: [u8; 1] = bs.read().await;
-                                hasher.update(&b);
-                            }
+                        let obj_start_bs = bs.clone();
+                        let mut obj_start_bs2 = bs.clone();
+
+                        // This somehows fixes crashes, perhaps due to stack size issues
+                        for _ in 0..length {
+                            let _: [u8; 1] = bs.read().await;
                         }
-                        let hash: HexHash<32> = hasher.finalize();
+
+                        let hash: HexHash<32> = NoinlineFut(async move {
+                            let mut hasher: Blake2b = Hasher::new();
+                            let mut bs = obj_start_bs;
+                            let salt = b"Object::";
+                            hasher.update(salt);
+                            {
+                                const CHUNK_SIZE: usize = 128;
+                                let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
+                                for _ in 0..chunks {
+                                    let b: [u8; CHUNK_SIZE] = bs.read().await;
+                                    hasher.update(&b);
+                                }
+                                for _ in 0..rem {
+                                    let b: [u8; 1] = bs.read().await;
+                                    hasher.update(&b);
+                                }
+                            }
+                            hasher.finalize::<HexHash<32>>()
+                        })
+                        .await;
 
                         if hash.0 == digest[1..33] {
                             info!(
@@ -251,7 +258,10 @@ impl HasObjectData for WithObjectData {
                                 HexSlice(digest)
                             );
                             // Found object, now try to parse
-                            return TryFuture(object_parser().parse(&mut obj_start_bs)).await
+                            return NoinlineFut(TryFuture(
+                                object_parser().parse(&mut obj_start_bs2),
+                            ))
+                            .await;
                         }
                     }
                     info!(
