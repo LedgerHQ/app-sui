@@ -30,7 +30,8 @@ pub type SHA3_256_HASH = Array<Byte, 33>;
 pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
 pub type ObjectDigest = <DefaultInterp as HasOutput<ObjectDigestSchema>>::Output;
 
-pub type CoinData = ([u8; 32], u64);
+pub type CoinID = [u8; 32];
+pub type CoinData = (CoinID, u64);
 pub type ObjectData = CoinData;
 
 pub trait HasObjectData {
