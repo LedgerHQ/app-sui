@@ -1,6 +1,7 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest};
+use crate::parser::object::object_parser;
 use crate::parser::tx::{tx_parser, ProgrammableTransaction};
 use crate::settings::*;
 use crate::swap;
@@ -18,7 +19,6 @@ use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
 use core::convert::TryFrom;
-use core::convert::TryInto;
 use core::future::Future;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
@@ -251,12 +251,7 @@ impl HasObjectData for WithObjectData {
                                 HexSlice(digest)
                             );
                             // Found object, now try to parse
-                            // TODO: make balance from digest
-                            return Some((
-                                [0; 32],
-                                u64::from_le_bytes(digest[0..8].try_into().unwrap()),
-                            ));
-                            // return TryFuture(object_parser().parse(&mut obj_start_bs)).await
+                            return TryFuture(object_parser().parse(&mut obj_start_bs)).await
                         }
                     }
                     info!(
