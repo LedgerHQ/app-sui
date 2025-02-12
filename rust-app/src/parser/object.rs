@@ -46,13 +46,13 @@ pub struct TypeTag2;
 // Parsed data
 pub enum MoveObjectType {
     /// A type that is not `0x2::coin::Coin<T>`
-    Other(StructTag),
+    // Other(StructTag),
     /// A SUI coin (i.e., `0x2::coin::Coin<0x2::sui::SUI>`)
     GasCoin,
     /// A record of a staked SUI coin (i.e., `0x3::staking_pool::StakedSui`)
     StakedSui,
     /// A non-SUI coin type (i.e., `0x2::coin::Coin<T> where T != 0x2::sui::SUI`)
-    Coin(TypeTag),
+    Coin(CoinID),
 }
 
 // Parsers
@@ -117,11 +117,15 @@ pub const fn move_object_parser<BS: Clone + Readable>(
             DefaultInterp,
             SubInterp(DefaultInterp),
         ),
-        |(_, _, sequence_number, d): (_, _, _, ArrayVec<u8, 40>)| {
+        |(object_type, _, sequence_number, d): (_, _, _, ArrayVec<u8, 40>)| {
             info!("SequenceNumber {}", sequence_number);
             match d.into_inner() {
                 Ok(c) => {
-                    let uid: [u8; 32] = c[0..32].try_into().expect("uid slice wrong length");
+                    let uid: [u8; 32] = match object_type {
+                        MoveObjectType::GasCoin => SUI_COIN_ID,
+                        MoveObjectType::StakedSui => SUI_COIN_ID,
+                        MoveObjectType::Coin(coin_id) => coin_id,
+                    };
                     let amount: u64 =
                         u64::from_le_bytes(c[32..].try_into().expect("amount slice wrong length"));
                     info!("CoinData 0x{}, {}", HexSlice(&uid), amount);
@@ -169,8 +173,19 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
                 }
                 3 => {
                     info!("MoveObjectType: Coin(TypeTag)");
-                    <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input).await;
-                    MoveObjectType::Coin(TypeTag)
+                    if let Some(coin_id) =
+                        <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
+                            .await
+                    {
+                        MoveObjectType::Coin(coin_id)
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
                 }
                 _ => {
                     reject_on(
@@ -186,7 +201,7 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
 }
 
 pub const fn struct_tag_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTag, BS, Output = ()> {
+) -> impl AsyncParser<StructTag, BS, Output = CoinID> {
     Action(
         (
             DefaultInterp,
@@ -210,13 +225,13 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", type_tags.len());
-            Some(())
+            Some(address)
         },
     )
 }
 
 impl HasOutput<TypeTag> for DefaultInterp {
-    type Output = ();
+    type Output = Option<CoinID>;
 }
 
 impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
@@ -231,28 +246,35 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
             match enum_variant {
                 0 => {
                     info!("TypeTag: Bool");
+                    None
                 }
                 1 => {
                     info!("TypeTag: U8");
+                    None
                 }
                 2 => {
                     info!("TypeTag: U64");
+                    None
                 }
                 3 => {
                     info!("TypeTag: U128");
+                    None
                 }
                 4 => {
                     info!("TypeTag: Address");
+                    None
                 }
                 5 => {
                     info!("TypeTag: Signer");
+                    None
                 }
                 6 => {
                     info!("TypeTag: Vector(Box<TypeTag>)");
+                    None
                 }
                 7 => {
                     info!("TypeTag: Struct(StructTag)");
-                    struct_tag_parser().parse(input).await;
+                    Some(struct_tag_parser().parse(input).await)
                 }
                 _ => {
                     reject_on(
@@ -310,7 +332,7 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
                         core::line!(),
                         SyscallError::NotSupported as u16,
                     )
-                        .await
+                    .await
                 }
                 _ => {
                     reject_on(
