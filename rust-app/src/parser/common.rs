@@ -32,6 +32,11 @@ pub type ObjectDigest = <DefaultInterp as HasOutput<ObjectDigestSchema>>::Output
 
 pub type CoinID = [u8; 32];
 pub type CoinData = (CoinID, u64);
+
+pub const SUI_COIN_ID: CoinID = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+];
+
 pub type ObjectData = CoinData;
 
 pub trait HasObjectData {
