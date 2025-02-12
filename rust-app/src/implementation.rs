@@ -106,8 +106,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     };
 
     info!("input length {}", input.len());
+
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
+
+    // TODO: Figure out why this hack is necessary to make things work on speculos
+    let mut txn = input[0].clone();
+    TryFuture(tx_parser(()).parse(&mut txn)).await;
 
     let known_txn = {
         let mut txn = input[0].clone();
