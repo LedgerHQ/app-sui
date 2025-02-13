@@ -66,11 +66,18 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
+pub struct ObjectRefOutput {
+    pub address: SuiAddressRaw,
+    pub version: u64,
+    pub digest: [u8; 33],
+}
+
 pub enum CallArg {
     RecipientAddress(SuiAddressRaw),
     Amount(u64),
     OtherPure,
-    ObjectArg,
+    ImmOrOwnedObject(ObjectRefOutput),
+    SharedObject,
 }
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
@@ -122,7 +129,8 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                     match enum_variant {
                         0 => {
                             trace!("CallArgSchema: ObjectArg: ImmOrOwnedObject");
-                            object_ref_parser().parse(input).await;
+                            let obj_ref = object_ref_parser_with_output().parse(input).await;
+                            CallArg::ImmOrOwnedObject(obj_ref)
                         }
                         1 => {
                             trace!("CallArgSchema: ObjectArg: SharedObject");
@@ -133,6 +141,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                                 &(DefaultInterp, DefaultInterp, DefaultInterp), input
                             )
                             .await;
+                            CallArg::SharedObject
                         }
                         _ => {
                             reject_on(
@@ -143,7 +152,6 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             .await
                         }
                     }
-                    CallArg::ObjectArg
                 }
                 _ => {
                     trace!("CallArgSchema: Unknown enum: {}", enum_variant);
@@ -288,6 +296,7 @@ impl HasOutput<ProgrammableTransaction> for ProgrammableTransaction {
     type Output = (
         <DefaultInterp as HasOutput<Recipient>>::Output,
         <DefaultInterp as HasOutput<Amount>>::Output,
+        Option<ObjectRefOutput>,
     );
 }
 
@@ -301,6 +310,8 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
             let mut recipient_addr = None;
             let mut recipient_index = None;
             let mut amounts: ArrayVec<(u64, u32), SPLIT_COIN_ARRAY_LENGTH> = ArrayVec::new();
+            let mut out_obj = None;
+            let mut obj_index = 0u16;
 
             // Handle inputs
             {
@@ -315,6 +326,10 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                     )
                     .await;
                     match arg {
+                        CallArg::ImmOrOwnedObject(obj) => {
+                            out_obj = Some(obj);
+                            obj_index = i as u16;
+                        }
                         CallArg::RecipientAddress(addr) => match recipient_addr {
                             None => {
                                 recipient_addr = Some(addr);
@@ -421,6 +436,9 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                         Command::SplitCoins(coin, input_indices) => {
                             match coin {
                                 Argument::GasCoin => {}
+                                Argument::Input(input) if input == obj_index => {
+                                    trace!("SplitCoins: Object");
+                                }
                                 _ => {
                                     reject_on(
                                         core::file!(),
@@ -473,7 +491,7 @@ impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for Programm
                 .await;
             }
 
-            (recipient, total_amount)
+            (recipient, total_amount, out_obj)
         }
     }
 }
@@ -569,6 +587,21 @@ const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS
 
 const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRef, BS, Output = ()> {
     Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| Some(()))
+}
+
+const fn object_ref_parser_with_output<BS: Readable>(
+) -> impl AsyncParser<ObjectRef, BS, Output = ObjectRefOutput> {
+    Action(
+        (DefaultInterp, DefaultInterp, DefaultInterp),
+        |(address, version, digest)| {
+            trace!("ObjectRef{{ addr: {:X?}, version: {} }}", &address, version);
+            Some(ObjectRefOutput {
+                address,
+                version,
+                digest,
+            })
+        },
+    )
 }
 
 const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
@@ -681,7 +714,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     if known_txn {
         let mut txn = input[0].clone();
-        let ((recipient, total_amount), gas_budget) = tx_parser().parse(&mut txn).await;
+        let ((recipient, total_amount, _obj_ref), gas_budget) = tx_parser().parse(&mut txn).await;
 
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;
@@ -743,4 +776,51 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     // Does nothing if not a swap mode
     ctx.set_swap_sign_success();
+}
+
+pub struct CoinObjectConfig {
+    pub obj: ObjectRefOutput,
+    pub ticker: ArrayVec<u8, 8>,
+    pub decimals: u8,
+    pub der_signature: ArrayVec<u8, 73>,
+}
+
+const fn coin_object_params_parser<BS: Readable>(
+) -> impl AsyncParser<CoinObjectParams, BS, Output = (ArrayVec<u8, 8>, u8)> {
+    Action(
+        (SubInterp(DefaultInterp), DefaultInterp),
+        |(ticker, decimals)| Some((ticker, decimals)),
+    )
+}
+
+const fn coin_object_config_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<CoinObjectConfigScheme, BS, Output = CoinObjectConfig> {
+    Action(
+        (
+            object_ref_parser_with_output(),
+            coin_object_params_parser(),
+            SubInterp(DefaultInterp),
+        ),
+        |(obj, (ticker, decimals), der_signature)| {
+            Some(CoinObjectConfig {
+                obj,
+                ticker,
+                decimals,
+                der_signature,
+            })
+        },
+    )
+}
+
+pub async fn set_coin_metadata_apdu(io: HostIO, _ctx: &RunCtx) {
+    let input = match io.get_params::<1>() {
+        Some(v) => v,
+        None => reject(SyscallError::InvalidParameter as u16).await,
+    };
+
+    let coin_obj_config = coin_object_config_parser()
+        .parse(&mut input[0].clone())
+        .await;
+
+    todo!()
 }

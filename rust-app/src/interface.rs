@@ -83,6 +83,12 @@ pub type AppId = ULEB128;
 #[allow(non_camel_case_types)]
 pub type SHA3_256_HASH = Array<Byte, 33>;
 
+pub type Decimals = Byte;
+pub type Ticker = DArray<Byte, Byte, 8>;
+pub type CoinObjectParams = (Ticker, Decimals);
+pub type DerSig = DArray<Byte, Byte, 73>;
+pub type CoinObjectConfigScheme = (ObjectRef, CoinObjectParams, DerSig);
+
 pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
 
 #[allow(dead_code)]
@@ -125,6 +131,7 @@ pub enum Ins {
     VerifyAddress = 1,
     GetPubkey = 2,
     Sign = 3,
+    SetCoinMetadata = 4,
     GetVersionStr = 0xfe,
     Exit = 0xff,
 }
