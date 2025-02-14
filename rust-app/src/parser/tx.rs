@@ -741,7 +741,31 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                         .await
                                     }
                                 },
-                                _ => {
+                                Argument::NestedResult(command_ix, coin_ix) => {
+                                    if let Some((id, amt)) = command_results
+                                        .get(&command_ix)
+                                        .and_then(|result| match result {
+                                            CommandResult::SplitCoinAmounts(id, coin_amounts) => {
+                                                coin_amounts
+                                                    .get(coin_ix as usize)
+                                                    .map(|amt| (id, amt))
+                                            }
+                                            _ => None,
+                                        })
+                                    {
+                                        total_amount_2 += amt;
+                                        *id
+                                    } else {
+                                        reject_on(
+                                            core::file!(),
+                                            core::line!(),
+                                            SyscallError::NotSupported as u16,
+                                        )
+                                        .await
+                                    }
+                                }
+                                Argument::Result(_) => {
+                                    info!("MergeCoins destination coin Result not supported");
                                     reject_on(
                                         core::file!(),
                                         core::line!(),
