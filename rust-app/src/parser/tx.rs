@@ -1163,18 +1163,46 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
     }
 }
 
+pub enum KnownTx {
+    TransferTx {
+        recipient: SuiAddressRaw,
+        total_amount: u64,
+        gas_budget: u64,
+    },
+}
+
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
-) -> impl AsyncParser<
-    IntentMessage,
-    BS,
-    Output = <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
-> {
+) -> impl AsyncParser<IntentMessage, BS, Output = KnownTx> {
     Action(
         (
             intent_parser(),
             TransactionDataParser { object_data_source },
         ),
-        |(_, d)| Some(d),
+        |(_, d): (
+            _,
+            <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
+        )| {
+            match d.0 {
+                ProgrammableTransaction::TransferSuiTx {
+                    recipient,
+                    amount,
+                    includes_gas_coin,
+                } => {
+                    let (gas_budget, gas_coin_amount) = d.1;
+                    let total_amount_ = if includes_gas_coin {
+                        gas_coin_amount.map(|amt| amount + amt)
+                    } else {
+                        Some(amount)
+                    };
+
+                    total_amount_.map(|total_amount| KnownTx::TransferTx {
+                        recipient,
+                        total_amount,
+                        gas_budget,
+                    })
+                }
+            }
+        },
     )
 }

@@ -2,7 +2,7 @@ use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest};
 use crate::parser::object::object_parser;
-use crate::parser::tx::{tx_parser, ProgrammableTransaction};
+use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
@@ -120,26 +120,12 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         .await
     };
 
-    if let Some((
-        ProgrammableTransaction::TransferSuiTx {
-            recipient,
-            amount,
-            includes_gas_coin,
-        },
-        (gas_budget, gas_coin_amount),
-    )) = known_txn
+    if let Some(KnownTx::TransferTx {
+        recipient,
+        total_amount,
+        gas_budget,
+    }) = known_txn
     {
-        info!("known_txn, 0x{}, {}, {}", HexSlice(&recipient), amount, includes_gas_coin);
-        let total_amount = if includes_gas_coin {
-            if let Some(amt) = gas_coin_amount {
-                amount + amt
-            } else {
-                reject::<u64>(SyscallError::NotSupported as u16).await
-            }
-        } else {
-            amount
-        };
-
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;
         if !path.starts_with(&BIP32_PREFIX[0..2]) {
