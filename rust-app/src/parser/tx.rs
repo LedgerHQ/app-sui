@@ -603,15 +603,71 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             }
                         }
                         Command::SplitCoins(coin, amounts) => {
+                            // We are not validating whether the coin balance is sufficient for the amounts specified
+                            // as the transaction would fail on the network with InsufficientCoinBalance error
                             let coin_id = match coin {
                                 Argument::GasCoin => SUI_COIN_ID,
-                                _ => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
+                                Argument::Input(input_ix) => match inputs.get(&input_ix) {
+                                    Some(InputValue::ObjectRef(digest)) => {
+                                        info!("SplitCoins trying object_data_source");
+                                        let coin_data =
+                                            self.object_data_source.get_object_data(&digest).await;
+                                        match coin_data {
+                                            Some((id, _)) => id,
+                                            _ => {
+                                                info!("SplitCoins Coin Object not found");
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
+                                            }
+                                        }
+                                    }
+                                    Some(InputValue::Object((id, _))) => *id,
+                                    _ => {
+                                        info!("SplitCoins input refers to non ObjectRef");
+                                        reject_on(
+                                            core::file!(),
+                                            core::line!(),
+                                            SyscallError::NotSupported as u16,
+                                        )
+                                        .await
+                                    }
+                                },
+                                Argument::NestedResult(command_ix, _) => {
+                                    if let Some(id) =
+                                        command_results.get(&command_ix).and_then(|result| {
+                                            match result {
+                                                CommandResult::SplitCoinAmounts(id, _) => Some(id),
+                                                _ => None,
+                                            }
+                                        })
+                                    {
+                                        *id
+                                    } else {
+                                        reject_on(
+                                            core::file!(),
+                                            core::line!(),
+                                            SyscallError::NotSupported as u16,
+                                        )
+                                        .await
+                                    }
+                                }
+
+                                Argument::Result(command_ix) => {
+                                    match command_results.get(&command_ix) {
+                                        Some(CommandResult::MergedCoin((id, _))) => *id,
+                                        _ => {
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    }
                                 }
                             };
                             let mut coin_amounts = ArrayVec::<u64, SPLIT_COIN_ARRAY_LENGTH>::new();
