@@ -671,6 +671,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                             }
                                         }
                                     }
+                                    Some(InputValue::Object((id, amt))) => {
+                                        total_amount_2 += amt;
+                                        *id
+                                    }
                                     _ => {
                                         info!("MergeCoins input refers to non ObjectRef");
                                         reject_on(
@@ -731,6 +735,18 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                                     .await
                                                 }
                                             }
+                                        }
+                                        Some(InputValue::Object((id, amt))) => {
+                                            if *id != coin_id {
+                                                info!("MergeCoins mismatch in coin_id(s)");
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
+                                            }
+                                            total_amount_2 += amt;
                                         }
                                         _ => {
                                             info!("MergeCoins input refers to non ObjectRef");
