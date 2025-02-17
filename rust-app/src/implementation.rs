@@ -1,5 +1,8 @@
+use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::settings::*;
+use crate::swap;
+use crate::swap::params::TxParams;
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
@@ -627,7 +630,38 @@ const fn tx_parser<BS: Clone + Readable>(
     Action((intent_parser(), TransactionData), |(_, d)| Some(d))
 }
 
-pub async fn sign_apdu(io: HostIO, settings: Settings, ui: UserInterface) {
+async fn prompt_tx_params(
+    ui: &UserInterface,
+    path: &[u32],
+    TxParams {
+        amount,
+        fee,
+        destination_address,
+    }: TxParams,
+) {
+    if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
+        try_option(ui.confirm_sign_tx(address, destination_address, amount, fee))
+    })
+    .ok()
+    .is_none()
+    {
+        reject::<()>(StatusWords::UserCancelled as u16).await;
+    };
+}
+async fn check_tx_params(expected: &TxParams, received: &TxParams) {
+    if !swap::check_tx_params(expected, received) {
+        reject::<()>(SW_SWAP_TX_PARAM_MISMATCH).await;
+    }
+}
+
+pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInterface) {
+    let _on_failure = defer::defer(|| {
+        // In case of a swap, we need to communicate that signing failed
+        if ctx.is_swap() && !ctx.is_swap_sign_succeeded() {
+            ctx.set_swap_sign_failure();
+        }
+    });
+
     let mut input = match io.get_params::<2>() {
         Some(v) => v,
         None => reject(SyscallError::InvalidParameter as u16).await,
@@ -655,16 +689,20 @@ pub async fn sign_apdu(io: HostIO, settings: Settings, ui: UserInterface) {
             reject::<()>(SyscallError::InvalidParameter as u16).await;
         }
 
-        // Show prompts after all inputs have been parsed
-        if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-            try_option(ui.confirm_sign_tx(address, recipient, total_amount, gas_budget))
-        })
-        .ok()
-        .is_none()
-        {
-            reject::<()>(StatusWords::UserCancelled as u16).await;
+        let tx_params = TxParams {
+            amount: total_amount,
+            fee: gas_budget,
+            destination_address: recipient,
         };
-    } else if !settings.get_blind_sign() {
+
+        if ctx.is_swap() {
+            let expected = ctx.get_swap_tx_params();
+            check_tx_params(expected, &tx_params).await;
+        } else {
+            // Show prompts after all inputs have been parsed
+            prompt_tx_params(&ui, path.as_slice(), tx_params).await;
+        }
+    } else if !settings.get_blind_sign() || ctx.is_swap() {
         ui.warn_tx_not_recognized();
         reject::<()>(SyscallError::NotSupported as u16).await;
     }
@@ -701,5 +739,8 @@ pub async fn sign_apdu(io: HostIO, settings: Settings, ui: UserInterface) {
             reject::<()>(SyscallError::Unspecified as u16).await;
         }
     })
-    .await
+    .await;
+
+    // Does nothing if not a swap mode
+    ctx.set_swap_sign_success();
 }

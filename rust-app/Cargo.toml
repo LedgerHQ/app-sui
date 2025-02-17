@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Obsidian Systems"]
 edition = "2018"
 autobins = false
@@ -17,25 +17,27 @@ num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
 pin-project = "1.0.10"
 include_gif = "1.0.1"
+hex = { version = "0.4.3", default-features = false }
+defer = "0.2.1"
 
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable
 # speculos logging and change log level.
 [features]
 default = [ ]
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable speculos logging and change log level.
-speculos = [ "ledger_device_sdk/speculos", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
+speculos = [ "ledger_device_sdk/debug", "ledger_device_sdk/speculos", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
 extra_debug = ["ledger-log/log_trace"]
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = "1.19.5"
-ledger_secure_sdk_sys = "1.6.2"
+ledger_device_sdk = "1.20.3"
+ledger_secure_sdk_sys = "1.6.6"
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.19.5"
+version = "1.20.3"
 features = [ "speculos" ]
 
 [[bin]]
@@ -52,6 +54,7 @@ overflow-checks = false
 [profile.release]
 opt-level = 3
 overflow-checks = false
+lto = "fat"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax"))'] }
@@ -60,7 +63,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos",
 name = "Sui"
 path = ["44'/784'"]
 curve = ["ed25519"]
-flags = "0"
+flags = "0x800"
 
 [package.metadata.ledger.nanox]
 icon = "sui-small.gif"
