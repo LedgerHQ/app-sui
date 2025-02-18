@@ -6,6 +6,7 @@ use crate::swap::params::TxParams;
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
+use arrayvec::ArrayString;
 use arrayvec::ArrayVec;
 use ledger_crypto_helpers::common::{try_option, Address};
 use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
@@ -18,6 +19,7 @@ use ledger_parser_combinators::interp::*;
 
 use core::convert::TryFrom;
 use core::future::Future;
+use core::str;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
 pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
@@ -66,10 +68,12 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
+#[derive(PartialEq)]
+#[cfg_attr(feature = "speculos", derive(Debug))]
 pub struct ObjectRefOutput {
     pub address: SuiAddressRaw,
     pub version: u64,
-    pub digest: [u8; 33],
+    pub digest: [u8; 32],
 }
 
 pub enum CallArg {
@@ -593,8 +597,8 @@ const fn object_ref_parser_with_output<BS: Readable>(
 ) -> impl AsyncParser<ObjectRef, BS, Output = ObjectRefOutput> {
     Action(
         (DefaultInterp, DefaultInterp, DefaultInterp),
-        |(address, version, digest)| {
-            trace!("ObjectRef{{ addr: {:X?}, version: {} }}", &address, version);
+        |(address, version, (_sz, digest))| {
+            trace!("ObjectRef{{ \naddr: {:X?}, \nversion: {} \ndigest {:X?} }}", &address, version, &digest);
             Some(ObjectRefOutput {
                 address,
                 version,
@@ -671,9 +675,11 @@ async fn prompt_tx_params(
         fee,
         destination_address,
     }: TxParams,
+    ticker: &str,
+    decimals: u8,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, destination_address, amount, fee))
+        try_option(ui.confirm_sign_tx(address, destination_address, amount, fee, ticker, decimals))
     })
     .ok()
     .is_none()
@@ -687,6 +693,28 @@ async fn check_tx_params(expected: &TxParams, received: &TxParams) {
     }
 }
 
+async fn match_coin_object(ctx: &RunCtx, coin_object: ObjectRefOutput) -> (ArrayString<8>, u8) {
+    let res = ctx.access_coin_info(|stored_coin_info| -> Result<_, u16> {
+        let Some(stored_coin_info) = stored_coin_info else {
+            return Err(SW_TX_COIN_INFO_NOT_SET);
+        };
+
+        if stored_coin_info.coin_object != coin_object 
+        {
+            return Err(SW_TX_COIN_INFO_MISMATCH);
+        }
+
+        Ok((stored_coin_info.ticker.clone(), stored_coin_info.decimals))
+    });
+
+    match res {
+        Ok(v) => v,
+        Err(sw) => {
+            reject(sw).await
+        }
+    }
+}
+
 pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInterface) {
     let _on_failure = defer::defer(|| {
         // In case of a swap, we need to communicate that signing failed
@@ -697,7 +725,9 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     let mut input = match io.get_params::<2>() {
         Some(v) => v,
-        None => reject(SyscallError::InvalidParameter as u16).await,
+        None => {
+            reject(SyscallError::InvalidParameter as u16).await
+        }
     };
 
     // Read length, and move input[0] by one byte
@@ -714,7 +744,9 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     if known_txn {
         let mut txn = input[0].clone();
-        let ((recipient, total_amount, _obj_ref), gas_budget) = tx_parser().parse(&mut txn).await;
+        let ((recipient, total_amount, maybe_coin_obj), gas_budget) =
+            tx_parser().parse(&mut txn).await;
+
 
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;
@@ -732,8 +764,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             let expected = ctx.get_swap_tx_params();
             check_tx_params(expected, &tx_params).await;
         } else {
+            let (ticker, decimals) = if let Some(coin_object) = maybe_coin_obj {
+                match_coin_object(ctx, coin_object).await
+            } else {
+                (ArrayString::from("SUI").unwrap(), SUI_DECIMALS)
+            };
             // Show prompts after all inputs have been parsed
-            prompt_tx_params(&ui, path.as_slice(), tx_params).await;
+            prompt_tx_params(&ui, path.as_slice(), tx_params, ticker.as_str(), decimals).await;
         }
     } else if !settings.get_blind_sign() || ctx.is_swap() {
         ui.warn_tx_not_recognized();
@@ -778,49 +815,50 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     ctx.set_swap_sign_success();
 }
 
-pub struct CoinObjectConfig {
-    pub obj: ObjectRefOutput,
-    pub ticker: ArrayVec<u8, 8>,
+#[cfg_attr(feature = "speculos", derive(Debug))]
+pub struct CoinInfo {
+    pub coin_object: ObjectRefOutput,
+    pub ticker: ArrayString<8>,
     pub decimals: u8,
     pub der_signature: ArrayVec<u8, 73>,
 }
 
-const fn coin_object_params_parser<BS: Readable>(
-) -> impl AsyncParser<CoinObjectParams, BS, Output = (ArrayVec<u8, 8>, u8)> {
-    Action(
-        (SubInterp(DefaultInterp), DefaultInterp),
-        |(ticker, decimals)| Some((ticker, decimals)),
-    )
-}
-
-const fn coin_object_config_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<CoinObjectConfigScheme, BS, Output = CoinObjectConfig> {
-    Action(
-        (
-            object_ref_parser_with_output(),
-            coin_object_params_parser(),
-            SubInterp(DefaultInterp),
-        ),
-        |(obj, (ticker, decimals), der_signature)| {
-            Some(CoinObjectConfig {
-                obj,
-                ticker,
-                decimals,
-                der_signature,
-            })
-        },
-    )
-}
-
-pub async fn set_coin_metadata_apdu(io: HostIO, _ctx: &RunCtx) {
-    let input = match io.get_params::<1>() {
+pub async fn set_coin_info_apdu(io: HostIO, ctx: &RunCtx) {
+    let mut input = match io.get_params::<1>() {
         Some(v) => v,
         None => reject(SyscallError::InvalidParameter as u16).await,
     };
 
-    let coin_obj_config = coin_object_config_parser()
-        .parse(&mut input[0].clone())
-        .await;
+    let coin_object = ObjectRefOutput {
+        address: input[0].read().await,
+        version: u64::from_le_bytes(input[0].read().await),
+        digest: input[0].read().await,
+    };
 
-    todo!()
+    let coin_info = CoinInfo {
+        coin_object,
+        ticker: {
+            let res: Option<_> = try {
+                let ticker_len = u8::from_le_bytes(input[0].read().await) as usize;
+                let ticker_bytes: [u8; 8] = input[0].read().await;
+                let ticker_str = str::from_utf8(&ticker_bytes[..ticker_len]).ok()?;
+                ArrayString::from(ticker_str).ok()?
+            };
+
+            let Some(ticker) = res else {
+                reject(SyscallError::InvalidParameter as u16).await
+            };
+            ticker
+        },
+        decimals: u8::from_le_bytes(input[0].read().await),
+        der_signature: input[0].read().await.into(),
+    };
+
+    io.result_final(&[]).await;
+
+    trace!("CoinInfo: {:X?}", coin_info);
+
+    //TODO: Check signature
+
+    ctx.set_coin_info(coin_info);
 }

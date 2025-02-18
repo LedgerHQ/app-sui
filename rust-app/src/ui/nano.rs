@@ -21,18 +21,20 @@ impl UserInterface {
         recipient: [u8; 32],
         total_amount: u64,
         gas_budget: u64,
+        ticker: &str,
+        decimals: u8,
     ) -> Option<()> {
-        scroller("Transfer", |w| Ok(write!(w, "SUI")?))?;
+        scroller("Transfer", |w| Ok(write!(w, "{ticker}")?))?;
 
         scroller_paginated("From", |w| Ok(write!(w, "{address}")?))?;
         scroller_paginated("To", |w| Ok(write!(w, "0x{}", HexSlice(&recipient))?))?;
 
-        let (quotient, remainder_str) = get_amount_in_decimals(total_amount);
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, decimals);
         scroller_paginated("Amount", |w| {
-            Ok(write!(w, "SUI {quotient}.{}", remainder_str.as_str())?)
+            Ok(write!(w, "{ticker} {quotient}.{}", remainder_str.as_str())?)
         })?;
 
-        let (quotient, remainder_str) = get_amount_in_decimals(gas_budget);
+        let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_DECIMALS);
         scroller("Max Gas", |w| {
             Ok(write!(w, "SUI {}.{}", quotient, remainder_str.as_str())?)
         })?;

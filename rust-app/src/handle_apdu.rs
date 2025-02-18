@@ -43,8 +43,8 @@ pub fn handle_apdu_async(
                 trace!("Handling sign");
                 NoinlineFut(sign_apdu(io, ctx, settings, ui)).await;
             }
-            Ins::SetCoinMetadata => {
-                NoinlineFut(set_coin_metadata_apdu(io, ctx)).await;
+            Ins::SetCoinInfo => {
+                NoinlineFut(set_coin_info_apdu(io, ctx)).await;
             }
             Ins::GetVersionStr => {}
             Ins::Exit if ctx.is_swap() => unsafe { ledger_secure_sdk_sys::os_lib_end() },

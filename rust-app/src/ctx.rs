@@ -1,5 +1,6 @@
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
 
+use crate::implementation::CoinInfo;
 use crate::swap::params::TxParams;
 
 #[derive(Clone, Copy)]
@@ -14,13 +15,16 @@ pub enum State {
 pub struct RunCtx {
     state: Cell<State>,
     tx_params: TxParams,
+    coin_obj_config: RefCell<Option<CoinInfo>>,
 }
 
+// App/swap mode context methods
 impl RunCtx {
     pub fn app() -> Self {
         RunCtx {
             state: Cell::new(State::App),
             tx_params: TxParams::default(),
+            coin_obj_config: RefCell::new(None),
         }
     }
 
@@ -28,6 +32,7 @@ impl RunCtx {
         RunCtx {
             state: Cell::new(State::LibSwapIdle),
             tx_params,
+            coin_obj_config: RefCell::new(None),
         }
     }
 
@@ -62,5 +67,16 @@ impl RunCtx {
     pub fn get_swap_tx_params(&self) -> &TxParams {
         assert!(self.is_swap(), "attempt to get swap tx params in app mode");
         &self.tx_params
+    }
+}
+
+// Coin object configuration methods
+impl RunCtx {
+    pub fn set_coin_info(&self, config: CoinInfo) {
+        self.coin_obj_config.borrow_mut().replace(config);
+    }
+
+    pub fn access_coin_info<R>(&self, f: impl FnOnce(Option<&CoinInfo>) -> R) -> R {
+        f(self.coin_obj_config.borrow().as_ref())
     }
 }

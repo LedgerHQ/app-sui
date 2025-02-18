@@ -19,7 +19,7 @@ use ledger_log::{error, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams};
 
-use crate::interface::SuiPubKeyAddress;
+use crate::{interface::SuiPubKeyAddress, utils::SUI_DECIMALS};
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use crate::main_nanos::app_main;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
@@ -68,7 +68,7 @@ pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
 // Max sui amount 10_000_000_000 SUI.
 // So max string length is 11 (quotient) + 1 (dot) + 12 (reminder) + 4 (text) = 28
 pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayString<28>, Error> {
-    let (quotient, remainder_str) = get_amount_in_decimals(params.amount);
+    let (quotient, remainder_str) = get_amount_in_decimals(params.amount, SUI_DECIMALS);
 
     let mut printable_amount = ArrayString::<28>::default();
     write!(&mut printable_amount, "SUI {}.{}", quotient, remainder_str)

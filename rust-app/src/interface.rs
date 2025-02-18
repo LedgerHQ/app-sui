@@ -79,16 +79,9 @@ pub type IntentVersion = ULEB128;
 pub type IntentScope = ULEB128;
 pub type AppId = ULEB128;
 
-// TODO: confirm if 33 is indeed ok for all uses of SHA3_256_HASH
 #[allow(non_camel_case_types)]
-pub type SHA3_256_HASH = Array<Byte, 33>;
-
-pub type Decimals = Byte;
-pub type Ticker = DArray<Byte, Byte, 8>;
-pub type CoinObjectParams = (Ticker, Decimals);
-pub type DerSig = DArray<Byte, Byte, 73>;
-pub type CoinObjectConfigScheme = (ObjectRef, CoinObjectParams, DerSig);
-
+// Prefixed with ULEB128 size byte
+pub type SHA3_256_HASH = (Byte, Array<Byte, 32>);
 pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
 
 #[allow(dead_code)]
@@ -131,7 +124,7 @@ pub enum Ins {
     VerifyAddress = 1,
     GetPubkey = 2,
     Sign = 3,
-    SetCoinMetadata = 4,
+    SetCoinInfo = 4,
     GetVersionStr = 0xfe,
     Exit = 0xff,
 }
@@ -153,3 +146,5 @@ impl TryFrom<ApduHeader> for Ins {
 
 // Status word used when swap transaction parameters check failed
 pub const SW_SWAP_TX_PARAM_MISMATCH: u16 = 0x6e05;
+pub const SW_TX_COIN_INFO_NOT_SET: u16 = 0x6e06;
+pub const SW_TX_COIN_INFO_MISMATCH: u16 = 0x6e07;
