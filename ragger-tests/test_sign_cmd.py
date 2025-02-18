@@ -1,28 +1,49 @@
+import base58
 import pytest
 import concurrent.futures
 import time
 import base64
 
-from application_client.client import Client, Errors
+from application_client.client import Client, Errors, build_coin_info
 from contextlib import contextmanager
 from ragger.error import ExceptionRAPDU
 from ragger.navigator import NavIns, NavInsID
 from utils import ROOT_SCREENSHOT_PATH, check_signature_validity, run_apdu_and_nav_tasks_concurrently
 
-# can sign a simple Sui transfer transaction
-def test_sign_tx_sui_transfer(backend, scenario_navigator, firmware, navigator):
+# can sign a simple Sui/Token transfer transaction
+@pytest.mark.parametrize("is_token", ["token", ""])
+def test_sign_tx_sui_transfer(backend, scenario_navigator, firmware, navigator, is_token):
+    is_token = is_token == "token"
     client = Client(backend, use_block_protocol=True)
     path = "m/44'/784'/0'"
 
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32
 
-    transaction = bytes.fromhex('000000000002000840420f000000000000204f2370b2a4810ad6c8e1cfd92cc8c8818fef8f59e3a80cea17871f78d850ba4b0202000101000001010200000101006fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e210112a6d0c44edc630d2724b1f57fea4f93308b1d22164402c65778bd99379c4733070000000000000020f2fd3c87b227f1015182fe4348ed680d7ed32bcd3269704252c03e1d0b13d30d6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e2101000000000000000c0400000000000000')
+    if is_token:
+        transaction = bytes.fromhex('01020300000301009fec961434e391d7106a2353f04be26052ba40254115004118e1be09b9724e2e615300000000000020eab1422236814f7dbbd2c3400dd46a11b412ef35fb62ba528c70fe76ec1310ad0008c7c7c7c700000000002087aa2830134adc42ed726fde1755e2af38469920314f936755de616c3b4b46fd02020100000101010001010200000102005a64eec558ee719741578942714a0b35058ced15d79f4af64da014715ada449701000000000000000000000000000000000000000000000000000000000000feee0a1a0000000000002000000000000000000000000000000000000000000000000000000000000000005a64eec558ee719741578942714a0b35058ced15d79f4af64da014715ada44970100000000000000424200000000000000')
+    else:
+        transaction = bytes.fromhex('000000000002000840420f000000000000204f2370b2a4810ad6c8e1cfd92cc8c8818fef8f59e3a80cea17871f78d850ba4b0202000101000001010200000101006fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e210112a6d0c44edc630d2724b1f57fea4f93308b1d22164402c65778bd99379c4733070000000000000020f2fd3c87b227f1015182fe4348ed680d7ed32bcd3269704252c03e1d0b13d30d6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e2101000000000000000c0400000000000000')
 
     def apdu_task():
+        if is_token:
+            coin_info = build_coin_info(
+                address=bytes.fromhex("9fec961434e391d7106a2353f04be26052ba40254115004118e1be09b9724e2e"),
+                version=21345,
+                digest=base58.b58decode("Go9Aq1uftR2KjU4pLMw1cGdy7QnTfTYvVnZKezTWD4Gk"),
+                ticker=b"USDC",
+                decimals=6,
+                der_signature=b'',
+            )
+            client.set_coin_info(coin_info)
+
         return client.sign_tx(path=path, transaction=transaction)
 
     def nav_task():
+        test_case_name="test_sign_tx_sui_transfer"
+        if is_token:
+            test_case_name += "_token"
+
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
                 instructions=[ NavInsID.RIGHT_CLICK # Transfer SUI
@@ -34,7 +55,7 @@ def test_sign_tx_sui_transfer(backend, scenario_navigator, firmware, navigator):
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
-                , test_case_name="test_sign_tx_sui_transfer"
+                , test_case_name=test_case_name
                 , path=scenario_navigator.screenshot_path
                 , screen_change_before_first_instruction=True
                 , screen_change_after_last_instruction=False

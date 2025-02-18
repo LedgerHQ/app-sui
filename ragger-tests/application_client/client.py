@@ -1,7 +1,7 @@
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 from hashlib import sha256
-from struct import unpack
+from struct import unpack, pack
 
 from ragger.backend.interface import BackendInterface, RAPDU
 from bip_utils import Bip32Utils
@@ -19,6 +19,7 @@ class InsType(IntEnum):
     VERIFY_ADDRESS = 0x01
     GET_PUBLIC_KEY = 0x02
     SIGN_TX        = 0x03
+    GET_COIN_INFO  = 0x04
 
 class Errors(IntEnum):
     SW_DENY                    = 0x6985
@@ -71,6 +72,12 @@ class Client:
     def get_public_key_with_confirmation(self, path: str) -> Tuple[int, bytes, int, bytes]:
         return self.get_public_key_impl(InsType.VERIFY_ADDRESS, path)
 
+    def set_coin_info(self, coin_info):
+        self.send_fn(cla=CLA,
+            ins=InsType.GET_COIN_INFO,
+            p1=P1,
+            p2=P2,
+            payload=[coin_info])
 
     def get_public_key_impl(self, ins, path: str) -> Tuple[int, bytes, int, bytes]:
         response = self.send_fn(cla=CLA,
@@ -218,3 +225,29 @@ def pop_sized_buf_from_buffer(buffer:bytes, size:int) -> Tuple[bytes, bytes]:
 def pop_size_prefixed_buf_from_buf(buffer:bytes) -> Tuple[bytes, int, bytes]:
     data_len = buffer[0]
     return buffer[1+data_len:], data_len, buffer[1:data_len+1]
+
+def build_coin_info(address: bytes, version: int, digest: bytes, ticker: bytes, decimals: int, der_signature: bytes) -> bytes:
+    if len(address) != 32:
+        raise ValueError("Address must be exactly 32 bytes.")
+    if len(digest) != 32:
+        raise ValueError("Digest must be exactly 33 bytes.")
+    if len(ticker) > 8:
+        raise ValueError("Ticker must be at most 8 bytes.")
+    if len(der_signature) > 73:
+        raise ValueError("DER signature must be at most 73 bytes.")
+    
+    # Prefix sizes
+    ticker_size = len(ticker)
+    der_signature_size = len(der_signature)
+    
+    # Pack data into a structured format
+    packed_data = (
+        address +
+        pack("<Q", version) +  # Little-endian u64
+        digest +
+        pack("B", ticker_size) + ticker.ljust(8, b'\x00') +  # Ticker with size prefix and padding
+        pack("B", decimals) +
+        pack("B", der_signature_size) + der_signature.ljust(73, b'\x00')  # Signature with size prefix and padding
+    )
+    
+    return packed_data
