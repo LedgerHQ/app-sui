@@ -1,4 +1,5 @@
 use crate::parser::common::*;
+use crate::utils::NoinlineFut;
 
 extern crate alloc;
 use alloc::collections::BTreeMap;
@@ -347,11 +348,12 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
-                    let arg = <DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
+                    let arg =
+                        NoinlineFut(<DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        ))
+                        .await;
                     match arg {
                         CallArg::Other => {}
                         CallArg::RecipientAddress(v) => {
@@ -397,240 +399,24 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 let length = u16::try_from(length_u32).expect("u16 expected");
                 info!("ProgrammableTransaction: Commands: {}", length);
                 for command_ix in 0..length {
-                    let c = <DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
+                    let c = NoinlineFut(<DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
-                    )
+                    ))
                     .await;
                     match c {
                         Command::TransferObject(coins, recipient_input) => {
-                            match recipient_input {
-                                Argument::Input(inp_index) => match inputs.get(&inp_index) {
-                                    Some(InputValue::RecipientAddress(addr)) => {
-                                        match recipient_addr {
-                                            Some(addr_) => {
-                                                if *addr != addr_ {
-                                                    info!("TransferObject multiple recipients");
-                                                    reject_on::<()>(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await;
-                                                }
-                                            }
-                                            None => recipient_addr = Some(addr.clone()),
-                                        }
-                                    }
-                                    _ => {
-                                        info!("TransferObject invalid inp_index");
-                                        reject_on::<()>(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await;
-                                    }
-                                },
-                                _ => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            }
-                            let mut coin_id: Option<CoinID> = None;
-                            // set total_amount
-                            for coin in &coins {
-                                match coin {
-                                    Argument::GasCoin => {
-                                        if let Some(id_) = coin_id {
-                                            if id_ != SUI_COIN_ID {
-                                                info!("TransferObject mismatch in coin_id(s)");
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            } else {
-                                                coin_id = Some(SUI_COIN_ID);
-                                            }
-                                        }
-                                        includes_gas_coin = true;
-                                    }
-                                    Argument::Input(input_ix) => match inputs.get(input_ix) {
-                                        Some(InputValue::ObjectRef(digest)) => {
-                                            info!("TransferObject trying object_data_source");
-                                            let coin_data = self
-                                                .object_data_source
-                                                .get_object_data(&digest)
-                                                .await;
-                                            match coin_data {
-                                                Some((_, amt)) => total_amount += amt,
-                                                _ => {
-                                                    info!("TransferObject Coin Object not found");
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                            }
-                                        }
-                                        Some(InputValue::Object((id, amt))) => {
-                                            if let Some(id_) = coin_id {
-                                                if id_ != *id {
-                                                    info!("TransferObject mismatch in coin_id(s)");
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                } else {
-                                                    coin_id = Some(*id);
-                                                }
-                                            }
-                                            total_amount += amt;
-                                        }
-                                        Some(InputValue::Amount(_)) => {
-                                            info!("TransferObject input refers to non ObjectRef");
-                                            reject_on(
-                                                core::file!(),
-                                                core::line!(),
-                                                SyscallError::NotSupported as u16,
-                                            )
-                                            .await
-                                        }
-                                        Some(InputValue::RecipientAddress(_)) => {
-                                            info!("TransferObject input refers to non ObjectRef");
-                                            reject_on(
-                                                core::file!(),
-                                                core::line!(),
-                                                SyscallError::NotSupported as u16,
-                                            )
-                                            .await
-                                        }
-                                        None => {
-                                            info!("TransferObject input not found");
-                                            reject_on(
-                                                core::file!(),
-                                                core::line!(),
-                                                SyscallError::NotSupported as u16,
-                                            )
-                                            .await
-                                        }
-                                    },
-                                    Argument::NestedResult(command_ix, coin_ix) => {
-                                        match command_results.get(command_ix) {
-                                            Some(CommandResult::SplitCoinAmounts(
-                                                id,
-                                                coin_amounts,
-                                            )) => {
-                                                if let Some(id_) = coin_id {
-                                                    if id_ != *id {
-                                                        info!(
-                                                            "TransferObject mismatch in coin_id(s)"
-                                                        );
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::NotSupported as u16,
-                                                        )
-                                                        .await
-                                                    } else {
-                                                        coin_id = Some(*id);
-                                                    }
-                                                }
-                                                if let Some(amt) =
-                                                    coin_amounts.get(*coin_ix as usize)
-                                                {
-                                                    total_amount += amt;
-                                                } else {
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                            }
-                                            _ => {
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            }
-                                        }
-                                    }
-                                    Argument::Result(command_ix) => {
-                                        match command_results.get(command_ix) {
-                                            Some(CommandResult::SplitCoinAmounts(
-                                                id,
-                                                coin_amounts,
-                                            )) => {
-                                                if let Some(id_) = coin_id {
-                                                    if id_ != *id {
-                                                        info!(
-                                                            "TransferObject mismatch in coin_id(s)"
-                                                        );
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::NotSupported as u16,
-                                                        )
-                                                        .await
-                                                    } else {
-                                                        coin_id = Some(*id);
-                                                    }
-                                                }
-                                                if coin_amounts.len() == 1 {
-                                                    total_amount += coin_amounts[0];
-                                                } else {
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                            }
-                                            Some(CommandResult::MergedCoin((id, amt))) => {
-                                                if let Some(id_) = coin_id {
-                                                    if id_ != *id {
-                                                        info!(
-                                                            "TransferObject mismatch in coin_id(s)"
-                                                        );
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::NotSupported as u16,
-                                                        )
-                                                        .await
-                                                    } else {
-                                                        coin_id = Some(*id);
-                                                    }
-                                                }
-                                                total_amount += amt;
-                                            }
-                                            _ => {
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            NoinlineFut(handle_transfer_object(
+                                coins,
+                                recipient_input,
+                                &inputs,
+                                &mut recipient_addr,
+                                &mut total_amount,
+                                &mut includes_gas_coin,
+                                self.object_data_source.clone(),
+                                &command_results,
+                            ))
+                            .await;
                         }
                         Command::SplitCoins(coin, amounts) => {
                             // We are not validating whether the coin balance is sufficient for the amounts specified
@@ -992,6 +778,222 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 amount: total_amount,
                 includes_gas_coin,
             }
+        }
+    }
+}
+
+async fn handle_transfer_object<OD: HasObjectData>(
+    coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
+    recipient_input: Argument,
+    inputs: &BTreeMap<u16, InputValue>,
+    recipient_addr: &mut Option<SuiAddressRaw>,
+    total_amount: &mut u64,
+    includes_gas_coin: &mut bool,
+    object_data_source: OD,
+    command_results: &BTreeMap<u16, CommandResult>,
+) {
+    match recipient_input {
+        Argument::Input(inp_index) => match inputs.get(&inp_index) {
+            Some(InputValue::RecipientAddress(addr)) => match recipient_addr {
+                Some(addr_) => {
+                    if *addr != *addr_ {
+                        info!("TransferObject multiple recipients");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+                }
+                None => *recipient_addr = Some(addr.clone()),
+            },
+            _ => {
+                info!("TransferObject invalid inp_index");
+                reject_on::<()>(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await;
+            }
+        },
+        _ => {
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+    }
+    let mut coin_id: Option<CoinID> = None;
+    // set total_amount
+    for coin in &coins {
+        match coin {
+            Argument::GasCoin => {
+                if let Some(id_) = coin_id {
+                    if id_ != SUI_COIN_ID {
+                        info!("TransferObject mismatch in coin_id(s)");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    } else {
+                        coin_id = Some(SUI_COIN_ID);
+                    }
+                }
+                *includes_gas_coin = true;
+            }
+            Argument::Input(input_ix) => match inputs.get(input_ix) {
+                Some(InputValue::ObjectRef(digest)) => {
+                    info!("TransferObject trying object_data_source");
+                    let coin_data = object_data_source.get_object_data(&digest).await;
+                    match coin_data {
+                        Some((_, amt)) => *total_amount += amt,
+                        _ => {
+                            info!("TransferObject Coin Object not found");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                }
+                Some(InputValue::Object((id, amt))) => {
+                    if let Some(id_) = coin_id {
+                        if id_ != *id {
+                            info!("TransferObject mismatch in coin_id(s)");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        } else {
+                            coin_id = Some(*id);
+                        }
+                    }
+                    *total_amount += amt;
+                }
+                Some(InputValue::Amount(_)) => {
+                    info!("TransferObject input refers to non ObjectRef");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+                Some(InputValue::RecipientAddress(_)) => {
+                    info!("TransferObject input refers to non ObjectRef");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+                None => {
+                    info!("TransferObject input not found");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            },
+            Argument::NestedResult(command_ix, coin_ix) => match command_results.get(command_ix) {
+                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
+                    if let Some(id_) = coin_id {
+                        if id_ != *id {
+                            info!("TransferObject mismatch in coin_id(s)");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        } else {
+                            coin_id = Some(*id);
+                        }
+                    }
+                    if let Some(amt) = coin_amounts.get(*coin_ix as usize) {
+                        *total_amount += amt;
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            },
+            Argument::Result(command_ix) => match command_results.get(command_ix) {
+                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
+                    if let Some(id_) = coin_id {
+                        if id_ != *id {
+                            info!("TransferObject mismatch in coin_id(s)");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        } else {
+                            coin_id = Some(*id);
+                        }
+                    }
+                    if coin_amounts.len() == 1 {
+                        *total_amount += coin_amounts[0];
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                }
+                Some(CommandResult::MergedCoin((id, amt))) => {
+                    if let Some(id_) = coin_id {
+                        if id_ != *id {
+                            info!("TransferObject mismatch in coin_id(s)");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        } else {
+                            coin_id = Some(*id);
+                        }
+                    }
+                    *total_amount += amt;
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            },
         }
     }
 }
