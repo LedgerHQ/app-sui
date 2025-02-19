@@ -571,6 +571,36 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                     }
                                     Argument::Result(command_ix) => {
                                         match command_results.get(command_ix) {
+                                            Some(CommandResult::SplitCoinAmounts(
+                                                id,
+                                                coin_amounts,
+                                            )) => {
+                                                if let Some(id_) = coin_id {
+                                                    if id_ != *id {
+                                                        info!(
+                                                            "TransferObject mismatch in coin_id(s)"
+                                                        );
+                                                        reject_on(
+                                                            core::file!(),
+                                                            core::line!(),
+                                                            SyscallError::NotSupported as u16,
+                                                        )
+                                                        .await
+                                                    } else {
+                                                        coin_id = Some(*id);
+                                                    }
+                                                }
+                                                if coin_amounts.len() == 1 {
+                                                    total_amount += coin_amounts[0];
+                                                } else {
+                                                    reject_on(
+                                                        core::file!(),
+                                                        core::line!(),
+                                                        SyscallError::NotSupported as u16,
+                                                    )
+                                                    .await
+                                                }
+                                            }
                                             Some(CommandResult::MergedCoin((id, amt))) => {
                                                 if let Some(id_) = coin_id {
                                                     if id_ != *id {
