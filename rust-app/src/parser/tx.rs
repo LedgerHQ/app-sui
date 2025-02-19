@@ -430,239 +430,15 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             command_results.insert(command_ix, res);
                         }
                         Command::MergeCoins(dest_coin, coins) => {
-                            let mut total_amount_2: u64 = 0;
-                            let coin_id = match dest_coin {
-                                Argument::GasCoin => SUI_COIN_ID,
-                                Argument::Input(input_ix) => match inputs.get(&input_ix) {
-                                    Some(InputValue::ObjectRef(digest)) => {
-                                        info!("MergeCoins trying object_data_source");
-                                        let coin_data =
-                                            self.object_data_source.get_object_data(&digest).await;
-                                        match coin_data {
-                                            Some((id, amt)) => {
-                                                total_amount_2 += amt;
-                                                id
-                                            }
-                                            _ => {
-                                                info!("MergeCoins Coin Object not found");
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            }
-                                        }
-                                    }
-                                    Some(InputValue::Object((id, amt))) => {
-                                        total_amount_2 += amt;
-                                        *id
-                                    }
-                                    _ => {
-                                        info!("MergeCoins input refers to non ObjectRef");
-                                        reject_on(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await
-                                    }
-                                },
-                                Argument::NestedResult(command_ix, coin_ix) => {
-                                    if let Some((id, amt)) = command_results
-                                        .get(&command_ix)
-                                        .and_then(|result| match result {
-                                            CommandResult::SplitCoinAmounts(id, coin_amounts) => {
-                                                coin_amounts
-                                                    .get(coin_ix as usize)
-                                                    .map(|amt| (id, amt))
-                                            }
-                                            _ => None,
-                                        })
-                                    {
-                                        total_amount_2 += amt;
-                                        *id
-                                    } else {
-                                        reject_on(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await
-                                    }
-                                }
-                                Argument::Result(_) => {
-                                    info!("MergeCoins destination coin Result not supported");
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            };
-                            for coin in &coins {
-                                match coin {
-                                    Argument::GasCoin => {
-                                        info!("MergeCoins cannot consume gas coin");
-                                        reject_on(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await
-                                    }
-                                    Argument::Input(input_ix) => match inputs.get(input_ix) {
-                                        Some(InputValue::ObjectRef(digest)) => {
-                                            info!("MergeCoins trying object_data_source");
-                                            let coin_data = self
-                                                .object_data_source
-                                                .get_object_data(&digest)
-                                                .await;
-                                            match coin_data {
-                                                Some((id, amt)) => {
-                                                    if id != coin_id {
-                                                        info!("MergeCoins mismatch in coin_id(s)");
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::NotSupported as u16,
-                                                        )
-                                                        .await
-                                                    }
-                                                    total_amount_2 += amt;
-                                                }
-                                                _ => {
-                                                    info!("MergeCoins Coin Object not found");
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                            }
-                                        }
-                                        Some(InputValue::Object((id, amt))) => {
-                                            if *id != coin_id {
-                                                info!("MergeCoins mismatch in coin_id(s)");
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            }
-                                            total_amount_2 += amt;
-                                        }
-                                        _ => {
-                                            info!("MergeCoins input refers to non ObjectRef");
-                                            reject_on(
-                                                core::file!(),
-                                                core::line!(),
-                                                SyscallError::NotSupported as u16,
-                                            )
-                                            .await
-                                        }
-                                    },
-                                    Argument::NestedResult(command_ix, coin_ix) => {
-                                        if let Some(amt) =
-                                            command_results.get(command_ix).and_then(|result| {
-                                                match result {
-                                                    CommandResult::SplitCoinAmounts(
-                                                        id,
-                                                        coin_amounts,
-                                                    ) => {
-                                                        if *id != coin_id {
-                                                            None
-                                                        } else {
-                                                            coin_amounts.get(*coin_ix as usize)
-                                                        }
-                                                    }
-                                                    _ => None,
-                                                }
-                                            })
-                                        {
-                                            total_amount_2 += amt;
-                                        } else {
-                                            reject_on(
-                                                core::file!(),
-                                                core::line!(),
-                                                SyscallError::NotSupported as u16,
-                                            )
-                                            .await
-                                        }
-                                    }
-                                    Argument::Result(command_ix) => {
-                                        match command_results.get(command_ix) {
-                                            Some(CommandResult::SplitCoinAmounts(
-                                                id,
-                                                coin_amounts,
-                                            )) => {
-                                                if *id != coin_id {
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                                for amt in coin_amounts {
-                                                    total_amount_2 += amt;
-                                                }
-                                            }
-                                            Some(CommandResult::MergedCoin((id, amt))) => {
-                                                if *id != coin_id {
-                                                    reject_on(
-                                                        core::file!(),
-                                                        core::line!(),
-                                                        SyscallError::NotSupported as u16,
-                                                    )
-                                                    .await
-                                                }
-                                                total_amount_2 += amt;
-                                            }
-                                            _ => {
-                                                reject_on(
-                                                    core::file!(),
-                                                    core::line!(),
-                                                    SyscallError::NotSupported as u16,
-                                                )
-                                                .await
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // MergeCoins does an overwrite of existing coins
-                            match dest_coin {
-                                Argument::GasCoin => {
-                                    added_amount_to_gas_coin += total_amount_2;
-                                }
-                                Argument::Input(input_ix) => {
-                                    inputs.insert(
-                                        input_ix,
-                                        InputValue::Object((coin_id, total_amount_2)),
-                                    );
-                                }
-                                Argument::Result(command_ix) => {
-                                    command_results.insert(
-                                        command_ix,
-                                        CommandResult::MergedCoin((coin_id, total_amount_2)),
-                                    );
-                                }
-                                Argument::NestedResult(command_ix, coin_ix) => {
-                                    command_results.get_mut(&command_ix).map(
-                                        |result| match result {
-                                            CommandResult::SplitCoinAmounts(_, coin_amounts) => {
-                                                coin_amounts[coin_ix as usize] = total_amount_2;
-                                            }
-                                            _ => {}
-                                        },
-                                    );
-                                }
-                            }
+                            NoinlineFut(handle_merge_coins(
+                                dest_coin,
+                                coins,
+                                &mut inputs,
+                                self.object_data_source.clone(),
+                                &mut command_results,
+                                &mut added_amount_to_gas_coin,
+                            ))
+                            .await;
                         }
                     }
                 }
@@ -1007,6 +783,232 @@ async fn handle_split_coins<OD: HasObjectData>(
         }
     }
     CommandResult::SplitCoinAmounts(coin_id, coin_amounts)
+}
+
+async fn handle_merge_coins<OD: HasObjectData>(
+    dest_coin: Argument,
+    coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
+    inputs: &mut BTreeMap<u16, InputValue>,
+    object_data_source: OD,
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    added_amount_to_gas_coin: &mut u64,
+) {
+    let mut total_amount_2: u64 = 0;
+    let coin_id = match dest_coin {
+        Argument::GasCoin => SUI_COIN_ID,
+        Argument::Input(input_ix) => match inputs.get(&input_ix) {
+            Some(InputValue::ObjectRef(digest)) => {
+                info!("MergeCoins trying object_data_source");
+                let coin_data = object_data_source.get_object_data(&digest).await;
+                match coin_data {
+                    Some((id, amt)) => {
+                        total_amount_2 += amt;
+                        id
+                    }
+                    _ => {
+                        info!("MergeCoins Coin Object not found");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                }
+            }
+            Some(InputValue::Object((id, amt))) => {
+                total_amount_2 += amt;
+                *id
+            }
+            _ => {
+                info!("MergeCoins input refers to non ObjectRef");
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        },
+        Argument::NestedResult(command_ix, coin_ix) => {
+            if let Some((id, amt)) =
+                command_results
+                    .get(&command_ix)
+                    .and_then(|result| match result {
+                        CommandResult::SplitCoinAmounts(id, coin_amounts) => {
+                            coin_amounts.get(coin_ix as usize).map(|amt| (id, amt))
+                        }
+                        _ => None,
+                    })
+            {
+                total_amount_2 += amt;
+                *id
+            } else {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        }
+        Argument::Result(_) => {
+            info!("MergeCoins destination coin Result not supported");
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+    };
+    for coin in &coins {
+        match coin {
+            Argument::GasCoin => {
+                info!("MergeCoins cannot consume gas coin");
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+            Argument::Input(input_ix) => match inputs.get(input_ix) {
+                Some(InputValue::ObjectRef(digest)) => {
+                    info!("MergeCoins trying object_data_source");
+                    let coin_data = object_data_source.get_object_data(&digest).await;
+                    match coin_data {
+                        Some((id, amt)) => {
+                            if id != coin_id {
+                                info!("MergeCoins mismatch in coin_id(s)");
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                            total_amount_2 += amt;
+                        }
+                        _ => {
+                            info!("MergeCoins Coin Object not found");
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                }
+                Some(InputValue::Object((id, amt))) => {
+                    if *id != coin_id {
+                        info!("MergeCoins mismatch in coin_id(s)");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    total_amount_2 += amt;
+                }
+                _ => {
+                    info!("MergeCoins input refers to non ObjectRef");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            },
+            Argument::NestedResult(command_ix, coin_ix) => {
+                if let Some(amt) = command_results
+                    .get(command_ix)
+                    .and_then(|result| match result {
+                        CommandResult::SplitCoinAmounts(id, coin_amounts) => {
+                            if *id != coin_id {
+                                None
+                            } else {
+                                coin_amounts.get(*coin_ix as usize)
+                            }
+                        }
+                        _ => None,
+                    })
+                {
+                    total_amount_2 += amt;
+                } else {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+            Argument::Result(command_ix) => match command_results.get(command_ix) {
+                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
+                    if *id != coin_id {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    for amt in coin_amounts {
+                        total_amount_2 += amt;
+                    }
+                }
+                Some(CommandResult::MergedCoin((id, amt))) => {
+                    if *id != coin_id {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    total_amount_2 += amt;
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            },
+        }
+    }
+
+    // MergeCoins does an overwrite of existing coins
+    match dest_coin {
+        Argument::GasCoin => {
+            *added_amount_to_gas_coin += total_amount_2;
+        }
+        Argument::Input(input_ix) => {
+            inputs.insert(input_ix, InputValue::Object((coin_id, total_amount_2)));
+        }
+        Argument::Result(command_ix) => {
+            command_results.insert(
+                command_ix,
+                CommandResult::MergedCoin((coin_id, total_amount_2)),
+            );
+        }
+        Argument::NestedResult(command_ix, coin_ix) => {
+            command_results
+                .get_mut(&command_ix)
+                .map(|result| match result {
+                    CommandResult::SplitCoinAmounts(_, coin_amounts) => {
+                        coin_amounts[coin_ix as usize] = total_amount_2;
+                    }
+                    _ => {}
+                });
+        }
+    }
 }
 
 pub struct TransactionKindParser<OD> {
