@@ -46,9 +46,11 @@ opt-level = 3
 # This is needed to avoid this error while doing 'cargo stack-sizes'
 #    error: undefined symbol: core::panicking::panic::
 overflow-checks = false
+lto = "fat"
 [profile.release]
 opt-level = 3
 overflow-checks = false
+lto = "fat"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax"))'] }
