@@ -1,3 +1,4 @@
+use crate::ctx::RunCtx;
 use crate::implementation::*;
 use crate::interface::*;
 use crate::settings::*;
@@ -9,12 +10,13 @@ use arrayvec::ArrayVec;
 use core::future::Future;
 use ledger_log::trace;
 
-pub type APDUsFuture = impl Future<Output = ()>;
+pub type APDUsFuture<'ctx> = impl Future<Output = ()> + 'ctx;
 
 #[inline(never)]
 pub fn handle_apdu_async(
     io: HostIO,
     ins: Ins,
+    ctx: &RunCtx,
     settings: Settings,
     ui: UserInterface,
 ) -> APDUsFuture {
@@ -39,9 +41,10 @@ pub fn handle_apdu_async(
             }
             Ins::Sign => {
                 trace!("Handling sign");
-                NoinlineFut(sign_apdu(io, settings, ui)).await;
+                NoinlineFut(sign_apdu(io, ctx, settings, ui)).await;
             }
             Ins::GetVersionStr => {}
+            Ins::Exit if ctx.is_swap() => unsafe { ledger_secure_sdk_sys::os_lib_end() },
             Ins::Exit => ledger_device_sdk::exit_app(0),
         }
     }

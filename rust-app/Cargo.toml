@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["Obsidian Systems"]
 edition = "2018"
 autobins = false
@@ -17,6 +17,8 @@ num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
 pin-project = "1.0.10"
 include_gif = "1.0.1"
+hex = { version = "0.4.3", default-features = false }
+defer = "0.2.1"
 
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable
 # speculos logging and change log level.
@@ -62,7 +64,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos",
 name = "Sui"
 path = ["44'/784'"]
 curve = ["ed25519"]
-flags = "0"
+flags = "0x800"
 
 [package.metadata.ledger.nanox]
 icon = "sui-small.gif"
