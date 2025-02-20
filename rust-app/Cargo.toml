@@ -20,7 +20,7 @@ include_gif = "1.0.1"
 [features]
 default = [ ]
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable speculos logging and change log level.
-speculos = [ "ledger_device_sdk/speculos", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
+speculos = [ "ledger_device_sdk/speculos", "ledger_device_sdk/debug", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
 extra_debug = ["ledger-log/log_trace"]
 pending_review_screen = []
 
