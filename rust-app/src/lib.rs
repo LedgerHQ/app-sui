@@ -42,6 +42,8 @@ pub mod handle_apdu;
 #[cfg(target_family = "bolos")]
 pub mod implementation;
 
+pub mod parser;
+
 #[cfg(target_family = "bolos")]
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 pub mod menu;
