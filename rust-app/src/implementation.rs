@@ -1,5 +1,8 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
+use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest};
+use crate::parser::object::object_parser;
+use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
@@ -7,13 +10,12 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::ArrayVec;
-use ledger_crypto_helpers::common::{try_option, Address};
+use ledger_crypto_helpers::common::{try_option, Address, HexSlice};
 use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::{StatusWords, SyscallError};
-use ledger_log::trace;
+use ledger_log::{info, trace};
 use ledger_parser_combinators::async_parser::*;
-use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
 use core::convert::TryFrom;
@@ -66,570 +68,6 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-pub enum CallArg {
-    RecipientAddress(SuiAddressRaw),
-    Amount(u64),
-    OtherPure,
-    ObjectArg,
-}
-
-impl HasOutput<CallArgSchema> for DefaultInterp {
-    type Output = CallArg;
-}
-
-impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    let length =
-                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
-                            .await;
-                    trace!("CallArgSchema: Pure: length: {}", length);
-                    match length {
-                        8 => CallArg::Amount(
-                            <DefaultInterp as AsyncParser<Amount, BS>>::parse(
-                                &DefaultInterp,
-                                input,
-                            )
-                            .await,
-                        ),
-                        32 => CallArg::RecipientAddress(
-                            <DefaultInterp as AsyncParser<Recipient, BS>>::parse(
-                                &DefaultInterp,
-                                input,
-                            )
-                            .await,
-                        ),
-                        _ => {
-                            for _ in 0..length {
-                                let _: [u8; 1] = input.read().await;
-                            }
-                            CallArg::OtherPure
-                        }
-                    }
-                }
-                1 => {
-                    let enum_variant =
-                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
-                            .await;
-                    match enum_variant {
-                        0 => {
-                            trace!("CallArgSchema: ObjectArg: ImmOrOwnedObject");
-                            object_ref_parser().parse(input).await;
-                        }
-                        1 => {
-                            trace!("CallArgSchema: ObjectArg: SharedObject");
-                            <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
-                                SharedObject,
-                                BS,
-                            >>::parse(
-                                &(DefaultInterp, DefaultInterp, DefaultInterp), input
-                            )
-                            .await;
-                        }
-                        _ => {
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    }
-                    CallArg::ObjectArg
-                }
-                _ => {
-                    trace!("CallArgSchema: Unknown enum: {}", enum_variant);
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-pub const TRANSFER_OBJECT_ARRAY_LENGTH: usize = 1;
-pub const SPLIT_COIN_ARRAY_LENGTH: usize = 8;
-
-pub enum Command {
-    TransferObject(ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>, Argument),
-    SplitCoins(Argument, ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>),
-}
-
-impl HasOutput<CommandSchema> for DefaultInterp {
-    type Output = Command;
-}
-
-impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                1 => {
-                    trace!("CommandSchema: TransferObject");
-                    let v1 = <SubInterp<DefaultInterp> as AsyncParser<
-                        Vec<ArgumentSchema, TRANSFER_OBJECT_ARRAY_LENGTH>,
-                        BS,
-                    >>::parse(&SubInterp(DefaultInterp), input)
-                    .await;
-                    let v2 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
-                    Command::TransferObject(v1, v2)
-                }
-                2 => {
-                    trace!("CommandSchema: SplitCoins");
-                    let v1 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
-                    let v2 = <SubInterp<DefaultInterp> as AsyncParser<
-                        Vec<ArgumentSchema, SPLIT_COIN_ARRAY_LENGTH>,
-                        BS,
-                    >>::parse(&SubInterp(DefaultInterp), input)
-                    .await;
-                    Command::SplitCoins(v1, v2)
-                }
-                _ => {
-                    trace!("CommandSchema: Unknown enum: {}", enum_variant);
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-pub enum Argument {
-    GasCoin,
-    Input(u16),
-    Result(u16),
-    NestedResult(u16, u16),
-}
-
-impl HasOutput<ArgumentSchema> for DefaultInterp {
-    type Output = Argument;
-}
-
-impl<BS: Clone + Readable> AsyncParser<ArgumentSchema, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    trace!("ArgumentSchema: GasCoin");
-                    Argument::GasCoin
-                }
-                1 => {
-                    trace!("ArgumentSchema: Input");
-                    Argument::Input(
-                        <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
-                            .await,
-                    )
-                }
-                2 => {
-                    trace!("ArgumentSchema: Result");
-                    Argument::Result(
-                        <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
-                            .await,
-                    )
-                }
-                3 => {
-                    trace!("ArgumentSchema: NestedResult");
-                    Argument::NestedResult(
-                        <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
-                            .await,
-                        <DefaultInterp as AsyncParser<U16LE, BS>>::parse(&DefaultInterp, input)
-                            .await,
-                    )
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-impl HasOutput<ProgrammableTransaction> for ProgrammableTransaction {
-    type Output = (
-        <DefaultInterp as HasOutput<Recipient>>::Output,
-        <DefaultInterp as HasOutput<Amount>>::Output,
-    );
-}
-
-impl<BS: Clone + Readable> AsyncParser<ProgrammableTransaction, BS> for ProgrammableTransaction {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let mut recipient_addr = None;
-            let mut recipient_index = None;
-            let mut amounts: ArrayVec<(u64, u32), SPLIT_COIN_ARRAY_LENGTH> = ArrayVec::new();
-
-            // Handle inputs
-            {
-                let length =
-                    <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-
-                trace!("ProgrammableTransaction: Inputs: {}", length);
-                for i in 0..length {
-                    let arg = <DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
-                    match arg {
-                        CallArg::RecipientAddress(addr) => match recipient_addr {
-                            None => {
-                                recipient_addr = Some(addr);
-                                recipient_index = Some(i);
-                            }
-                            // Reject on multiple RecipientAddress(s)
-                            _ => {
-                                reject_on(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await
-                            }
-                        },
-                        CallArg::Amount(amt) =>
-                        {
-                            #[allow(clippy::single_match)]
-                            match amounts.try_push((amt, i)) {
-                                Err(_) => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            if recipient_index.is_none() || amounts.is_empty() {
-                reject_on::<()>(
-                    core::file!(),
-                    core::line!(),
-                    SyscallError::NotSupported as u16,
-                )
-                .await;
-            }
-
-            let recipient = match recipient_addr {
-                Some(addr) => addr,
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            };
-
-            let mut verified_recipient = false;
-            let mut total_amount: u64 = 0;
-            // Handle commands
-            {
-                let length =
-                    <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                trace!("ProgrammableTransaction: Commands: {}", length);
-                for _ in 0..length {
-                    let c = <DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
-                    match c {
-                        Command::TransferObject(_nested_results, recipient_input) => {
-                            if verified_recipient {
-                                // Reject more than one TransferObject(s)
-                                reject_on::<()>(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await;
-                            }
-                            match recipient_input {
-                                Argument::Input(inp_index) => {
-                                    if Some(inp_index as u32) != recipient_index {
-                                        trace!("TransferObject recipient mismatch");
-                                        reject_on::<()>(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await;
-                                    }
-                                    verified_recipient = true;
-                                }
-                                _ => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            }
-                        }
-                        Command::SplitCoins(coin, input_indices) => {
-                            match coin {
-                                Argument::GasCoin => {}
-                                _ => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            }
-                            for arg in &input_indices {
-                                match arg {
-                                    Argument::Input(inp_index) => {
-                                        for (amt, ix) in &amounts {
-                                            if *ix == (*inp_index as u32) {
-                                                match total_amount.checked_add(*amt) {
-                                                    Some(t) => total_amount = t,
-                                                    None => {
-                                                        reject_on(
-                                                            core::file!(),
-                                                            core::line!(),
-                                                            SyscallError::InvalidParameter as u16,
-                                                        )
-                                                        .await
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        reject_on(
-                                            core::file!(),
-                                            core::line!(),
-                                            SyscallError::NotSupported as u16,
-                                        )
-                                        .await
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !verified_recipient {
-                reject_on::<()>(
-                    core::file!(),
-                    core::line!(),
-                    SyscallError::NotSupported as u16,
-                )
-                .await;
-            }
-
-            (recipient, total_amount)
-        }
-    }
-}
-
-impl HasOutput<TransactionKind> for TransactionKind {
-    type Output = <ProgrammableTransaction as HasOutput<ProgrammableTransaction>>::Output;
-}
-
-impl<BS: Clone + Readable> AsyncParser<TransactionKind, BS> for TransactionKind {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    trace!("TransactionKind: ProgrammableTransaction");
-                    <ProgrammableTransaction as AsyncParser<ProgrammableTransaction, BS>>::parse(
-                        &ProgrammableTransaction,
-                        input,
-                    )
-                    .await
-                }
-                _ => {
-                    trace!("TransactionKind: {}", enum_variant);
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-impl HasOutput<TransactionExpiration> for DefaultInterp {
-    type Output = ();
-}
-
-impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    trace!("TransactionExpiration: None");
-                }
-                1 => {
-                    trace!("TransactionExpiration: Epoch");
-                    <DefaultInterp as AsyncParser<EpochId, BS>>::parse(&DefaultInterp, input).await;
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-const fn gas_data_parser<BS: Clone + Readable>() -> impl AsyncParser<GasData, BS, Output = u64> {
-    Action(
-        (
-            SubInterp(object_ref_parser()),
-            DefaultInterp,
-            DefaultInterp,
-            DefaultInterp,
-        ),
-        |(_, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
-            // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
-            // gas price. We only care about the total, not the price or amount in isolation , so we
-            // just ignore that field.
-            //
-            // C.F. https://github.com/MystenLabs/sui/pull/8676
-            Some(gas_budget)
-        },
-    )
-}
-
-const fn object_ref_parser<BS: Readable>() -> impl AsyncParser<ObjectRef, BS, Output = ()> {
-    Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| Some(()))
-}
-
-const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
-    Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| {
-        trace!("Intent Ok");
-        Some(())
-    })
-}
-
-type TransactionDataV1Output = (<TransactionKind as HasOutput<TransactionKind>>::Output, u64);
-
-const fn transaction_data_v1_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output> {
-    Action(
-        (
-            TransactionKind,
-            DefaultInterp,
-            gas_data_parser(),
-            DefaultInterp,
-        ),
-        |(v, _, gas_budget, _)| Some((v, gas_budget)),
-    )
-}
-
-impl HasOutput<TransactionData> for TransactionData {
-    type Output = TransactionDataV1Output;
-}
-
-impl<BS: Clone + Readable> AsyncParser<TransactionData, BS> for TransactionData {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    trace!("TransactionData: V1");
-                    transaction_data_v1_parser().parse(input).await
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-const fn tx_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<IntentMessage, BS, Output = <TransactionData as HasOutput<TransactionData>>::Output>
-{
-    Action((intent_parser(), TransactionData), |(_, d)| Some(d))
-}
-
 async fn prompt_tx_params(
     ui: &UserInterface,
     path: &[u32],
@@ -662,27 +100,32 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         }
     });
 
-    let mut input = match io.get_params::<2>() {
+    let mut input = match io.get_params::<3>() {
         Some(v) => v,
         None => reject(SyscallError::InvalidParameter as u16).await,
     };
+
+    info!("input length {}", input.len());
 
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
     let known_txn = {
         let mut txn = input[0].clone();
+        let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
         NoinlineFut(async move {
-            trace!("Beginning check parse");
-            TryFuture(tx_parser().parse(&mut txn)).await.is_some()
+            info!("Beginning tx_parse");
+            TryFuture(tx_parser(object_data_source).parse(&mut txn)).await
         })
         .await
     };
 
-    if known_txn {
-        let mut txn = input[0].clone();
-        let ((recipient, total_amount), gas_budget) = tx_parser().parse(&mut txn).await;
-
+    if let Some(KnownTx::TransferTx {
+        recipient,
+        total_amount,
+        gas_budget,
+    }) = known_txn
+    {
         let mut bs = input[1].clone();
         let path = BIP_PATH_PARSER.parse(&mut bs).await;
         if !path.starts_with(&BIP32_PREFIX[0..2]) {
@@ -723,7 +166,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
         }
         let hash: HexHash<32> = hasher.finalize();
-        if !known_txn {
+        if known_txn.is_none() {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {
                 reject::<()>(StatusWords::UserCancelled as u16).await;
@@ -743,4 +186,77 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     // Does nothing if not a swap mode
     ctx.set_swap_sign_success();
+}
+
+#[derive(Clone)]
+struct WithObjectData {
+    bs: ByteStream,
+}
+
+impl HasObjectData for WithObjectData {
+    type State<'c> = impl Future<Output = Option<ObjectData>> + 'c;
+
+    fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c> {
+        async move {
+            let mut bs = self.bs.clone();
+            let objects_count: Option<usize> =
+                TryFuture(bs.read()).await.map(|v| usize::from_le_bytes(v));
+
+            match objects_count {
+                None => None,
+                Some(0) => None,
+                Some(c) => {
+                    info!("get_object_data: objects_count {}", c);
+                    for _ in 0..c {
+                        let length = usize::from_le_bytes(bs.read().await);
+                        let obj_start_bs = bs.clone();
+                        let mut obj_start_bs2 = bs.clone();
+
+                        // This somehows fixes crashes, perhaps due to stack size issues
+                        for _ in 0..length {
+                            let _: [u8; 1] = bs.read().await;
+                        }
+
+                        let hash: HexHash<32> = NoinlineFut(async move {
+                            let mut hasher: Blake2b = Hasher::new();
+                            let mut bs = obj_start_bs;
+                            let salt = b"Object::";
+                            hasher.update(salt);
+                            {
+                                const CHUNK_SIZE: usize = 128;
+                                let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
+                                for _ in 0..chunks {
+                                    let b: [u8; CHUNK_SIZE] = bs.read().await;
+                                    hasher.update(&b);
+                                }
+                                for _ in 0..rem {
+                                    let b: [u8; 1] = bs.read().await;
+                                    hasher.update(&b);
+                                }
+                            }
+                            hasher.finalize::<HexHash<32>>()
+                        })
+                        .await;
+
+                        if hash.0 == digest[1..33] {
+                            info!(
+                                "get_object_data: found object with digest {}",
+                                HexSlice(digest)
+                            );
+                            // Found object, now try to parse
+                            return NoinlineFut(TryFuture(
+                                object_parser().parse(&mut obj_start_bs2),
+                            ))
+                            .await;
+                        }
+                    }
+                    info!(
+                        "get_object_data: did not found object with digest {}",
+                        HexSlice(digest)
+                    );
+                    None
+                }
+            }
+        }
+    }
 }

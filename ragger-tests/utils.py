@@ -32,7 +32,7 @@ def run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, check_result):
     future_apdu = executor.submit(apdu_task)
 
     # Submit nav_task after a delay
-    future_nav = executor.submit(lambda: time.sleep(2) or nav_task())
+    future_nav = executor.submit(lambda: time.sleep(5) or nav_task())
 
     try:
         # Wait for both futures to complete
