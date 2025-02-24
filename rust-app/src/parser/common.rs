@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use core::future::Future;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
@@ -31,11 +32,26 @@ pub type SuiAddressRaw = [u8; SUI_ADDRESS_LENGTH];
 pub type ObjectDigest = <DefaultInterp as HasOutput<ObjectDigestSchema>>::Output;
 
 pub type CoinID = [u8; 32];
-pub type CoinData = (CoinID, u64);
+
+// Max string length which will be shown to the user
+// For parsing longer length is also handled, but it will be truncated to this
+pub const COIN_STRING_LENGTH: usize = 16;
+
+pub type CoinModuleName = ArrayVec<u8, COIN_STRING_LENGTH>;
+pub type CoinFunctionName = ArrayVec<u8, COIN_STRING_LENGTH>;
+
+pub type CoinType = (CoinID, CoinModuleName, CoinFunctionName);
+
+pub type CoinData = (CoinType, u64);
 
 pub const SUI_COIN_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ];
+
+// This does not contain the correct module and function names, as we don't have a way to create const ArrayVec with them
+pub const SUI_COIN_TYPE: CoinType = (SUI_COIN_ID, ArrayVec::new_const(), ArrayVec::new_const());
+
+pub const SUI_COIN_DIVISOR: u8 = 9;
 
 pub type ObjectData = CoinData;
 

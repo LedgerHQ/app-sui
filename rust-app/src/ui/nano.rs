@@ -1,9 +1,12 @@
 use crate::interface::*;
+use crate::parser::common::{CoinType, SUI_COIN_DIVISOR};
+use crate::ui::common::*;
 use crate::utils::*;
 
 extern crate alloc;
 use alloc::format;
 
+use either::*;
 use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::HexHash;
 
@@ -42,42 +45,53 @@ impl UserInterface {
         address: &SuiPubKeyAddress,
         recipient: [u8; 32],
         total_amount: u64,
+        coin_type: CoinType,
         gas_budget: u64,
     ) -> Option<()> {
-        let fields = [
-            Field {
-                name: "From",
-                value: &format!("{address}"),
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let to = Field {
+            name: "To",
+            value: &format!("0x{}", HexSlice(&recipient)),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
             },
-            Field {
-                name: "To",
-                value: &format!("0x{}", HexSlice(&recipient)),
-            },
-            Field {
-                name: "Amount",
-                value: {
-                    let (quotient, remainder_str) = get_amount_in_decimals(total_amount);
-                    &format!("SUI {}.{}", quotient, remainder_str.as_str())
-                },
-            },
-            Field {
-                name: "Max Gas",
-                value: {
-                    let (quotient, remainder_str) = get_amount_in_decimals(gas_budget);
-                    &format!("SUI {}.{}", quotient, remainder_str.as_str())
-                },
-            },
-        ];
-        let success = MultiFieldReview::new(
-            &fields,
-            &[&"Review", &"transaction"],
-            Some(&EYE),
-            &"Accept and send",
-            Some(&CHECKMARK),
-            &"Reject",
-            Some(&CROSS),
-        )
-        .show();
+        };
+        let ((amt_str, amt_val), coin_fields) = get_coin_and_amount_fields(total_amount, coin_type);
+        let amt = Field {
+            name: amt_str.as_str(),
+            value: amt_val.as_str(),
+        };
+
+        let do_review = |fields| {
+            MultiFieldReview::new(
+                fields,
+                &[&"Review", &"transaction"],
+                Some(&EYE),
+                &"Accept and send",
+                Some(&CHECKMARK),
+                &"Reject",
+                Some(&CROSS),
+            )
+            .show()
+        };
+        let success = match coin_fields {
+            Left(_ticker) => do_review(&[from, to, amt, gas]),
+            Right((coin_str, id_str)) => {
+                let coin = Field {
+                    name: coin_str.as_str(),
+                    value: id_str.as_str(),
+                };
+                do_review(&[from, to, coin, amt, gas])
+            }
+        };
         if success {
             Some(())
         } else {

@@ -52,7 +52,7 @@ pub enum MoveObjectType {
     /// A record of a staked SUI coin (i.e., `0x3::staking_pool::StakedSui`)
     StakedSui,
     /// A non-SUI coin type (i.e., `0x2::coin::Coin<T> where T != 0x2::sui::SUI`)
-    Coin(CoinID),
+    Coin((CoinID, CoinModuleName, CoinFunctionName)),
 }
 
 // Parsers
@@ -121,15 +121,15 @@ pub const fn move_object_parser<BS: Clone + Readable>(
             info!("SequenceNumber {}", sequence_number);
             match d.into_inner() {
                 Ok(c) => {
-                    let uid: [u8; 32] = match object_type {
-                        MoveObjectType::GasCoin => SUI_COIN_ID,
-                        MoveObjectType::StakedSui => SUI_COIN_ID,
-                        MoveObjectType::Coin(coin_id) => coin_id,
+                    let coin_type: CoinType = match object_type {
+                        MoveObjectType::GasCoin => SUI_COIN_TYPE,
+                        MoveObjectType::StakedSui => SUI_COIN_TYPE,
+                        MoveObjectType::Coin(v) => v,
                     };
                     let amount: u64 =
                         u64::from_le_bytes(c[32..].try_into().expect("amount slice wrong length"));
-                    info!("CoinData 0x{}, {}", HexSlice(&uid), amount);
-                    Some((uid, amount))
+                    info!("CoinData 0x{}, {}", HexSlice(&coin_type.0), amount);
+                    Some((coin_type, amount))
                 }
                 Err(_) => {
                     info!("ObjectContents not of len 40");
@@ -173,11 +173,11 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
                 }
                 3 => {
                     info!("MoveObjectType: Coin(TypeTag)");
-                    if let Some(coin_id) =
+                    if let Some((coin_id, module, name)) =
                         <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
                             .await
                     {
-                        MoveObjectType::Coin(coin_id)
+                        MoveObjectType::Coin((coin_id, module, name))
                     } else {
                         reject_on(
                             core::file!(),
@@ -201,7 +201,7 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
 }
 
 pub const fn struct_tag_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTag, BS, Output = CoinID> {
+) -> impl AsyncParser<StructTag, BS, Output = (CoinID, CoinModuleName, CoinFunctionName)> {
     Action(
         (
             DefaultInterp,
@@ -209,7 +209,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             SubInterp(DefaultInterp),
             SubInterp(DefaultInterp),
         ),
-        |(address, module, name, type_tags): (
+        |(address, mut module, mut name, type_tags): (
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
@@ -225,13 +225,20 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", type_tags.len());
-            Some(address)
+            Some((
+                address,
+                module
+                    .drain(..module.len().min(COIN_STRING_LENGTH))
+                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
+                name.drain(..name.len().min(COIN_STRING_LENGTH))
+                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
+            ))
         },
     )
 }
 
 impl HasOutput<TypeTag> for DefaultInterp {
-    type Output = Option<CoinID>;
+    type Output = Option<(CoinID, CoinModuleName, CoinFunctionName)>;
 }
 
 impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {

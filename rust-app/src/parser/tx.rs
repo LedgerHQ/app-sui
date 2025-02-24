@@ -178,7 +178,7 @@ pub enum Command {
 }
 
 pub enum CommandResult {
-    SplitCoinAmounts(CoinID, ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
+    SplitCoinAmounts(CoinType, ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
     MergedCoin(CoinData),
 }
 
@@ -323,6 +323,11 @@ pub enum ProgrammableTransaction {
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         includes_gas_coin: bool,
     },
+    TransferTokenTx {
+        recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
+        amount: <DefaultInterp as HasOutput<Amount>>::Output,
+        coin_type: CoinType,
+    },
 }
 
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
@@ -385,6 +390,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             // Does not contain amount from GasCoin, in case the entire GasCoin is also being transferred
             let mut total_amount: u64 = 0;
 
+            let mut coin_type: Option<CoinType> = None;
+
             // Are we transferring entire gas coin?
             let mut includes_gas_coin: bool = false;
 
@@ -412,6 +419,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 &inputs,
                                 &mut recipient_addr,
                                 &mut total_amount,
+                                &mut coin_type,
                                 &mut includes_gas_coin,
                                 self.object_data_source.clone(),
                                 &command_results,
@@ -456,14 +464,43 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            if includes_gas_coin {
-                total_amount += added_amount_to_gas_coin;
-            }
+            let coin_type = match coin_type {
+                Some(v) => v,
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
 
-            ProgrammableTransaction::TransferSuiTx {
-                recipient,
-                amount: total_amount,
-                includes_gas_coin,
+            if coin_type.0 != SUI_COIN_ID {
+                if includes_gas_coin {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+
+                ProgrammableTransaction::TransferTokenTx {
+                    recipient,
+                    amount: total_amount,
+                    coin_type,
+                }
+            } else {
+                if includes_gas_coin {
+                    total_amount += added_amount_to_gas_coin;
+                }
+
+                ProgrammableTransaction::TransferSuiTx {
+                    recipient,
+                    amount: total_amount,
+                    includes_gas_coin,
+                }
             }
         }
     }
@@ -475,6 +512,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
     inputs: &BTreeMap<u16, InputValue>,
     recipient_addr: &mut Option<SuiAddressRaw>,
     total_amount: &mut u64,
+    coin_type: &mut Option<CoinType>,
     includes_gas_coin: &mut bool,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
@@ -514,13 +552,12 @@ async fn handle_transfer_object<OD: HasObjectData>(
             .await
         }
     }
-    let mut coin_id: Option<CoinID> = None;
     // set total_amount
     for coin in &coins {
         match coin {
             Argument::GasCoin => {
-                if let Some(id_) = coin_id {
-                    if id_ != SUI_COIN_ID {
+                if let Some((id_, _, _)) = coin_type {
+                    if *id_ != SUI_COIN_ID {
                         info!("TransferObject mismatch in coin_id(s)");
                         reject_on(
                             core::file!(),
@@ -528,9 +565,9 @@ async fn handle_transfer_object<OD: HasObjectData>(
                             SyscallError::NotSupported as u16,
                         )
                         .await
-                    } else {
-                        coin_id = Some(SUI_COIN_ID);
                     }
+                } else {
+                    *coin_type = Some(SUI_COIN_TYPE.clone());
                 }
                 *includes_gas_coin = true;
             }
@@ -539,7 +576,22 @@ async fn handle_transfer_object<OD: HasObjectData>(
                     info!("TransferObject trying object_data_source");
                     let coin_data = object_data_source.get_object_data(&digest).await;
                     match coin_data {
-                        Some((_, amt)) => *total_amount += amt,
+                        Some((coin_type_, amt)) => {
+                            if let Some(v) = coin_type {
+                                if *v != coin_type_ {
+                                    info!("TransferObject mismatch in coin_type(s)");
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            } else {
+                                *coin_type = Some(coin_type_.clone());
+                            }
+                            *total_amount += amt
+                        }
                         _ => {
                             info!("TransferObject Coin Object not found");
                             reject_on(
@@ -551,19 +603,19 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         }
                     }
                 }
-                Some(InputValue::Object((id, amt))) => {
-                    if let Some(id_) = coin_id {
-                        if id_ != *id {
-                            info!("TransferObject mismatch in coin_id(s)");
+                Some(InputValue::Object((coin_type_, amt))) => {
+                    if let Some(v) = coin_type {
+                        if *v != *coin_type_ {
+                            info!("TransferObject mismatch in coin_type(s)");
                             reject_on(
                                 core::file!(),
                                 core::line!(),
                                 SyscallError::NotSupported as u16,
                             )
                             .await
-                        } else {
-                            coin_id = Some(*id);
                         }
+                    } else {
+                        *coin_type = Some(coin_type_.clone());
                     }
                     *total_amount += amt;
                 }
@@ -596,19 +648,19 @@ async fn handle_transfer_object<OD: HasObjectData>(
                 }
             },
             Argument::NestedResult(command_ix, coin_ix) => match command_results.get(command_ix) {
-                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
-                    if let Some(id_) = coin_id {
-                        if id_ != *id {
-                            info!("TransferObject mismatch in coin_id(s)");
+                Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
+                    if let Some(v) = coin_type {
+                        if *v != *coin_type_ {
+                            info!("TransferObject mismatch in coin_type(s)");
                             reject_on(
                                 core::file!(),
                                 core::line!(),
                                 SyscallError::NotSupported as u16,
                             )
                             .await
-                        } else {
-                            coin_id = Some(*id);
                         }
+                    } else {
+                        *coin_type = Some(coin_type_.clone());
                     }
                     if let Some(amt) = coin_amounts.get(*coin_ix as usize) {
                         *total_amount += amt;
@@ -631,19 +683,19 @@ async fn handle_transfer_object<OD: HasObjectData>(
                 }
             },
             Argument::Result(command_ix) => match command_results.get(command_ix) {
-                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
-                    if let Some(id_) = coin_id {
-                        if id_ != *id {
-                            info!("TransferObject mismatch in coin_id(s)");
+                Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
+                    if let Some(v) = coin_type {
+                        if *v != *coin_type_ {
+                            info!("TransferObject mismatch in coin_type(s)");
                             reject_on(
                                 core::file!(),
                                 core::line!(),
                                 SyscallError::NotSupported as u16,
                             )
                             .await
-                        } else {
-                            coin_id = Some(*id);
                         }
+                    } else {
+                        *coin_type = Some(coin_type_.clone());
                     }
                     if coin_amounts.len() == 1 {
                         *total_amount += coin_amounts[0];
@@ -656,19 +708,19 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         .await
                     }
                 }
-                Some(CommandResult::MergedCoin((id, amt))) => {
-                    if let Some(id_) = coin_id {
-                        if id_ != *id {
-                            info!("TransferObject mismatch in coin_id(s)");
+                Some(CommandResult::MergedCoin((coin_type_, amt))) => {
+                    if let Some(v) = coin_type {
+                        if *v != *coin_type_ {
+                            info!("TransferObject mismatch in coin_type(s)");
                             reject_on(
                                 core::file!(),
                                 core::line!(),
                                 SyscallError::NotSupported as u16,
                             )
                             .await
-                        } else {
-                            coin_id = Some(*id);
                         }
+                    } else {
+                        *coin_type = Some(coin_type_.clone());
                     }
                     *total_amount += amt;
                 }
@@ -694,14 +746,14 @@ async fn handle_split_coins<OD: HasObjectData>(
 ) -> CommandResult {
     // We are not validating whether the coin balance is sufficient for the amounts specified
     // as the transaction would fail on the network with InsufficientCoinBalance error
-    let coin_id = match coin {
-        Argument::GasCoin => SUI_COIN_ID,
+    let coin_type = match coin {
+        Argument::GasCoin => SUI_COIN_TYPE,
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("SplitCoins trying object_data_source");
                 let coin_data = object_data_source.get_object_data(&digest).await;
                 match coin_data {
-                    Some((id, _)) => id,
+                    Some((v, _)) => v,
                     _ => {
                         info!("SplitCoins Coin Object not found");
                         reject_on(
@@ -713,7 +765,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((id, _))) => *id,
+            Some(InputValue::Object((v, _))) => v.clone(),
             _ => {
                 info!("SplitCoins input refers to non ObjectRef");
                 reject_on(
@@ -725,14 +777,14 @@ async fn handle_split_coins<OD: HasObjectData>(
             }
         },
         Argument::NestedResult(command_ix, _) => {
-            if let Some(id) = command_results
+            if let Some(v) = command_results
                 .get(&command_ix)
                 .and_then(|result| match result {
                     CommandResult::SplitCoinAmounts(id, _) => Some(id),
                     _ => None,
                 })
             {
-                *id
+                v.clone()
             } else {
                 reject_on(
                     core::file!(),
@@ -744,7 +796,7 @@ async fn handle_split_coins<OD: HasObjectData>(
         }
 
         Argument::Result(command_ix) => match command_results.get(&command_ix) {
-            Some(CommandResult::MergedCoin((id, _))) => *id,
+            Some(CommandResult::MergedCoin((v, _))) => v.clone(),
             _ => {
                 reject_on(
                     core::file!(),
@@ -782,7 +834,7 @@ async fn handle_split_coins<OD: HasObjectData>(
             }
         }
     }
-    CommandResult::SplitCoinAmounts(coin_id, coin_amounts)
+    CommandResult::SplitCoinAmounts(coin_type, coin_amounts)
 }
 
 async fn handle_merge_coins<OD: HasObjectData>(
@@ -794,16 +846,16 @@ async fn handle_merge_coins<OD: HasObjectData>(
     added_amount_to_gas_coin: &mut u64,
 ) {
     let mut total_amount_2: u64 = 0;
-    let coin_id = match dest_coin {
-        Argument::GasCoin => SUI_COIN_ID,
+    let coin_type = match dest_coin {
+        Argument::GasCoin => SUI_COIN_TYPE,
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("MergeCoins trying object_data_source");
                 let coin_data = object_data_source.get_object_data(&digest).await;
                 match coin_data {
-                    Some((id, amt)) => {
+                    Some((v, amt)) => {
                         total_amount_2 += amt;
-                        id
+                        v
                     }
                     _ => {
                         info!("MergeCoins Coin Object not found");
@@ -816,9 +868,9 @@ async fn handle_merge_coins<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((id, amt))) => {
+            Some(InputValue::Object((coin_type, amt))) => {
                 total_amount_2 += amt;
-                *id
+                coin_type.clone()
             }
             _ => {
                 info!("MergeCoins input refers to non ObjectRef");
@@ -831,18 +883,17 @@ async fn handle_merge_coins<OD: HasObjectData>(
             }
         },
         Argument::NestedResult(command_ix, coin_ix) => {
-            if let Some((id, amt)) =
-                command_results
-                    .get(&command_ix)
-                    .and_then(|result| match result {
-                        CommandResult::SplitCoinAmounts(id, coin_amounts) => {
-                            coin_amounts.get(coin_ix as usize).map(|amt| (id, amt))
-                        }
-                        _ => None,
-                    })
+            if let Some((v, amt)) = command_results
+                .get(&command_ix)
+                .and_then(|result| match result {
+                    CommandResult::SplitCoinAmounts(id, coin_amounts) => {
+                        coin_amounts.get(coin_ix as usize).map(|amt| (id, amt))
+                    }
+                    _ => None,
+                })
             {
                 total_amount_2 += amt;
-                *id
+                v.clone()
             } else {
                 reject_on(
                     core::file!(),
@@ -878,9 +929,9 @@ async fn handle_merge_coins<OD: HasObjectData>(
                     info!("MergeCoins trying object_data_source");
                     let coin_data = object_data_source.get_object_data(&digest).await;
                     match coin_data {
-                        Some((id, amt)) => {
-                            if id != coin_id {
-                                info!("MergeCoins mismatch in coin_id(s)");
+                        Some((coin_type_, amt)) => {
+                            if coin_type_ != coin_type {
+                                info!("MergeCoins mismatch in coin_type(s)");
                                 reject_on(
                                     core::file!(),
                                     core::line!(),
@@ -901,9 +952,9 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         }
                     }
                 }
-                Some(InputValue::Object((id, amt))) => {
-                    if *id != coin_id {
-                        info!("MergeCoins mismatch in coin_id(s)");
+                Some(InputValue::Object((coin_type_, amt))) => {
+                    if *coin_type_ != coin_type {
+                        info!("MergeCoins mismatch in coin_type(s)");
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -927,8 +978,8 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 if let Some(amt) = command_results
                     .get(command_ix)
                     .and_then(|result| match result {
-                        CommandResult::SplitCoinAmounts(id, coin_amounts) => {
-                            if *id != coin_id {
+                        CommandResult::SplitCoinAmounts(coin_type_, coin_amounts) => {
+                            if *coin_type_ != coin_type {
                                 None
                             } else {
                                 coin_amounts.get(*coin_ix as usize)
@@ -948,8 +999,8 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 }
             }
             Argument::Result(command_ix) => match command_results.get(command_ix) {
-                Some(CommandResult::SplitCoinAmounts(id, coin_amounts)) => {
-                    if *id != coin_id {
+                Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
+                    if *coin_type_ != coin_type {
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -961,8 +1012,8 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         total_amount_2 += amt;
                     }
                 }
-                Some(CommandResult::MergedCoin((id, amt))) => {
-                    if *id != coin_id {
+                Some(CommandResult::MergedCoin((coin_type_, amt))) => {
+                    if *coin_type_ != coin_type {
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -990,12 +1041,12 @@ async fn handle_merge_coins<OD: HasObjectData>(
             *added_amount_to_gas_coin += total_amount_2;
         }
         Argument::Input(input_ix) => {
-            inputs.insert(input_ix, InputValue::Object((coin_id, total_amount_2)));
+            inputs.insert(input_ix, InputValue::Object((coin_type, total_amount_2)));
         }
         Argument::Result(command_ix) => {
             command_results.insert(
                 command_ix,
-                CommandResult::MergedCoin((coin_id, total_amount_2)),
+                CommandResult::MergedCoin((coin_type, total_amount_2)),
             );
         }
         Argument::NestedResult(command_ix, coin_ix) => {
@@ -1211,6 +1262,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 pub enum KnownTx {
     TransferTx {
         recipient: SuiAddressRaw,
+        coin_type: CoinType,
         total_amount: u64,
         gas_budget: u64,
     },
@@ -1243,7 +1295,21 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
 
                     total_amount_.map(|total_amount| KnownTx::TransferTx {
                         recipient,
+                        coin_type: SUI_COIN_TYPE,
                         total_amount,
+                        gas_budget,
+                    })
+                }
+                ProgrammableTransaction::TransferTokenTx {
+                    recipient,
+                    amount,
+                    coin_type,
+                } => {
+                    let (gas_budget, _) = d.1;
+                    Some(KnownTx::TransferTx {
+                        recipient,
+                        coin_type,
+                        total_amount: amount,
                         gas_budget,
                     })
                 }

@@ -24,7 +24,7 @@ use crate::interface::SuiPubKeyAddress;
 use crate::main_nanos::app_main;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 use crate::main_stax::app_main;
-use crate::{ctx::RunCtx, utils::get_amount_in_decimals};
+use crate::{ctx::RunCtx, parser::common::SUI_COIN_DIVISOR, utils::get_amount_in_decimals};
 
 pub mod panic_handler;
 pub mod params;
@@ -68,7 +68,7 @@ pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
 // Max sui amount 10_000_000_000 SUI.
 // So max string length is 11 (quotient) + 1 (dot) + 12 (reminder) + 4 (text) = 28
 pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayString<28>, Error> {
-    let (quotient, remainder_str) = get_amount_in_decimals(params.amount);
+    let (quotient, remainder_str) = get_amount_in_decimals(params.amount, SUI_COIN_DIVISOR);
 
     let mut printable_amount = ArrayString::<28>::default();
     write!(&mut printable_amount, "SUI {}.{}", quotient, remainder_str)
