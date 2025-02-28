@@ -82,7 +82,6 @@ def test_sign_tx_sui_whole_gas_coin(backend, scenario_navigator, firmware, navig
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -183,7 +182,6 @@ def test_sign_tx_sui_whole_gas_plus_input_coin(backend, scenario_navigator, firm
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -302,7 +300,6 @@ def test_sign_tx_sui_split_gas_plus_input_coin(backend, scenario_navigator, firm
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -399,7 +396,6 @@ def test_sign_tx_sui_whole_input_coin(backend, scenario_navigator, firmware, nav
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -508,7 +504,6 @@ def test_sign_tx_sui_whole_two_input_coin(backend, scenario_navigator, firmware,
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -624,7 +619,6 @@ def test_sign_tx_sui_merge_two_input_coin(backend, scenario_navigator, firmware,
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
