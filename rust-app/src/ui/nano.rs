@@ -25,9 +25,9 @@ impl UserInterface {
             &[&"Provide Public Key"],
             None,
             &"Approve",
-            None,
+            Some(&CHECKMARK),
             &"Reject",
-            None,
+            Some(&CROSS),
         )
         .show();
         if success {
