@@ -145,7 +145,6 @@ def test_sign_tx_sui_two_split_transfer(backend, scenario_navigator, firmware, n
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -283,7 +282,6 @@ def test_sign_tx_sui_split_merge(backend, scenario_navigator, firmware, navigato
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -414,7 +412,6 @@ def test_sign_tx_sui_split_merge_to_gas(backend, scenario_navigator, firmware, n
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -586,7 +583,6 @@ def test_sign_tx_sui_two_split_merge_to_gas(backend, scenario_navigator, firmwar
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10

@@ -30,7 +30,6 @@ def test_sign_tx_sui_transfer(backend, scenario_navigator, firmware, navigator):
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.BOTH_CLICK
                               ]
                 , timeout=10
@@ -65,7 +64,6 @@ def test_sign_tx_blind_sign(backend, scenario_navigator, firmware, navigator):
             navigator.navigate_and_compare(
                 instructions=[ NavInsID.RIGHT_CLICK # Warning...
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # Transaction Hash
-                               , NavInsID.RIGHT_CLICK # Blind Sign Transaction?
                                , NavInsID.BOTH_CLICK]
                 , timeout=10
                 , path=scenario_navigator.screenshot_path
@@ -122,7 +120,6 @@ def test_sign_tx_refused(backend, scenario_navigator, firmware, navigator):
                                , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
                                , NavInsID.RIGHT_CLICK # Amount
                                , NavInsID.RIGHT_CLICK # Max Gas
-                               , NavInsID.RIGHT_CLICK # Sign Transaction?
                                , NavInsID.RIGHT_CLICK # Confirm
                                , NavInsID.BOTH_CLICK
                               ]
