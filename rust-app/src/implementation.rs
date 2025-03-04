@@ -150,7 +150,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             check_tx_params(expected, &tx_params).await;
         } else {
             // Show prompts after all inputs have been parsed
-            prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type).await;
+            NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type)).await;
         }
     } else if !settings.get_blind_sign() || ctx.is_swap() {
         ui.warn_tx_not_recognized();

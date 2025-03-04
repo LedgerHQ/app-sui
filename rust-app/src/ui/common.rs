@@ -75,6 +75,7 @@ struct KnownCoin<'a> {
     ticker: &'a str,
 }
 
+#[inline(never)]
 fn get_known_coin_ticker(coin_type: &CoinType) -> Option<(ArrayString<8>, u8)> {
     let known_coins: [KnownCoin; 3] = [
         KnownCoin {
