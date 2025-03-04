@@ -19,6 +19,7 @@ pin-project = "1.0.10"
 include_gif = "1.0.1"
 hex = { version = "0.4.3", default-features = false }
 defer = "0.2.1"
+either = { version = "1.14.0", default-features = false }
 
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable
 # speculos logging and change log level.

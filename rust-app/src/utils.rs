@@ -28,8 +28,8 @@ impl<F: Future> Future for NoinlineFut<F> {
 
 use arrayvec::ArrayString;
 
-pub fn get_amount_in_decimals(amount: u64) -> (u64, ArrayString<12>) {
-    let factor_pow = 9;
+pub fn get_amount_in_decimals(amount: u64, divisor: u8) -> (u64, ArrayString<12>) {
+    let factor_pow = divisor as u32;
     let factor = u64::pow(10, factor_pow);
     let quotient = amount / factor;
     let remainder = amount % factor;

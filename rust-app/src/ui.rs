@@ -7,3 +7,5 @@ pub use nbgl::*;
 pub mod nano;
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 pub use nano::*;
+
+pub mod common;

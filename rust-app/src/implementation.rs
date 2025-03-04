@@ -1,6 +1,6 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest};
+use crate::parser::common::{CoinType, HasObjectData, ObjectData, ObjectDigest, SUI_COIN_ID};
 use crate::parser::object::object_parser;
 use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
@@ -76,9 +76,10 @@ async fn prompt_tx_params(
         fee,
         destination_address,
     }: TxParams,
+    coin_type: CoinType,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, destination_address, amount, fee))
+        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee))
     })
     .ok()
     .is_none()
@@ -120,9 +121,12 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         .await
     };
 
+    let is_unknown_txn = known_txn.is_none();
+
     if let Some(KnownTx::TransferTx {
         recipient,
         total_amount,
+        coin_type,
         gas_budget,
     }) = known_txn
     {
@@ -139,11 +143,14 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         };
 
         if ctx.is_swap() {
+            if coin_type.0 != SUI_COIN_ID {
+                reject::<()>(SyscallError::NotSupported as u16).await;
+            }
             let expected = ctx.get_swap_tx_params();
             check_tx_params(expected, &tx_params).await;
         } else {
             // Show prompts after all inputs have been parsed
-            prompt_tx_params(&ui, path.as_slice(), tx_params).await;
+            NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type)).await;
         }
     } else if !settings.get_blind_sign() || ctx.is_swap() {
         ui.warn_tx_not_recognized();
@@ -166,7 +173,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
         }
         let hash: HexHash<32> = hasher.finalize();
-        if known_txn.is_none() {
+        if is_unknown_txn {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {
                 reject::<()>(StatusWords::UserCancelled as u16).await;
