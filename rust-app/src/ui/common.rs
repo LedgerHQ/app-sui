@@ -10,6 +10,7 @@ use arrayvec::ArrayVec;
 use either::*;
 use ledger_crypto_helpers::common::HexSlice;
 
+#[inline(never)]
 pub fn get_coin_and_amount_fields(
     total_amount: u64,
     coin_type: CoinType,
