@@ -6,6 +6,7 @@ use alloc::collections::BTreeMap;
 use arrayvec::ArrayVec;
 use core::convert::TryFrom;
 use core::future::Future;
+use either::*;
 use ledger_device_sdk::io::SyscallError;
 use ledger_log::info;
 use ledger_parser_combinators::async_parser::*;
@@ -68,7 +69,9 @@ pub type GasData = (u64, Option<u64>);
 pub enum CallArg {
     RecipientAddress(SuiAddressRaw),
     Amount(u64),
+    OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
+    SharedObject(CoinID),
     Other,
 }
 
@@ -76,7 +79,9 @@ pub enum CallArg {
 pub enum InputValue {
     RecipientAddress(SuiAddressRaw),
     Amount(u64),
+    OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
+    SharedObject(CoinID),
     Object(CoinData),
     // ^ mutable via MergeCoins
 }
@@ -108,6 +113,13 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             )
                             .await,
                         ),
+                        1 | 9 => CallArg::OptionalAmount(
+                            <SubInterp<DefaultInterp> as AsyncParser<Option<Amount>, BS>>::parse(
+                                &SubInterp(DefaultInterp),
+                                input,
+                            )
+                            .await,
+                        ),
                         32 => CallArg::RecipientAddress(
                             <DefaultInterp as AsyncParser<Recipient, BS>>::parse(
                                 &DefaultInterp,
@@ -134,14 +146,15 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         }
                         1 => {
                             info!("CallArgSchema: ObjectRef: SharedObject");
-                            <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
-                                SharedObject,
-                                BS,
-                            >>::parse(
-                                &(DefaultInterp, DefaultInterp, DefaultInterp), input
-                            )
-                            .await;
-                            CallArg::Other
+                            let (object_id, _, _) =
+                                <(DefaultInterp, DefaultInterp, DefaultInterp) as AsyncParser<
+                                    SharedObject,
+                                    BS,
+                                >>::parse(
+                                    &(DefaultInterp, DefaultInterp, DefaultInterp), input
+                                )
+                                .await;
+                            CallArg::SharedObject(object_id)
                         }
                         _ => {
                             reject_on(
@@ -167,19 +180,107 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
     }
 }
 
+pub struct TypeInput;
+
+impl HasOutput<TypeInput> for DefaultInterp {
+    type Output = ();
+}
+
+impl<BS: Clone + Readable> AsyncParser<TypeInput, BS> for DefaultInterp {
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
+    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
+        async move {
+            let enum_variant =
+                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+            match enum_variant {
+                0 => {
+                    info!("TypeInput: Bool");
+                }
+                1 => {
+                    info!("TypeInput: U8");
+                }
+                2 => {
+                    info!("TypeInput: U64");
+                }
+                3 => {
+                    info!("TypeInput: U128");
+                }
+                4 => {
+                    info!("TypeInput: Address");
+                }
+                5 => {
+                    info!("TypeInput: Signer");
+                }
+                6 => {
+                    info!("TypeInput: Vector(Box<TypeInput>)");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+                7 => {
+                    info!("TypeInput: Struct(Box<StructInput>)");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+                8 => {
+                    info!("TypeInput: U16");
+                }
+                9 => {
+                    info!("TypeInput: U32");
+                }
+                10 => {
+                    info!("TypeInput: U256");
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+}
+
+pub const MOVE_CALL_ARGS_ARRAY_LENGTH: usize = 8;
 pub const TRANSFER_OBJECT_ARRAY_LENGTH: usize = 8;
 pub const SPLIT_COIN_ARRAY_LENGTH: usize = 8;
 pub const MERGE_COIN_ARRAY_LENGTH: usize = 8;
+pub const MAKE_MOVE_VEC_ARRAY_LENGTH: usize = 8;
+
+pub const STRING_LENGTH: usize = 32;
+pub type String = Vec<Byte, STRING_LENGTH>;
 
 pub enum Command {
+    MoveCall(
+        CoinID,
+        ArrayVec<u8, STRING_LENGTH>,
+        ArrayVec<u8, STRING_LENGTH>,
+        ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+    ),
     TransferObject(ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>, Argument),
     SplitCoins(Argument, ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>),
     MergeCoins(Argument, ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>),
+    MakeMoveVec(ArrayVec<Argument, MAKE_MOVE_VEC_ARRAY_LENGTH>),
 }
 
 pub enum CommandResult {
     SplitCoinAmounts(CoinType, ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
     MergedCoin(CoinData),
+    MoveVecMergedCoin(CoinData),
+    StakingPoolSplitCoin(u64),
 }
 
 impl HasOutput<CommandSchema> for DefaultInterp {
@@ -196,6 +297,33 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
             let enum_variant =
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
             match enum_variant {
+                0 => {
+                    info!("CommandSchema: MoveCall");
+                    let package =
+                        <DefaultInterp as AsyncParser<ObjectID, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    let module = <SubInterp<DefaultInterp> as AsyncParser<String, BS>>::parse(
+                        &SubInterp(DefaultInterp),
+                        input,
+                    )
+                    .await;
+                    let function = <SubInterp<DefaultInterp> as AsyncParser<String, BS>>::parse(
+                        &SubInterp(DefaultInterp),
+                        input,
+                    )
+                    .await;
+                    <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
+                        &SubInterp(DefaultInterp),
+                        input,
+                    )
+                    .await;
+                    let args = <SubInterp<DefaultInterp> as AsyncParser<
+                        Vec<ArgumentSchema, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+                        BS,
+                    >>::parse(&SubInterp(DefaultInterp), input)
+                    .await;
+                    Command::MoveCall(package, module, function, args)
+                }
                 1 => {
                     info!("CommandSchema: TransferObject");
                     let v1 = <SubInterp<DefaultInterp> as AsyncParser<
@@ -238,6 +366,20 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                     .await;
                     Command::MergeCoins(v1, v2)
                 }
+                5 => {
+                    info!("CommandSchema: MakeMoveVec");
+                    <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
+                        &SubInterp(DefaultInterp),
+                        input,
+                    )
+                    .await;
+                    let v1 = <SubInterp<DefaultInterp> as AsyncParser<
+                        Vec<ArgumentSchema, MAKE_MOVE_VEC_ARRAY_LENGTH>,
+                        BS,
+                    >>::parse(&SubInterp(DefaultInterp), input)
+                    .await;
+                    Command::MakeMoveVec(v1)
+                }
                 _ => {
                     info!("CommandSchema: Unknown enum: {}", enum_variant);
                     reject_on(
@@ -252,6 +394,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
     }
 }
 
+#[derive(Debug)]
 pub enum Argument {
     GasCoin,
     Input(u16),
@@ -328,6 +471,21 @@ pub enum ProgrammableTransaction {
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         coin_type: CoinType,
     },
+    StakeTx {
+        recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
+        amount: <DefaultInterp as HasOutput<Amount>>::Output,
+        includes_gas_coin: bool,
+    },
+    UnstakeTx {
+        total_amount: u64,
+    },
+}
+
+pub enum ProgrammableTransactionTypeState {
+    UnknownTx,
+    TransferTx,
+    StakeTx,
+    UnstakeTx,
 }
 
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
@@ -367,8 +525,14 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Amount(v) => {
                             inputs.insert(i, InputValue::Amount(v));
                         }
+                        CallArg::OptionalAmount(v) => {
+                            inputs.insert(i, InputValue::OptionalAmount(v));
+                        }
                         CallArg::ObjectRef(v) => {
                             inputs.insert(i, InputValue::ObjectRef(v));
+                        }
+                        CallArg::SharedObject(v) => {
+                            inputs.insert(i, InputValue::SharedObject(v));
                         }
                     }
                 }
@@ -399,6 +563,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             // as we don't know the GasCoin coin balance, we only track the any additions here
             let mut added_amount_to_gas_coin: u64 = 0;
 
+            let mut tx_type: ProgrammableTransactionTypeState =
+                ProgrammableTransactionTypeState::UnknownTx;
+
             // Handle commands
             {
                 let length_u32 =
@@ -412,7 +579,57 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     ))
                     .await;
                     match c {
+                        Command::MoveCall(package, module, function, args) => {
+                            match tx_type {
+                                ProgrammableTransactionTypeState::UnknownTx => {}
+                                _ => {
+                                    // We don't support more than one MoveCall operation per tx
+                                    // (or MoveCall with TransferObject)
+                                    info!("MoveCall operation not supported");
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                            let res = NoinlineFut(handle_move_call(
+                                package,
+                                module,
+                                function,
+                                args,
+                                &inputs,
+                                &mut recipient_addr,
+                                &mut total_amount,
+                                &mut coin_type,
+                                &mut includes_gas_coin,
+                                self.object_data_source.clone(),
+                                &command_results,
+                            ))
+                            .await;
+                            match res {
+                                Left(tx_type_) => tx_type = tx_type_,
+                                Right(v) => {
+                                    command_results.insert(command_ix, v);
+                                }
+                            }
+                        }
                         Command::TransferObject(coins, recipient_input) => {
+                            match tx_type {
+                                ProgrammableTransactionTypeState::UnknownTx => {
+                                    tx_type = ProgrammableTransactionTypeState::TransferTx;
+                                }
+                                ProgrammableTransactionTypeState::TransferTx => {}
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
                             NoinlineFut(handle_transfer_object(
                                 coins,
                                 recipient_input,
@@ -448,21 +665,21 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             ))
                             .await;
                         }
+                        Command::MakeMoveVec(coins) => {
+                            let res = NoinlineFut(handle_make_move_vec(
+                                coins,
+                                &mut inputs,
+                                &mut coin_type,
+                                &mut includes_gas_coin,
+                                self.object_data_source.clone(),
+                                &command_results,
+                            ))
+                            .await;
+                            command_results.insert(command_ix, res);
+                        }
                     }
                 }
             }
-
-            let recipient = match recipient_addr {
-                Some(addr) => addr,
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            };
 
             let coin_type = match coin_type {
                 Some(v) => v,
@@ -476,8 +693,86 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            if coin_type.0 != SUI_COIN_ID {
-                if includes_gas_coin {
+            match tx_type {
+                ProgrammableTransactionTypeState::TransferTx => {
+                    let recipient = match recipient_addr {
+                        Some(addr) => addr,
+                        _ => {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    };
+
+                    if coin_type.0 != SUI_COIN_ID {
+                        if includes_gas_coin {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+
+                        ProgrammableTransaction::TransferTokenTx {
+                            recipient,
+                            amount: total_amount,
+                            coin_type,
+                        }
+                    } else {
+                        if includes_gas_coin {
+                            total_amount += added_amount_to_gas_coin;
+                        }
+
+                        ProgrammableTransaction::TransferSuiTx {
+                            recipient,
+                            amount: total_amount,
+                            includes_gas_coin,
+                        }
+                    }
+                }
+                ProgrammableTransactionTypeState::StakeTx => {
+                    if coin_type.0 != SUI_COIN_ID {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    let recipient = match recipient_addr {
+                        Some(addr) => addr,
+                        _ => {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    };
+
+                    ProgrammableTransaction::StakeTx {
+                        recipient,
+                        amount: total_amount,
+                        includes_gas_coin,
+                    }
+                }
+                ProgrammableTransactionTypeState::UnstakeTx => {
+                    if coin_type.0 != SUI_COIN_ID {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    ProgrammableTransaction::UnstakeTx { total_amount }
+                }
+                ProgrammableTransactionTypeState::UnknownTx => {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -485,25 +780,248 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     )
                     .await
                 }
-
-                ProgrammableTransaction::TransferTokenTx {
-                    recipient,
-                    amount: total_amount,
-                    coin_type,
-                }
-            } else {
-                if includes_gas_coin {
-                    total_amount += added_amount_to_gas_coin;
-                }
-
-                ProgrammableTransaction::TransferSuiTx {
-                    recipient,
-                    amount: total_amount,
-                    includes_gas_coin,
-                }
             }
         }
     }
+}
+
+async fn handle_move_call<OD: HasObjectData>(
+    package: CoinID,
+    module: ArrayVec<u8, STRING_LENGTH>,
+    function: ArrayVec<u8, STRING_LENGTH>,
+    args: ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+    inputs: &BTreeMap<u16, InputValue>,
+    recipient_addr: &mut Option<SuiAddressRaw>,
+    total_amount: &mut u64,
+    coin_type: &mut Option<CoinType>,
+    includes_gas_coin: &mut bool,
+    object_data_source: OD,
+    command_results: &BTreeMap<u16, CommandResult>,
+) -> Either<ProgrammableTransactionTypeState, CommandResult> {
+    if package != SUI_SYSTEM_ID {
+        reject_on(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await
+    }
+    fn is_sui_state(inp: &InputValue) -> Option<()> {
+        match inp {
+            InputValue::SharedObject(id_) => {
+                if *id_ == SUI_SYSTEM_STATE_ID {
+                    Some(())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
+        args.get(arg_ix).and_then(|arg| match arg {
+            Argument::Input(ix) => inputs.get(ix),
+            _ => None,
+        })
+    };
+
+    return if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
+        && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake")
+    {
+        info!("MoveCall 0x3::sui_system::request_add_stake");
+
+        if let None = get_arg_input(0).and_then(is_sui_state) {
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+
+        match args.get(1) {
+            None => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+            Some(arg) => {
+                NoinlineFut(get_coin_amount(
+                    arg,
+                    inputs,
+                    total_amount,
+                    coin_type,
+                    includes_gas_coin,
+                    &object_data_source,
+                    command_results,
+                ))
+                .await;
+            }
+        }
+
+        match (get_arg_input(2), &recipient_addr) {
+            (Some(InputValue::RecipientAddress(addr)), None) => {
+                *recipient_addr = Some(addr.clone());
+            }
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        }
+        Left(ProgrammableTransactionTypeState::StakeTx)
+    } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
+        && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake_mul_coin")
+    {
+        info!("MoveCall 0x3::sui_system::request_add_stake_mul_coin");
+
+        if let None = get_arg_input(0).and_then(is_sui_state) {
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+
+        let mut total_amount_2: u64 = 0;
+        if let Some(CommandResult::MoveVecMergedCoin((t, amt))) =
+            args.get(1).and_then(|v| match v {
+                Argument::Result(ix) => command_results.get(ix),
+                _ => None,
+            })
+        {
+            *coin_type = Some(t.clone());
+            total_amount_2 = *amt;
+        } else {
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+
+        match get_arg_input(2) {
+            Some(InputValue::OptionalAmount(Some(amt))) => {
+                *total_amount = *amt;
+            }
+            Some(InputValue::OptionalAmount(None)) => {
+                *total_amount = total_amount_2;
+            }
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        }
+
+        match (get_arg_input(3), &recipient_addr) {
+            (Some(InputValue::RecipientAddress(addr)), None) => {
+                *recipient_addr = Some(addr.clone());
+            }
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        }
+        Left(ProgrammableTransactionTypeState::StakeTx)
+    } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
+        && core::str::from_utf8(function.as_slice()) == Ok("request_withdraw_stake")
+    {
+        info!("MoveCall 0x3::sui_system::request_withdraw_stake");
+
+        if let None = get_arg_input(0).and_then(is_sui_state) {
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+
+        match args.get(1) {
+            None => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+            Some(arg) => {
+                if let Some(amt) = match arg {
+                    Argument::Result(command_ix) => match command_results.get(command_ix) {
+                        Some(CommandResult::StakingPoolSplitCoin(amt)) => Some(amt),
+                        _ => None,
+                    },
+                    _ => None,
+                } {
+                    *total_amount += amt;
+                    *coin_type = Some(SUI_COIN_TYPE);
+                } else {
+                    NoinlineFut(get_coin_amount(
+                        arg,
+                        inputs,
+                        total_amount,
+                        coin_type,
+                        includes_gas_coin,
+                        &object_data_source,
+                        command_results,
+                    ))
+                    .await;
+                }
+            }
+        }
+
+        Left(ProgrammableTransactionTypeState::UnstakeTx)
+    } else if core::str::from_utf8(module.as_slice()) == Ok("staking_pool")
+        && core::str::from_utf8(function.as_slice()) == Ok("split")
+    {
+        info!("MoveCall 0x3::staking_pool::split");
+
+        // We do not need to check the balance or CoinID of coin
+        // As incorrect values will be rejected on chain
+
+        match get_arg_input(1) {
+            Some(InputValue::Amount(amt)) => Right(CommandResult::StakingPoolSplitCoin(*amt)),
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        }
+    } else {
+        info!(
+            "MoveCall NYI: '0x{}::{}::{}'",
+            HexSlice(&package),
+            core::str::from_utf8(module.as_slice()).unwrap_or("invalid utf-8"),
+            core::str::from_utf8(function.as_slice()).unwrap_or("invalid utf-8")
+        );
+        reject_on(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await
+    };
 }
 
 async fn handle_transfer_object<OD: HasObjectData>(
@@ -554,11 +1072,82 @@ async fn handle_transfer_object<OD: HasObjectData>(
     }
     // set total_amount
     for coin in &coins {
-        match coin {
-            Argument::GasCoin => {
-                if let Some((id_, _, _)) = coin_type {
-                    if *id_ != SUI_COIN_ID {
-                        info!("TransferObject mismatch in coin_id(s)");
+        get_coin_amount(
+            coin,
+            inputs,
+            total_amount,
+            coin_type,
+            includes_gas_coin,
+            &object_data_source,
+            command_results,
+        )
+        .await;
+    }
+}
+
+async fn get_coin_amount<OD: HasObjectData>(
+    coin: &Argument,
+    inputs: &BTreeMap<u16, InputValue>,
+    total_amount: &mut u64,
+    coin_type: &mut Option<CoinType>,
+    includes_gas_coin: &mut bool,
+    object_data_source: &OD,
+    command_results: &BTreeMap<u16, CommandResult>,
+) {
+    info!("get_coin_amount for {:?}", coin);
+    match coin {
+        Argument::GasCoin => {
+            if let Some((id_, _, _)) = coin_type {
+                if *id_ != SUI_COIN_ID {
+                    info!("get_coin_amount mismatch in coin_id(s)");
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            } else {
+                *coin_type = Some(SUI_COIN_TYPE.clone());
+            }
+            *includes_gas_coin = true;
+        }
+        Argument::Input(input_ix) => match inputs.get(input_ix) {
+            Some(InputValue::ObjectRef(digest)) => {
+                info!("get_coin_amount trying object_data_source");
+                let coin_data = object_data_source.get_object_data(&digest).await;
+                match coin_data {
+                    Some((coin_type_, amt)) => {
+                        if let Some(v) = coin_type {
+                            if *v != coin_type_ {
+                                info!("get_coin_amount mismatch in coin_type(s)");
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                        } else {
+                            *coin_type = Some(coin_type_.clone());
+                        }
+                        *total_amount += amt
+                    }
+                    _ => {
+                        info!("get_coin_amount Coin Object not found");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                }
+            }
+            Some(InputValue::Object((coin_type_, amt))) => {
+                if let Some(v) = coin_type {
+                    if *v != *coin_type_ {
+                        info!("get_coin_amount mismatch in coin_type(s)");
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -567,104 +1156,34 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         .await
                     }
                 } else {
-                    *coin_type = Some(SUI_COIN_TYPE.clone());
+                    *coin_type = Some(coin_type_.clone());
                 }
-                *includes_gas_coin = true;
+                *total_amount += amt;
             }
-            Argument::Input(input_ix) => match inputs.get(input_ix) {
-                Some(InputValue::ObjectRef(digest)) => {
-                    info!("TransferObject trying object_data_source");
-                    let coin_data = object_data_source.get_object_data(&digest).await;
-                    match coin_data {
-                        Some((coin_type_, amt)) => {
-                            if let Some(v) = coin_type {
-                                if *v != coin_type_ {
-                                    info!("TransferObject mismatch in coin_type(s)");
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            } else {
-                                *coin_type = Some(coin_type_.clone());
-                            }
-                            *total_amount += amt
-                        }
-                        _ => {
-                            info!("TransferObject Coin Object not found");
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    }
-                }
-                Some(InputValue::Object((coin_type_, amt))) => {
-                    if let Some(v) = coin_type {
-                        if *v != *coin_type_ {
-                            info!("TransferObject mismatch in coin_type(s)");
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    } else {
-                        *coin_type = Some(coin_type_.clone());
-                    }
-                    *total_amount += amt;
-                }
-                Some(InputValue::Amount(_)) => {
-                    info!("TransferObject input refers to non ObjectRef");
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-                Some(InputValue::RecipientAddress(_)) => {
-                    info!("TransferObject input refers to non ObjectRef");
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-                None => {
-                    info!("TransferObject input not found");
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            },
-            Argument::NestedResult(command_ix, coin_ix) => match command_results.get(command_ix) {
-                Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
-                    if let Some(v) = coin_type {
-                        if *v != *coin_type_ {
-                            info!("TransferObject mismatch in coin_type(s)");
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    } else {
-                        *coin_type = Some(coin_type_.clone());
-                    }
-                    if let Some(amt) = coin_amounts.get(*coin_ix as usize) {
-                        *total_amount += amt;
-                    } else {
+            Some(_) => {
+                info!("get_coin_amount input refers to non ObjectRef");
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+            None => {
+                info!("get_coin_amount input not found");
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        },
+        Argument::NestedResult(command_ix, coin_ix) => match command_results.get(command_ix) {
+            Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
+                if let Some(v) = coin_type {
+                    if *v != *coin_type_ {
+                        info!("get_coin_amount mismatch in coin_type(s)");
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -672,8 +1191,12 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         )
                         .await
                     }
+                } else {
+                    *coin_type = Some(coin_type_.clone());
                 }
-                _ => {
+                if let Some(amt) = coin_amounts.get(*coin_ix as usize) {
+                    *total_amount += amt;
+                } else {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -681,25 +1204,21 @@ async fn handle_transfer_object<OD: HasObjectData>(
                     )
                     .await
                 }
-            },
-            Argument::Result(command_ix) => match command_results.get(command_ix) {
-                Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
-                    if let Some(v) = coin_type {
-                        if *v != *coin_type_ {
-                            info!("TransferObject mismatch in coin_type(s)");
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    } else {
-                        *coin_type = Some(coin_type_.clone());
-                    }
-                    if coin_amounts.len() == 1 {
-                        *total_amount += coin_amounts[0];
-                    } else {
+            }
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        },
+        Argument::Result(command_ix) => match command_results.get(command_ix) {
+            Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
+                if let Some(v) = coin_type {
+                    if *v != *coin_type_ {
+                        info!("get_coin_amount mismatch in coin_type(s)");
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -707,24 +1226,12 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         )
                         .await
                     }
+                } else {
+                    *coin_type = Some(coin_type_.clone());
                 }
-                Some(CommandResult::MergedCoin((coin_type_, amt))) => {
-                    if let Some(v) = coin_type {
-                        if *v != *coin_type_ {
-                            info!("TransferObject mismatch in coin_type(s)");
-                            reject_on(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await
-                        }
-                    } else {
-                        *coin_type = Some(coin_type_.clone());
-                    }
-                    *total_amount += amt;
-                }
-                _ => {
+                if coin_amounts.len() == 1 {
+                    *total_amount += coin_amounts[0];
+                } else {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -732,8 +1239,32 @@ async fn handle_transfer_object<OD: HasObjectData>(
                     )
                     .await
                 }
-            },
-        }
+            }
+            Some(CommandResult::MergedCoin((coin_type_, amt))) => {
+                if let Some(v) = coin_type {
+                    if *v != *coin_type_ {
+                        info!("get_coin_amount mismatch in coin_type(s)");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                } else {
+                    *coin_type = Some(coin_type_.clone());
+                }
+                *total_amount += amt;
+            }
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        },
     }
 }
 
@@ -1062,6 +1593,43 @@ async fn handle_merge_coins<OD: HasObjectData>(
     }
 }
 
+async fn handle_make_move_vec<OD: HasObjectData>(
+    coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
+    inputs: &mut BTreeMap<u16, InputValue>,
+    coin_type: &mut Option<CoinType>,
+    includes_gas_coin: &mut bool,
+    object_data_source: OD,
+    command_results: &BTreeMap<u16, CommandResult>,
+) -> CommandResult {
+    let mut total_amount_2: u64 = 0;
+    for coin in &coins {
+        get_coin_amount(
+            coin,
+            inputs,
+            &mut total_amount_2,
+            coin_type,
+            includes_gas_coin,
+            &object_data_source,
+            command_results,
+        )
+        .await;
+    }
+    CommandResult::MoveVecMergedCoin((
+        match coin_type {
+            Some(v) => v.clone(),
+            _ => {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            }
+        },
+        total_amount_2,
+    ))
+}
+
 pub struct TransactionKindParser<OD> {
     object_data_source: OD,
 }
@@ -1266,7 +1834,18 @@ pub enum KnownTx {
         total_amount: u64,
         gas_budget: u64,
     },
+    StakeTx {
+        recipient: SuiAddressRaw,
+        total_amount: u64,
+        gas_budget: u64,
+    },
+    UnstakeTx {
+        total_amount: u64,
+        gas_budget: u64,
+    },
 }
+
+use ledger_crypto_helpers::common::HexSlice;
 
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
@@ -1310,6 +1889,33 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         recipient,
                         coin_type,
                         total_amount: amount,
+                        gas_budget,
+                    })
+                }
+                ProgrammableTransaction::StakeTx {
+                    recipient,
+                    amount,
+                    includes_gas_coin,
+                } => {
+                    let (gas_budget, gas_coin_amount) = d.1;
+                    let total_amount_ = if includes_gas_coin {
+                        gas_coin_amount.map(|amt| amount + amt)
+                    } else {
+                        Some(amount)
+                    };
+
+                    info!("StakeTx: {}, {}", HexSlice(&recipient), amount);
+                    total_amount_.map(|total_amount| KnownTx::StakeTx {
+                        recipient,
+                        total_amount,
+                        gas_budget,
+                    })
+                }
+                ProgrammableTransaction::UnstakeTx { total_amount } => {
+                    info!("UnstakeTx: {}", total_amount);
+                    let (gas_budget, _) = d.1;
+                    Some(KnownTx::UnstakeTx {
+                        total_amount,
                         gas_budget,
                     })
                 }

@@ -123,38 +123,87 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     let is_unknown_txn = known_txn.is_none();
 
-    if let Some(KnownTx::TransferTx {
-        recipient,
-        total_amount,
-        coin_type,
-        gas_budget,
-    }) = known_txn
-    {
-        let mut bs = input[1].clone();
-        let path = BIP_PATH_PARSER.parse(&mut bs).await;
-        if !path.starts_with(&BIP32_PREFIX[0..2]) {
-            reject::<()>(SyscallError::InvalidParameter as u16).await;
+    match known_txn {
+        Some(KnownTx::TransferTx {
+            recipient,
+            total_amount,
+            coin_type,
+            gas_budget,
+        }) => {
+            let mut bs = input[1].clone();
+            let path = BIP_PATH_PARSER.parse(&mut bs).await;
+            if !path.starts_with(&BIP32_PREFIX[0..2]) {
+                reject::<()>(SyscallError::InvalidParameter as u16).await;
+            }
+
+            let tx_params = TxParams {
+                amount: total_amount,
+                fee: gas_budget,
+                destination_address: recipient,
+            };
+
+            if ctx.is_swap() {
+                if coin_type.0 != SUI_COIN_ID {
+                    reject::<()>(SyscallError::NotSupported as u16).await;
+                }
+                let expected = ctx.get_swap_tx_params();
+                check_tx_params(expected, &tx_params).await;
+            } else {
+                // Show prompts after all inputs have been parsed
+                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type)).await;
+            }
         }
-
-        let tx_params = TxParams {
-            amount: total_amount,
-            fee: gas_budget,
-            destination_address: recipient,
-        };
-
-        if ctx.is_swap() {
-            if coin_type.0 != SUI_COIN_ID {
+        Some(KnownTx::StakeTx {
+            recipient,
+            total_amount,
+            gas_budget,
+        }) => {
+            if ctx.is_swap() {
                 reject::<()>(SyscallError::NotSupported as u16).await;
             }
-            let expected = ctx.get_swap_tx_params();
-            check_tx_params(expected, &tx_params).await;
-        } else {
-            // Show prompts after all inputs have been parsed
-            NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type)).await;
+            let mut bs = input[1].clone();
+            let path = BIP_PATH_PARSER.parse(&mut bs).await;
+            if !path.starts_with(&BIP32_PREFIX[0..2]) {
+                reject::<()>(SyscallError::InvalidParameter as u16).await;
+            }
+
+            if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
+                try_option(ui.confirm_stake_tx(address, recipient, total_amount, gas_budget))
+            })
+            .ok()
+            .is_none()
+            {
+                reject::<()>(StatusWords::UserCancelled as u16).await;
+            };
         }
-    } else if !settings.get_blind_sign() || ctx.is_swap() {
-        ui.warn_tx_not_recognized();
-        reject::<()>(SyscallError::NotSupported as u16).await;
+        Some(KnownTx::UnstakeTx {
+            total_amount,
+            gas_budget,
+        }) => {
+            if ctx.is_swap() {
+                reject::<()>(SyscallError::NotSupported as u16).await;
+            }
+            let mut bs = input[1].clone();
+            let path = BIP_PATH_PARSER.parse(&mut bs).await;
+            if !path.starts_with(&BIP32_PREFIX[0..2]) {
+                reject::<()>(SyscallError::InvalidParameter as u16).await;
+            }
+
+            if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
+                try_option(ui.confirm_unstake_tx(address, total_amount, gas_budget))
+            })
+            .ok()
+            .is_none()
+            {
+                reject::<()>(StatusWords::UserCancelled as u16).await;
+            };
+        }
+        None => {
+            if !settings.get_blind_sign() || ctx.is_swap() {
+                ui.warn_tx_not_recognized();
+                reject::<()>(SyscallError::NotSupported as u16).await;
+            }
+        }
     }
 
     NoinlineFut(async move {

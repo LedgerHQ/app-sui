@@ -32,7 +32,7 @@ pub type UID = ObjectID;
 
 pub type StorageRebate = U64LE;
 
-pub const STRING_LENGTH: usize = 128;
+pub const STRING_LENGTH: usize = 64;
 pub type String = Vec<Byte, STRING_LENGTH>;
 
 pub type StructTag = (SuiAddress, String, String, TypeParams);
