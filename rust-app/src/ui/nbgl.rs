@@ -104,6 +104,99 @@ impl UserInterface {
         }
     }
 
+    pub fn confirm_stake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        recipient: [u8; 32],
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let to = Field {
+            name: "To",
+            value: &format!("0x{}", HexSlice(&recipient)),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Stake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            let first_msg = &format!("Review transaction to stake SUI");
+            let last_msg = &format!("Sign transaction to stake SUI");
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(first_msg, "", last_msg)
+                .show(fields)
+        };
+        let success = do_review(&[from, to, amt, gas]);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_unstake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Unstake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            let first_msg = &format!("Review transaction to unstake SUI");
+            let last_msg = &format!("Sign transaction to unstake SUI");
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(first_msg, "", last_msg)
+                .show(fields)
+        };
+        let success = do_review(&[from, amt, gas]);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
     pub fn confirm_blind_sign_tx(&self, hash: &HexHash<32>) -> Option<()> {
         self.do_refresh.replace(true);
         let tx_fields = [Field {

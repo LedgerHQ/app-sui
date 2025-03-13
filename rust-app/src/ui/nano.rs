@@ -99,6 +99,101 @@ impl UserInterface {
         }
     }
 
+    pub fn confirm_stake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        recipient: [u8; 32],
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let to = Field {
+            name: "To",
+            value: &format!("0x{}", HexSlice(&recipient)),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Stake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            MultiFieldReview::new(
+                fields,
+                &[&"Review", &"transaction"],
+                Some(&EYE),
+                &"Accept and send",
+                Some(&CHECKMARK),
+                &"Reject",
+                Some(&CROSS),
+            )
+            .show()
+        };
+        let success = do_review(&[from, to, amt, gas]);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_unstake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Unstake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            MultiFieldReview::new(
+                fields,
+                &[&"Review", &"transaction"],
+                Some(&EYE),
+                &"Accept and send",
+                Some(&CHECKMARK),
+                &"Reject",
+                Some(&CROSS),
+            )
+            .show()
+        };
+        let success = do_review(&[from, amt, gas]);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
     pub fn confirm_blind_sign_tx(&self, hash: &HexHash<32>) -> Option<()> {
         let fields = [Field {
             name: "Transaction hash",

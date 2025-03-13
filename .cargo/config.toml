@@ -27,3 +27,6 @@ rustflags = [
 tt = "test --features extra_debug"
 br = "build --release"
 stackcheck = "stack-sizes --release --bin sui --target=thumbv6m-none-eabi"
+
+[env]
+HEAP_SIZE = "4096"
