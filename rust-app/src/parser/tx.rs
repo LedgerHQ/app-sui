@@ -1768,23 +1768,6 @@ type TransactionDataV1Output<OD> = (
     GasData,
 );
 
-const fn transaction_data_v1_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
-    object_data_source: OD,
-    object_data_source2: OD,
-) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output<OD>> {
-    Action(
-        (
-            TransactionKindParser {
-                object_data_source: object_data_source2,
-            },
-            DefaultInterp,
-            gas_data_parser(object_data_source),
-            DefaultInterp,
-        ),
-        |(v, _, gas_budget, _)| Some((v, gas_budget)),
-    )
-}
-
 pub struct TransactionDataParser<OD> {
     object_data_source: OD,
 }
@@ -1807,12 +1790,26 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    transaction_data_v1_parser(
-                        self.object_data_source.clone(),
-                        self.object_data_source.clone(),
-                    )
+                    let v = (TransactionKindParser {
+                        object_data_source: self.object_data_source.clone(),
+                    })
                     .parse(input)
-                    .await
+                    .await;
+
+                    <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input)
+                        .await;
+
+                    let gas_budget = gas_data_parser(self.object_data_source.clone())
+                        .parse(input)
+                        .await;
+
+                    <DefaultInterp as AsyncParser<TransactionExpiration, BS>>::parse(
+                        &DefaultInterp,
+                        input,
+                    )
+                    .await;
+
+                    (v, gas_budget)
                 }
                 _ => {
                     reject_on(
