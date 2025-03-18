@@ -1,5 +1,5 @@
 use crate::parser::common::*;
-use crate::utils::NoinlineFut;
+use crate::utils::{estimate_btree_map_usage, NoinlineFut};
 
 extern crate alloc;
 use alloc::collections::BTreeMap;
@@ -502,6 +502,29 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
+            let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
+
+            // By using heap we have the flexibility to handle transactions of various sizes
+            // But if we exceed the heap usage it would crash the app while parsing the transaction.
+            // It would be better to allow user to blind sign in such cases.
+            // This ensures that we never hit heap memory limits during parse(8k)
+            async fn check_heap_use(
+                inputs: &BTreeMap<u16, InputValue>,
+                command_results: &BTreeMap<u16, CommandResult>,
+            ) {
+                const MAX_HEAP_USAGE_ALLOWED: usize = 7 * 1024;
+
+                let v1 = estimate_btree_map_usage(inputs);
+                let v2 = estimate_btree_map_usage(command_results);
+                if v1 + v2 > MAX_HEAP_USAGE_ALLOWED {
+                    reject_on::<()>(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await;
+                }
+            }
 
             // Handle inputs
             {
@@ -511,6 +534,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
+                    check_heap_use(&inputs, &command_results).await;
                     let arg =
                         NoinlineFut(<DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
                             &DefaultInterp,
@@ -547,7 +571,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 .await;
             }
 
-            let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
             let mut recipient_addr = None;
 
             // Total amount, that we know of, being transferred to recipient
@@ -573,6 +596,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 let length = u16::try_from(length_u32).expect("u16 expected");
                 info!("ProgrammableTransaction: Commands: {}", length);
                 for command_ix in 0..length {
+                    check_heap_use(&inputs, &command_results).await;
                     let c = NoinlineFut(<DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
