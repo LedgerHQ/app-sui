@@ -1712,10 +1712,11 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
     }
 }
 
-const fn gas_data_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
-    object_data_source: OD,
-) -> impl AsyncParser<GasDataSchema, BS, Output = GasData> {
-    FutAction(
+pub type GasDataParserOutput = (ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>, u64);
+
+const fn gas_data_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<GasDataSchema, BS, Output = GasDataParserOutput> {
+    Action(
         (
             SubInterp(object_ref_parser()),
             DefaultInterp,
@@ -1723,26 +1724,13 @@ const fn gas_data_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
             DefaultInterp,
         ),
         {
-            move |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
-                let object_data_source = object_data_source.clone();
-                async move {
-                    let mut total_amount: Option<u64> = Some(0);
-                    for digest in coins {
-                        if let Some(amt0) = total_amount {
-                            let coin_data = object_data_source.get_object_data(&digest).await;
-                            match coin_data {
-                                Some((_, amt)) => total_amount = Some(amt0 + amt),
-                                _ => total_amount = None,
-                            }
-                        }
-                    }
-                    // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
-                    // gas price. We only care about the total, not the price or amount in isolation , so we
-                    // just ignore that field.
-                    //
-                    // C.F. https://github.com/MystenLabs/sui/pull/8676
-                    Some((gas_budget, total_amount))
-                }
+            |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
+                // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
+                // gas price. We only care about the total, not the price or amount in isolation , so we
+                // just ignore that field.
+                //
+                // C.F. https://github.com/MystenLabs/sui/pull/8676
+                Some((coins, gas_budget))
             }
         },
     )
@@ -1799,9 +1787,18 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input)
                         .await;
 
-                    let gas_budget = gas_data_parser(self.object_data_source.clone())
-                        .parse(input)
-                        .await;
+                    let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
+
+                    let mut total_gas_amount: Option<u64> = Some(0);
+                    for digest in gas_coins {
+                        if let Some(amt0) = total_gas_amount {
+                            let coin_data = self.object_data_source.get_object_data(&digest).await;
+                            match coin_data {
+                                Some((_, amt)) => total_gas_amount = Some(amt0 + amt),
+                                _ => total_gas_amount = None,
+                            }
+                        }
+                    }
 
                     <DefaultInterp as AsyncParser<TransactionExpiration, BS>>::parse(
                         &DefaultInterp,
@@ -1809,7 +1806,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     )
                     .await;
 
-                    (v, gas_budget)
+                    (v, (gas_budget, total_gas_amount))
                 }
                 _ => {
                     reject_on(
