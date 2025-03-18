@@ -1,7 +1,7 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::{CoinType, HasObjectData, ObjectData, ObjectDigest, SUI_COIN_ID};
-use crate::parser::object::object_parser;
+use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
 use crate::swap;
@@ -265,34 +265,9 @@ impl HasObjectData for WithObjectData {
                     info!("get_object_data: objects_count {}", c);
                     for _ in 0..c {
                         let length = usize::from_le_bytes(bs.read().await);
-                        let obj_start_bs = bs.clone();
-                        let mut obj_start_bs2 = bs.clone();
+                        let mut obj_start_bs = bs.clone();
 
-                        // This somehows fixes crashes, perhaps due to stack size issues
-                        for _ in 0..length {
-                            let _: [u8; 1] = bs.read().await;
-                        }
-
-                        let hash: HexHash<32> = NoinlineFut(async move {
-                            let mut hasher: Blake2b = Hasher::new();
-                            let mut bs = obj_start_bs;
-                            let salt = b"Object::";
-                            hasher.update(salt);
-                            {
-                                const CHUNK_SIZE: usize = 128;
-                                let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
-                                for _ in 0..chunks {
-                                    let b: [u8; CHUNK_SIZE] = bs.read().await;
-                                    hasher.update(&b);
-                                }
-                                for _ in 0..rem {
-                                    let b: [u8; 1] = bs.read().await;
-                                    hasher.update(&b);
-                                }
-                            }
-                            hasher.finalize::<HexHash<32>>()
-                        })
-                        .await;
+                        let hash = NoinlineFut(compute_object_hash(&mut bs, length)).await;
 
                         if hash.0 == digest[1..33] {
                             info!(
@@ -301,7 +276,7 @@ impl HasObjectData for WithObjectData {
                             );
                             // Found object, now try to parse
                             return NoinlineFut(TryFuture(
-                                object_parser().parse(&mut obj_start_bs2),
+                                object_parser().parse(&mut obj_start_bs),
                             ))
                             .await;
                         }
