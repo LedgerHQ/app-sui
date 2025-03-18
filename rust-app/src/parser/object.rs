@@ -3,6 +3,7 @@ use arrayvec::ArrayVec;
 use core::convert::TryInto;
 use core::future::Future;
 use ledger_crypto_helpers::common::HexSlice;
+use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::SyscallError;
 use ledger_log::info;
 use ledger_parser_combinators::async_parser::*;
@@ -404,4 +405,23 @@ impl<BS: Clone + Readable> AsyncParser<OwnerSchema, BS> for DefaultInterp {
             }
         }
     }
+}
+
+pub async fn compute_object_hash<BS: Clone + Readable>(bs: &mut BS, length: usize) -> HexHash<32> {
+    let mut hasher: Blake2b = Hasher::new();
+    let salt = b"Object::";
+    hasher.update(salt);
+
+    const CHUNK_SIZE: usize = 128;
+    let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
+    for _ in 0..chunks {
+        let b: [u8; CHUNK_SIZE] = bs.read().await;
+        hasher.update(&b);
+    }
+    for _ in 0..rem {
+        let b: [u8; 1] = bs.read().await;
+        hasher.update(&b);
+    }
+
+    hasher.finalize::<HexHash<32>>()
 }

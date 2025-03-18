@@ -1,5 +1,5 @@
 use crate::parser::common::*;
-use crate::utils::NoinlineFut;
+use crate::utils::{estimate_btree_map_usage, NoinlineFut};
 
 extern crate alloc;
 use alloc::collections::BTreeMap;
@@ -502,6 +502,29 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
+            let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
+
+            // By using heap we have the flexibility to handle transactions of various sizes
+            // But if we exceed the heap usage it would crash the app while parsing the transaction.
+            // It would be better to allow user to blind sign in such cases.
+            // This ensures that we never hit heap memory limits during parse(8k)
+            async fn check_heap_use(
+                inputs: &BTreeMap<u16, InputValue>,
+                command_results: &BTreeMap<u16, CommandResult>,
+            ) {
+                const MAX_HEAP_USAGE_ALLOWED: usize = 7 * 1024;
+
+                let v1 = estimate_btree_map_usage(inputs);
+                let v2 = estimate_btree_map_usage(command_results);
+                if v1 + v2 > MAX_HEAP_USAGE_ALLOWED {
+                    reject_on::<()>(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await;
+                }
+            }
 
             // Handle inputs
             {
@@ -511,6 +534,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
+                    check_heap_use(&inputs, &command_results).await;
                     let arg =
                         NoinlineFut(<DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
                             &DefaultInterp,
@@ -547,7 +571,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 .await;
             }
 
-            let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
             let mut recipient_addr = None;
 
             // Total amount, that we know of, being transferred to recipient
@@ -573,6 +596,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 let length = u16::try_from(length_u32).expect("u16 expected");
                 info!("ProgrammableTransaction: Commands: {}", length);
                 for command_ix in 0..length {
+                    check_heap_use(&inputs, &command_results).await;
                     let c = NoinlineFut(<DefaultInterp as AsyncParser<CommandSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
@@ -1712,10 +1736,11 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
     }
 }
 
-const fn gas_data_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
-    object_data_source: OD,
-) -> impl AsyncParser<GasDataSchema, BS, Output = GasData> {
-    FutAction(
+pub type GasDataParserOutput = (ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>, u64);
+
+const fn gas_data_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<GasDataSchema, BS, Output = GasDataParserOutput> {
+    Action(
         (
             SubInterp(object_ref_parser()),
             DefaultInterp,
@@ -1723,26 +1748,13 @@ const fn gas_data_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
             DefaultInterp,
         ),
         {
-            move |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
-                let object_data_source = object_data_source.clone();
-                async move {
-                    let mut total_amount: Option<u64> = Some(0);
-                    for digest in coins {
-                        if let Some(amt0) = total_amount {
-                            let coin_data = object_data_source.get_object_data(&digest).await;
-                            match coin_data {
-                                Some((_, amt)) => total_amount = Some(amt0 + amt),
-                                _ => total_amount = None,
-                            }
-                        }
-                    }
-                    // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
-                    // gas price. We only care about the total, not the price or amount in isolation , so we
-                    // just ignore that field.
-                    //
-                    // C.F. https://github.com/MystenLabs/sui/pull/8676
-                    Some((gas_budget, total_amount))
-                }
+            |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
+                // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
+                // gas price. We only care about the total, not the price or amount in isolation , so we
+                // just ignore that field.
+                //
+                // C.F. https://github.com/MystenLabs/sui/pull/8676
+                Some((coins, gas_budget))
             }
         },
     )
@@ -1768,23 +1780,6 @@ type TransactionDataV1Output<OD> = (
     GasData,
 );
 
-const fn transaction_data_v1_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
-    object_data_source: OD,
-    object_data_source2: OD,
-) -> impl AsyncParser<TransactionDataV1, BS, Output = TransactionDataV1Output<OD>> {
-    Action(
-        (
-            TransactionKindParser {
-                object_data_source: object_data_source2,
-            },
-            DefaultInterp,
-            gas_data_parser(object_data_source),
-            DefaultInterp,
-        ),
-        |(v, _, gas_budget, _)| Some((v, gas_budget)),
-    )
-}
-
 pub struct TransactionDataParser<OD> {
     object_data_source: OD,
 }
@@ -1807,12 +1802,35 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    transaction_data_v1_parser(
-                        self.object_data_source.clone(),
-                        self.object_data_source.clone(),
-                    )
+                    let v = (TransactionKindParser {
+                        object_data_source: self.object_data_source.clone(),
+                    })
                     .parse(input)
-                    .await
+                    .await;
+
+                    <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input)
+                        .await;
+
+                    let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
+
+                    let mut total_gas_amount: Option<u64> = Some(0);
+                    for digest in gas_coins {
+                        if let Some(amt0) = total_gas_amount {
+                            let coin_data = self.object_data_source.get_object_data(&digest).await;
+                            match coin_data {
+                                Some((_, amt)) => total_gas_amount = Some(amt0 + amt),
+                                _ => total_gas_amount = None,
+                            }
+                        }
+                    }
+
+                    <DefaultInterp as AsyncParser<TransactionExpiration, BS>>::parse(
+                        &DefaultInterp,
+                        input,
+                    )
+                    .await;
+
+                    (v, (gas_budget, total_gas_amount))
                 }
                 _ => {
                     reject_on(

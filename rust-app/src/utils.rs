@@ -50,3 +50,24 @@ pub fn get_amount_in_decimals(amount: u64, divisor: u8) -> (u64, ArrayString<12>
     }
     (quotient, remainder_str)
 }
+
+extern crate alloc;
+use alloc::collections::BTreeMap;
+use core::mem::size_of;
+
+/// Estimates the memory usage of a BTreeMap
+pub fn estimate_btree_map_usage<K, V>(map: &BTreeMap<K, V>) -> usize {
+    let base_size = size_of::<BTreeMap<K, V>>();
+
+    // Size of key and value types
+    let key_size = size_of::<K>();
+    let value_size = size_of::<V>();
+
+    // Approximate overhead per node in the BTree
+    // This is an estimation as the exact overhead depends on implementation details
+    let node_overhead = 16; // Pointer overhead, metadata, etc.
+
+    let entry_size = key_size + value_size + node_overhead;
+
+    base_size + (entry_size * map.len())
+}
