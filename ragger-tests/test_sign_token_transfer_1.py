@@ -504,7 +504,7 @@ def test_sign_tx_usdc_split_coin(backend, scenario_navigator, firmware, navigato
 # }
 # {"data":{"objects":{"nodes":[{"digest":"6ewjNycgiXo5TuKZCN2fQRdwyuqKawffYyFfpsDQBFSs","bcs":"AAMHiZMSnXLnM5hffxoAOWy9BVutb4F/7jZXbOSDyLu4uHsGc3VkZW5nBlNVREVORwABp3ZnHAAAAAAoJdqW+n8Sy/V/rIXwS4wpvZXRnnEjU8b0UPi7uKbyyENDjFkYAAAAAAAPL43UniadoGbzdiTTOotO0bJi1qX98rc1vjn418Ws9SClNBIS+ZkxFHxisw25kf37mBCLpipUHR8VhNn5c0lmk2CkFAAAAAAA"}]}}}
 # balance: 408521795
-def test_sign_tx_unrecognized_coin(backend, scenario_navigator, firmware, navigator):
+def test_sign_tx_HIPPO_coin(backend, scenario_navigator, firmware, navigator):
     client = Client(backend, use_block_protocol=True)
     path = "m/44'/784'/0'/0'/0'"
 
@@ -514,6 +514,93 @@ def test_sign_tx_unrecognized_coin(backend, scenario_navigator, firmware, naviga
     transaction = base64.b64decode('AAAAAAACAQAl2pb6fxLL9X+shfBLjCm9ldGecSNTxvRQ+Lu4pvLIQ6d2ZxwAAAAAIFQCzwkzjdDT/z8SxH21mdVkCljCe1cOGGqYLppob8NUACBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQEBAQEAAAEBAA8vjdSeJp2gZvN2JNM6i07RsmLWpf3ytzW+OfjXxaz1Ae+2Pou4IgmffYeLesUVRWnuzodmRG3dWvuFZguvoBGHv0GqHQAAAAAgGT+sWlGna1S+/DUWLOV4sUtGm3TqNlwLgzE03ikr8NwPL43UniadoGbzdiTTOotO0bJi1qX98rc1vjn418Ws9e4CAAAAAAAAmCsmAAAAAAAA')
 
     object_list = [base64.b64decode('AAMHiZMSnXLnM5hffxoAOWy9BVutb4F/7jZXbOSDyLu4uHsGc3VkZW5nBlNVREVORwABp3ZnHAAAAAAoJdqW+n8Sy/V/rIXwS4wpvZXRnnEjU8b0UPi7uKbyyENDjFkYAAAAAAAPL43UniadoGbzdiTTOotO0bJi1qX98rc1vjn418Ws9SClNBIS+ZkxFHxisw25kf37mBCLpipUHR8VhNn5c0lmk2CkFAAAAAAA')]
+
+    def apdu_task():
+        return client.sign_tx(path=path, transaction=transaction, object_list=object_list)
+
+    def nav_task():
+        if firmware.device.startswith("nano"):
+            navigator.navigate_and_compare(
+                instructions=[ NavInsID.RIGHT_CLICK # Review transfer
+                               , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # From ...
+                               , NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK # To ...
+                               , NavInsID.RIGHT_CLICK # Amount
+                               , NavInsID.RIGHT_CLICK # Max Gas
+                               , NavInsID.BOTH_CLICK
+                              ]
+                , timeout=10
+                , test_case_name=scenario_navigator.test_name
+                , path=scenario_navigator.screenshot_path
+                , screen_change_before_first_instruction=True
+                , screen_change_after_last_instruction=False
+            )
+        else:
+            scenario_navigator.review_approve()
+
+    def check_result(result):
+        assert len(result) == 64
+        assert check_signature_validity(public_key, result, transaction)
+
+    run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, check_result)
+
+# built_tx AAACAQAkOlErOjssUas7B1ipByHf2etJJYdwBbMTSEy5doj0VgHzIR4AAAAAIN8vTwL8rbbLzRfsdy1PyOXvcrij9n34ovKk2/o0N3wNACBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQEBAQEAAAEBAG02HZIA+4tmm1GrxPh4dKNj3Fry/X/O0WxUh1ovpxisAQkHEsRdw5dbbdY9esFx0S8xZ3rE61Q5gJ3SV2OdlnYVFxwwHgAAAAAgDI4TkhHnVDhJiSloJl/c9O1pBEyKpv0JUSJ/mmyKbuVtNh2SAPuLZptRq8T4eHSjY9xa8v1/ztFsVIdaL6cYrOkCAAAAAAAA8AMmAAAAAAAA
+# Transaction Commands: {
+#   "version": 2,
+#   "sender": "0x6d361d9200fb8b669b51abc4f87874a363dc5af2fd7fced16c54875a2fa718ac",
+#   "expiration": null,
+#   "gasData": {
+#     "budget": "2491376",
+#     "price": "745",
+#     "owner": null,
+#     "payment": [
+#       {
+#         "objectId": "0x090712c45dc3975b6dd63d7ac171d12f31677ac4eb5439809dd257639d967615",
+#         "version": "506469399",
+#         "digest": "r1Ye5Jfy67g4rgqQUybYzXFAQFApgsry1YL3u1uczKN"
+#       }
+#     ]
+#   },
+#   "inputs": [
+#     {
+#       "Object": {
+#         "ImmOrOwnedObject": {
+#           "objectId": "0x243a512b3a3b2c51ab3b0758a90721dfd9eb4925877005b313484cb97688f456",
+#           "version": "505541377",
+#           "digest": "G2DktCyX91sGmyLDFbvuRJdk9PpJnAFhowHCQenc2kpc"
+#         }
+#       }
+#     },
+#     {
+#       "Pure": {
+#         "bytes": "b7If7q0CfaSHMpWv/WxPNhj+F2+i+/Pnte8dlGOzHiE="
+#       }
+#     }
+#   ],
+#   "commands": [
+#     {
+#       "TransferObjects": {
+#         "objects": [
+#           {
+#             "Input": 0
+#           }
+#         ],
+#         "address": {
+#           "Input": 1
+#         }
+#       }
+#     }
+#   ]
+# }
+def test_sign_tx_unrecognized_coin(backend, scenario_navigator, firmware, navigator):
+    client = Client(backend, use_block_protocol=True)
+    path = "m/44'/784'/0'/0'/0'"
+
+    _, public_key, _, _ = client.get_public_key(path=path)
+    assert len(public_key) == 32
+
+    transaction = base64.b64decode('AAAAAAACAQAkOlErOjssUas7B1ipByHf2etJJYdwBbMTSEy5doj0VgHzIR4AAAAAIN8vTwL8rbbLzRfsdy1PyOXvcrij9n34ovKk2/o0N3wNACBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQEBAQEAAAEBAG02HZIA+4tmm1GrxPh4dKNj3Fry/X/O0WxUh1ovpxisAQkHEsRdw5dbbdY9esFx0S8xZ3rE61Q5gJ3SV2OdlnYVFxwwHgAAAAAgDI4TkhHnVDhJiSloJl/c9O1pBEyKpv0JUSJ/mmyKbuVtNh2SAPuLZptRq8T4eHSjY9xa8v1/ztFsVIdaL6cYrOkCAAAAAAAA8AMmAAAAAAAA')
+
+    object_list = [base64.b64decode('AAMHkOjF9XYq+mdulvsw4s0Mm/3IQNQy7OWHk/VPQtmYGwkFa2lsbGEFS0lMTEEAAQHzIR4AAAAAKCQ6USs6OyxRqzsHWKkHId/Z60klh3AFsxNITLl2iPRW5Rb4fgVVAAAAbTYdkgD7i2abUavE+Hh0o2PcWvL9f87RbFSHWi+nGKwgeQhHBdsHFvOvjCyMxNjkg1Ue4ypBA1B5GpIVylbqy2UAaRQAAAAAAA==')]
 
     def apdu_task():
         return client.sign_tx(path=path, transaction=transaction, object_list=object_list)
