@@ -258,8 +258,7 @@ impl HasObjectData for WithObjectData {
     fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c> {
         async move {
             let mut bs = self.bs.clone();
-            let objects_count: Option<usize> =
-                TryFuture(bs.read()).await.map(|v| usize::from_le_bytes(v));
+            let objects_count: Option<usize> = TryFuture(bs.read()).await.map(usize::from_le_bytes);
 
             match objects_count {
                 None => None,

@@ -809,6 +809,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_move_call<OD: HasObjectData>(
     package: CoinID,
     module: ArrayVec<u8, STRING_LENGTH>,
@@ -855,7 +856,7 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_add_stake");
 
-        if let None = get_arg_input(0).and_then(is_sui_state) {
+        if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
                 core::line!(),
@@ -889,7 +890,7 @@ async fn handle_move_call<OD: HasObjectData>(
 
         match (get_arg_input(2), &recipient_addr) {
             (Some(InputValue::RecipientAddress(addr)), None) => {
-                *recipient_addr = Some(addr.clone());
+                *recipient_addr = Some(*addr);
             }
             _ => {
                 reject_on(
@@ -906,7 +907,7 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_add_stake_mul_coin");
 
-        if let None = get_arg_input(0).and_then(is_sui_state) {
+        if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
                 core::line!(),
@@ -952,7 +953,7 @@ async fn handle_move_call<OD: HasObjectData>(
 
         match (get_arg_input(3), &recipient_addr) {
             (Some(InputValue::RecipientAddress(addr)), None) => {
-                *recipient_addr = Some(addr.clone());
+                *recipient_addr = Some(*addr);
             }
             _ => {
                 reject_on(
@@ -969,7 +970,7 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_withdraw_stake");
 
-        if let None = get_arg_input(0).and_then(is_sui_state) {
+        if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
                 core::line!(),
@@ -1048,6 +1049,7 @@ async fn handle_move_call<OD: HasObjectData>(
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_transfer_object<OD: HasObjectData>(
     coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
     recipient_input: Argument,
@@ -1073,7 +1075,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
                         .await;
                     }
                 }
-                None => *recipient_addr = Some(addr.clone()),
+                None => *recipient_addr = Some(*addr),
             },
             _ => {
                 info!("TransferObject invalid inp_index");
@@ -1139,7 +1141,7 @@ async fn get_coin_amount<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("get_coin_amount trying object_data_source");
-                let coin_data = object_data_source.get_object_data(&digest).await;
+                let coin_data = object_data_source.get_object_data(digest).await;
                 match coin_data {
                     Some((coin_type_, amt)) => {
                         if let Some(v) = coin_type {
@@ -1306,7 +1308,7 @@ async fn handle_split_coins<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("SplitCoins trying object_data_source");
-                let coin_data = object_data_source.get_object_data(&digest).await;
+                let coin_data = object_data_source.get_object_data(digest).await;
                 match coin_data {
                     Some((v, _)) => v,
                     _ => {
@@ -1365,7 +1367,7 @@ async fn handle_split_coins<OD: HasObjectData>(
     let mut coin_amounts = ArrayVec::<u64, SPLIT_COIN_ARRAY_LENGTH>::new();
     for arg in &amounts {
         match arg {
-            Argument::Input(inp_index) => match inputs.get(&inp_index) {
+            Argument::Input(inp_index) => match inputs.get(inp_index) {
                 Some(InputValue::Amount(amt)) => {
                     coin_amounts.push(*amt);
                 }
@@ -1406,7 +1408,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("MergeCoins trying object_data_source");
-                let coin_data = object_data_source.get_object_data(&digest).await;
+                let coin_data = object_data_source.get_object_data(digest).await;
                 match coin_data {
                     Some((v, amt)) => {
                         total_amount_2 += amt;
@@ -1482,7 +1484,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
             Argument::Input(input_ix) => match inputs.get(input_ix) {
                 Some(InputValue::ObjectRef(digest)) => {
                     info!("MergeCoins trying object_data_source");
-                    let coin_data = object_data_source.get_object_data(&digest).await;
+                    let coin_data = object_data_source.get_object_data(digest).await;
                     match coin_data {
                         Some((coin_type_, amt)) => {
                             if coin_type_ != coin_type {
@@ -1605,14 +1607,11 @@ async fn handle_merge_coins<OD: HasObjectData>(
             );
         }
         Argument::NestedResult(command_ix, coin_ix) => {
-            command_results
-                .get_mut(&command_ix)
-                .map(|result| match result {
-                    CommandResult::SplitCoinAmounts(_, coin_amounts) => {
-                        coin_amounts[coin_ix as usize] = total_amount_2;
-                    }
-                    _ => {}
-                });
+            if let Some(CommandResult::SplitCoinAmounts(_, coin_amounts)) =
+                command_results.get_mut(&command_ix)
+            {
+                coin_amounts[coin_ix as usize] = total_amount_2;
+            };
         }
     }
 }

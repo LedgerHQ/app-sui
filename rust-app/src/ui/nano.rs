@@ -25,11 +25,11 @@ impl UserInterface {
         }];
         let success = MultiFieldReview::new(
             &fields,
-            &[&"Provide Public Key"],
+            &["Provide Public Key"],
             None,
-            &"Approve",
+            "Approve",
             Some(&CHECKMARK),
-            &"Reject",
+            "Reject",
             Some(&CROSS),
         )
         .show();
@@ -73,11 +73,11 @@ impl UserInterface {
         let do_review = |fields| {
             MultiFieldReview::new(
                 fields,
-                &[&"Review", &"transaction"],
+                &["Review", "transaction"],
                 Some(&EYE),
-                &"Accept and send",
+                "Accept and send",
                 Some(&CHECKMARK),
-                &"Reject",
+                "Reject",
                 Some(&CROSS),
             )
             .show()
@@ -132,11 +132,11 @@ impl UserInterface {
         let do_review = |fields| {
             MultiFieldReview::new(
                 fields,
-                &[&"Review", &"transaction"],
+                &["Review", "transaction"],
                 Some(&EYE),
-                &"Accept and send",
+                "Accept and send",
                 Some(&CHECKMARK),
-                &"Reject",
+                "Reject",
                 Some(&CROSS),
             )
             .show()
@@ -177,11 +177,11 @@ impl UserInterface {
         let do_review = |fields| {
             MultiFieldReview::new(
                 fields,
-                &[&"Review", &"transaction"],
+                &["Review", "transaction"],
                 Some(&EYE),
-                &"Accept and send",
+                "Accept and send",
                 Some(&CHECKMARK),
-                &"Reject",
+                "Reject",
                 Some(&CROSS),
             )
             .show()
@@ -201,11 +201,11 @@ impl UserInterface {
         }];
         let success = MultiFieldReview::new(
             &fields,
-            &[&"WARNING transaction", &"not recognized"],
+            &["WARNING transaction", "not recognized"],
             Some(&WARNING),
-            &"Accept and send",
+            "Accept and send",
             Some(&CHECKMARK),
-            &"Reject",
+            "Reject",
             Some(&CROSS),
         )
         .show();
