@@ -1,5 +1,5 @@
 use crate::interface::*;
-use crate::parser::common::{CoinID, CoinType, SUI_COIN_DIVISOR, SUI_COIN_ID};
+use crate::parser::common::{CoinType, SUI_COIN_DIVISOR};
 use crate::ui::common::*;
 use crate::utils::*;
 

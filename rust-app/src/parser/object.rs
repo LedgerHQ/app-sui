@@ -2,6 +2,7 @@ use crate::parser::common::*;
 use arrayvec::ArrayVec;
 use core::convert::TryInto;
 use core::future::Future;
+#[cfg(feature = "speculos")]
 use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::SyscallError;
@@ -62,8 +63,8 @@ pub const fn object_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<ObjectInnerSchema, BS, Output = CoinData> {
     Action(
         (DefaultInterp, DefaultInterp, DefaultInterp, DefaultInterp),
-        |(d, _, _, storage_rebate)| {
-            info!("Object: StorageRebate {}", storage_rebate);
+        |(d, _, _, _storage_rebate)| {
+            info!("Object: StorageRebate {}", _storage_rebate);
             Some(d)
         },
     )
@@ -118,8 +119,8 @@ pub const fn move_object_parser<BS: Clone + Readable>(
             DefaultInterp,
             SubInterp(DefaultInterp),
         ),
-        |(object_type, _, sequence_number, d): (_, _, _, ArrayVec<u8, 40>)| {
-            info!("SequenceNumber {}", sequence_number);
+        |(object_type, _, _sequence_number, d): (_, _, _, ArrayVec<u8, 40>)| {
+            info!("SequenceNumber {}", _sequence_number);
             match d.into_inner() {
                 Ok(c) => {
                     let coin_type: CoinType = match object_type {
@@ -210,7 +211,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             SubInterp(DefaultInterp),
             SubInterp(DefaultInterp),
         ),
-        |(address, mut module, mut name, type_tags): (
+        |(address, mut module, mut name, _type_tags): (
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
@@ -225,7 +226,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 "StructTag Name {}",
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
-            info!("StructTag TypeTag len {}", type_tags.len());
+            info!("StructTag TypeTag len {}", _type_tags.len());
             Some((
                 address,
                 module
@@ -371,12 +372,12 @@ impl<BS: Clone + Readable> AsyncParser<OwnerSchema, BS> for DefaultInterp {
             match enum_variant {
                 0 => {
                     info!("OwnerSchema: AddressOwner(SuiAddress)");
-                    let owner = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(
+                    let _owner = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(
                         &DefaultInterp,
                         input,
                     )
                     .await;
-                    info!("OwnerSchema: AddressOwner({})", HexSlice(&owner));
+                    info!("OwnerSchema: AddressOwner({})", HexSlice(&_owner));
                 }
                 1 => {
                     info!("OwnerSchema: ObjectOwner(SuiAddress)");

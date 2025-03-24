@@ -10,13 +10,16 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::ArrayVec;
-use ledger_crypto_helpers::common::{try_option, Address, HexSlice};
+use ledger_crypto_helpers::common::{try_option, Address};
 use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::{StatusWords, SyscallError};
-use ledger_log::{info, trace};
+use ledger_log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
+
+#[cfg(feature = "speculos")]
+use ledger_crypto_helpers::common::HexSlice;
 
 use core::convert::TryFrom;
 use core::future::Future;
