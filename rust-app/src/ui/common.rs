@@ -55,7 +55,7 @@ pub fn get_coin_and_amount_fields(
 #[inline(never)]
 fn get_known_coin_ticker(coin_type: &CoinType) -> Option<(ArrayString<8>, u8)> {
     if *coin_type == SUI_COIN_TYPE {
-        return Some((ArrayString::from(&"SUI").unwrap(), SUI_COIN_DIVISOR));
+        return Some((ArrayString::from("SUI").unwrap(), SUI_COIN_DIVISOR));
     }
 
     for k in KNOWN_COINS {
@@ -69,7 +69,7 @@ fn get_known_coin_ticker(coin_type: &CoinType) -> Option<(ArrayString<8>, u8)> {
         let _ = function.try_extend_from_slice(k.function.as_bytes());
 
         if *coin_type == (coin_id, module, function) {
-            return Some((ArrayString::from(&k.ticker).unwrap(), k.divisor));
+            return Some((ArrayString::from(k.ticker).unwrap(), k.divisor));
         }
     }
     None

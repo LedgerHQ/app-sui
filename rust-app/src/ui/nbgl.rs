@@ -1,10 +1,11 @@
 use crate::interface::*;
-use crate::parser::common::{CoinID, CoinType, SUI_COIN_DIVISOR, SUI_COIN_ID};
+use crate::parser::common::{CoinType, SUI_COIN_DIVISOR};
 use crate::ui::common::*;
 use crate::utils::*;
 
 extern crate alloc;
 use alloc::format;
+use alloc::string::ToString;
 
 use core::cell::RefCell;
 use either::*;
@@ -91,7 +92,7 @@ impl UserInterface {
                     name: coin_str.as_str(),
                     value: id_str.as_str(),
                 };
-                do_review(&[from, to, coin, amt, gas], &"coins")
+                do_review(&[from, to, coin, amt, gas], "coins")
             }
         };
         NbglReviewStatus::new()
@@ -135,11 +136,11 @@ impl UserInterface {
         };
 
         let do_review = |fields| {
-            let first_msg = &format!("Review transaction to stake SUI");
-            let last_msg = &format!("Sign transaction to stake SUI");
+            let first_msg = "Review transaction to stake SUI".to_string();
+            let last_msg = "Sign transaction to stake SUI".to_string();
             NbglReview::new()
                 .glyph(&APP_ICON)
-                .titles(first_msg, "", last_msg)
+                .titles(&first_msg, "", &last_msg)
                 .show(fields)
         };
         let success = do_review(&[from, to, amt, gas]);
@@ -179,11 +180,11 @@ impl UserInterface {
         };
 
         let do_review = |fields| {
-            let first_msg = &format!("Review transaction to unstake SUI");
-            let last_msg = &format!("Sign transaction to unstake SUI");
+            let first_msg = "Review transaction to unstake SUI".to_string();
+            let last_msg = "Sign transaction to unstake SUI".to_string();
             NbglReview::new()
                 .glyph(&APP_ICON)
-                .titles(first_msg, "", last_msg)
+                .titles(&first_msg, "", &last_msg)
                 .show(fields)
         };
         let success = do_review(&[from, amt, gas]);

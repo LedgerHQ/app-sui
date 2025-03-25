@@ -82,7 +82,7 @@ class Client:
         response, chain_code_len, chain_code = pop_size_prefixed_buf_from_buf(response)
         return pub_key_len, pub_key, chain_code_len, chain_code
 
-    def sign_tx(self, path: str, transaction: bytes, object_list: list[bytes] | None = None) -> bytes:
+    def sign_tx(self, path: str, transaction: bytes, object_list: Optional[list[bytes]] = None) -> bytes:
         if object_list is None:
             object_list = []
         tx_len = (len(transaction)).to_bytes(4, byteorder='little')
