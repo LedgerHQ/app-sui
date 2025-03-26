@@ -18,6 +18,7 @@ pin-cell = "0.2.0"
 pin-project = "1.0.10"
 include_gif = "1.0.1"
 hex = { version = "0.4.3", default-features = false }
+hex-literal = { version = "0.4.1" }
 defer = "0.2.1"
 either = { version = "1.14.0", default-features = false }
 
