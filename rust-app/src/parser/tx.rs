@@ -1768,10 +1768,18 @@ const fn object_ref_parser<BS: Readable>(
 }
 
 const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = ()> {
-    Action((DefaultInterp, DefaultInterp, DefaultInterp), |_| {
-        info!("Intent Ok");
-        Some(())
-    })
+    Action(
+        (DefaultInterp, DefaultInterp, DefaultInterp),
+        |(version, scope, app_id)| {
+            if version != 0 || scope != 0 || app_id != 0 {
+                info!("Intent is not TransactionData");
+                None
+            } else {
+                info!("Intent Ok");
+                Some(())
+            }
+        },
+    )
 }
 
 type TransactionDataV1Output<OD> = (
