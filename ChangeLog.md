@@ -1,7 +1,7 @@
 # Change Log
 
 ## 0.2.5
-* Enable blind siging in swap mode
+* Fix displaying of UI warning in swap mode 
 
 ## 0.2.4
 * Add swap support
