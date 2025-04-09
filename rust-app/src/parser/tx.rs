@@ -852,7 +852,7 @@ async fn handle_move_call<OD: HasObjectData>(
         })
     };
 
-    return if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
+    if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake")
     {
         info!("MoveCall 0x3::sui_system::request_add_stake");
@@ -1047,7 +1047,7 @@ async fn handle_move_call<OD: HasObjectData>(
             SyscallError::NotSupported as u16,
         )
         .await
-    };
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
