@@ -498,7 +498,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c, OD: 'c;
+        BS: 'c,
+        OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
@@ -1668,7 +1669,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKin
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c, OD: 'c;
+        BS: 'c,
+        OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let enum_variant =
@@ -1801,7 +1803,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
-        BS: 'c, OD: 'c;
+        BS: 'c,
+        OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let enum_variant =
