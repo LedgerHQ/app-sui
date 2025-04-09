@@ -23,7 +23,8 @@ pub type ObjectInnerSchema = (
 pub type MoveObject = (MoveObjectType, bool, SequenceNumber, ObjectContents);
 
 // Limited to parsing Coin
-pub type ObjectContents = Vec<Byte, 40>;
+pub const OBJECT_CONTENTS_LEN: usize = 80;
+pub type ObjectContents = Vec<Byte, OBJECT_CONTENTS_LEN>;
 pub type Coin = (UID, Amount);
 
 pub struct ObjectDataSchema;
@@ -119,25 +120,32 @@ pub const fn move_object_parser<BS: Clone + Readable>(
             DefaultInterp,
             SubInterp(DefaultInterp),
         ),
-        |(object_type, _, _sequence_number, d): (_, _, _, ArrayVec<u8, 40>)| {
+        |(object_type, _, _sequence_number, d): (_, _, _, ArrayVec<u8, OBJECT_CONTENTS_LEN>)| {
             info!("SequenceNumber {}", _sequence_number);
-            match d.into_inner() {
-                Ok(c) => {
-                    let coin_type: CoinType = match object_type {
-                        MoveObjectType::GasCoin => SUI_COIN_TYPE,
-                        MoveObjectType::StakedSui => SUI_COIN_TYPE,
-                        MoveObjectType::Coin(v) => v,
-                    };
-                    let amount: u64 =
-                        u64::from_le_bytes(c[32..].try_into().expect("amount slice wrong length"));
-                    info!("CoinData 0x{}, {}", HexSlice(&coin_type.0), amount);
-                    Some((coin_type, amount))
-                }
-                Err(_) => {
-                    info!("ObjectContents not of len 40");
+
+            let (coin_type, is_stake) = match object_type {
+                MoveObjectType::GasCoin => (SUI_COIN_TYPE, false),
+                MoveObjectType::StakedSui => (SUI_COIN_TYPE, true),
+                MoveObjectType::Coin(v) => (v, false),
+            };
+            let amount: Option<u64> = match (d.len(), is_stake) {
+                (40, false) => Some(u64::from_le_bytes(
+                    d.as_slice()[32..]
+                        .try_into()
+                        .expect("amount slice wrong length"),
+                )),
+                // StakedSui
+                (80, true) => Some(u64::from_le_bytes(
+                    d.as_slice()[72..]
+                        .try_into()
+                        .expect("amount slice wrong length"),
+                )),
+                _ => {
+                    info!("ObjectContents incorrect");
                     None
                 }
-            }
+            };
+            amount.map(|v| (coin_type, v))
         },
     )
 }
