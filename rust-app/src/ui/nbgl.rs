@@ -117,7 +117,7 @@ impl UserInterface {
             value: &format!("{address}"),
         };
         let to = Field {
-            name: "To",
+            name: "Validator",
             value: &format!("0x{}", HexSlice(&recipient)),
         };
         let gas = Field {
@@ -143,7 +143,7 @@ impl UserInterface {
                 .titles(&first_msg, "", &last_msg)
                 .show(fields)
         };
-        let success = do_review(&[from, to, amt, gas]);
+        let success = do_review(&[from, amt, to, gas]);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);

@@ -111,7 +111,7 @@ impl UserInterface {
             value: &format!("{address}"),
         };
         let to = Field {
-            name: "To",
+            name: "Validator",
             value: &format!("0x{}", HexSlice(&recipient)),
         };
         let gas = Field {
@@ -141,7 +141,7 @@ impl UserInterface {
             )
             .show()
         };
-        let success = do_review(&[from, to, amt, gas]);
+        let success = do_review(&[from, amt, to, gas]);
         if success {
             Some(())
         } else {
