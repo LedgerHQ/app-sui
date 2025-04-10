@@ -279,7 +279,7 @@ pub enum Command {
 pub enum CommandResult {
     SplitCoinAmounts(CoinType, ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>),
     MergedCoin(CoinData),
-    MoveVecMergedCoin(CoinData),
+    MoveVecMergedCoin(TotalCoinAmount),
     StakingPoolSplitCoin(u64),
 }
 
@@ -585,12 +585,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             // Total amount, that we know of, being transferred to recipient
             // This does not contain the amount being transeferred from the
             // GasCoin (in case the entire GasCoin is also being transferred)
-            let mut total_amount: u64 = 0;
-
-            let mut coin_type: Option<CoinType> = None;
-
-            // Are we transferring the entire gas coin?
-            let mut includes_gas_coin: bool = false;
+            let mut total_coin_amount: Option<TotalCoinAmount> = None;
 
             // Amount added to GasCoin via MergeCoins
             // As we don't know the GasCoin coin balance, we only track how much
@@ -636,15 +631,27 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 args,
                                 &inputs,
                                 &mut recipient_addr,
-                                &mut total_amount,
-                                &mut coin_type,
-                                &mut includes_gas_coin,
                                 self.object_data_source.clone(),
                                 &command_results,
                             ))
                             .await;
                             match res {
-                                Left(tx_type_) => tx_type = tx_type_,
+                                Left((tx_type_, total_amt)) => {
+                                    tx_type = tx_type_;
+                                    // As we only support one MoveCall,
+                                    // total_coin_amount should not be Some
+                                    match total_coin_amount {
+                                        None => total_coin_amount = Some(total_amt),
+                                        _ => {
+                                            reject_on(
+                                                core::file!(),
+                                                core::line!(),
+                                                SyscallError::NotSupported as u16,
+                                            )
+                                            .await
+                                        }
+                                    }
+                                }
                                 Right(v) => {
                                     command_results.insert(command_ix, v);
                                 }
@@ -670,9 +677,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 recipient_input,
                                 &inputs,
                                 &mut recipient_addr,
-                                &mut total_amount,
-                                &mut coin_type,
-                                &mut includes_gas_coin,
+                                &mut total_coin_amount,
                                 self.object_data_source.clone(),
                                 &command_results,
                             ))
@@ -704,8 +709,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             let res = NoinlineFut(handle_make_move_vec(
                                 coins,
                                 &mut inputs,
-                                &mut coin_type,
-                                &mut includes_gas_coin,
                                 self.object_data_source.clone(),
                                 &command_results,
                             ))
@@ -716,8 +719,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             }
 
-            let coin_type = match coin_type {
-                Some(v) => v,
+            let (coin_type, mut total_amount, includes_gas_coin) = match total_coin_amount {
+                Some(v) => (v.coin_type, v.total_amount, v.includes_gas_coin),
                 _ => {
                     reject_on(
                         core::file!(),
@@ -829,12 +832,9 @@ async fn handle_move_call<OD: HasObjectData>(
     args: ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
     inputs: &BTreeMap<u16, InputValue>,
     recipient_addr: &mut Option<SuiAddressRaw>,
-    total_amount: &mut u64,
-    coin_type: &mut Option<CoinType>,
-    includes_gas_coin: &mut bool,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
-) -> Either<ProgrammableTransactionTypeState, CommandResult> {
+) -> Either<(ProgrammableTransactionTypeState, TotalCoinAmount), CommandResult> {
     if package != SUI_SYSTEM_ID {
         reject_on(
             core::file!(),
@@ -885,7 +885,7 @@ async fn handle_move_call<OD: HasObjectData>(
         }
 
         // Obtain stake coin balance
-        match args.get(1) {
+        let amt: CommandArgumentAmount = match args.get(1) {
             None => {
                 reject_on(
                     core::file!(),
@@ -895,18 +895,15 @@ async fn handle_move_call<OD: HasObjectData>(
                 .await
             }
             Some(arg) => {
-                NoinlineFut(get_coin_amount(
+                NoinlineFut(get_coin_arg_amount(
                     arg,
                     inputs,
-                    total_amount,
-                    coin_type,
-                    includes_gas_coin,
                     &object_data_source,
                     command_results,
                 ))
-                .await;
+                .await
             }
-        }
+        };
 
         // Obtain validator_address
         match (get_arg_input(2), &recipient_addr) {
@@ -922,7 +919,10 @@ async fn handle_move_call<OD: HasObjectData>(
                 .await
             }
         }
-        Left(ProgrammableTransactionTypeState::StakeTx)
+        Left((
+            ProgrammableTransactionTypeState::StakeTx,
+            to_total_coin_amount(amt),
+        ))
     } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake_mul_coin")
     {
@@ -947,15 +947,12 @@ async fn handle_move_call<OD: HasObjectData>(
 
         // 'stakes' has to be a vector, ie a result of a MakeMoveVec
         // We should already have the sum of amounts of all coins in the vector by now
-        let mut total_amount_2: u64 = 0;
-        if let Some(CommandResult::MoveVecMergedCoin((t, amt))) =
+        let mut total_amt = if let Some(CommandResult::MoveVecMergedCoin(t)) =
             args.get(1).and_then(|v| match v {
                 Argument::Result(ix) => command_results.get(ix),
                 _ => None,
-            })
-        {
-            *coin_type = Some(t.clone());
-            total_amount_2 = *amt;
+            }) {
+            t.clone()
         } else {
             reject_on(
                 core::file!(),
@@ -963,17 +960,15 @@ async fn handle_move_call<OD: HasObjectData>(
                 SyscallError::NotSupported as u16,
             )
             .await
-        }
+        };
 
         // The stake_amount can be optionally specified by the user
         // In the abscence of this the entire amount of 'stakes' will be staked
         match get_arg_input(2) {
             Some(InputValue::OptionalAmount(Some(amt))) => {
-                *total_amount = *amt;
+                total_amt.total_amount = *amt;
             }
-            Some(InputValue::OptionalAmount(None)) => {
-                *total_amount = total_amount_2;
-            }
+            Some(InputValue::OptionalAmount(None)) => {}
             _ => {
                 reject_on(
                     core::file!(),
@@ -998,7 +993,7 @@ async fn handle_move_call<OD: HasObjectData>(
                 .await
             }
         }
-        Left(ProgrammableTransactionTypeState::StakeTx)
+        Left((ProgrammableTransactionTypeState::StakeTx, total_amt))
     } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_withdraw_stake")
     {
@@ -1022,7 +1017,7 @@ async fn handle_move_call<OD: HasObjectData>(
         // Obtain staked_sui amount
         // It is possible to unstake a part of staked amount by first doing
         // 0x3::staking_pool::split on the staked sui coin
-        match args.get(1) {
+        let total_amt = match args.get(1) {
             None => {
                 reject_on(
                     core::file!(),
@@ -1039,24 +1034,26 @@ async fn handle_move_call<OD: HasObjectData>(
                     },
                     _ => None,
                 } {
-                    *total_amount += amt;
-                    *coin_type = Some(SUI_COIN_TYPE);
+                    TotalCoinAmount {
+                        coin_type: SUI_COIN_TYPE,
+                        total_amount: *amt,
+                        includes_gas_coin: false,
+                    }
                 } else {
-                    NoinlineFut(get_coin_amount(
-                        arg,
-                        inputs,
-                        total_amount,
-                        coin_type,
-                        includes_gas_coin,
-                        &object_data_source,
-                        command_results,
-                    ))
-                    .await;
+                    to_total_coin_amount(
+                        NoinlineFut(get_coin_arg_amount(
+                            arg,
+                            inputs,
+                            &object_data_source,
+                            command_results,
+                        ))
+                        .await,
+                    )
                 }
             }
-        }
+        };
 
-        Left(ProgrammableTransactionTypeState::UnstakeTx)
+        Left((ProgrammableTransactionTypeState::UnstakeTx, total_amt))
     } else if core::str::from_utf8(module.as_slice()) == Ok("staking_pool")
         && core::str::from_utf8(function.as_slice()) == Ok("split")
     {
@@ -1093,15 +1090,12 @@ async fn handle_move_call<OD: HasObjectData>(
 }
 
 // Obtain the recipient address and total value of coins being transferred
-#[allow(clippy::too_many_arguments)]
 async fn handle_transfer_object<OD: HasObjectData>(
     coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
     recipient_input: Argument,
     inputs: &BTreeMap<u16, InputValue>,
     recipient_addr: &mut Option<SuiAddressRaw>,
-    total_amount: &mut u64,
-    coin_type: &mut Option<CoinType>,
-    includes_gas_coin: &mut bool,
+    total_coin_amount: &mut Option<TotalCoinAmount>,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
 ) {
@@ -1141,35 +1135,90 @@ async fn handle_transfer_object<OD: HasObjectData>(
         }
     }
     // set total_amount
-    for coin in &coins {
-        get_coin_amount(
-            coin,
+    *total_coin_amount = Some(
+        get_total_amount_for_coins(
+            coins.as_slice(),
+            total_coin_amount.clone(),
             inputs,
-            total_amount,
-            coin_type,
-            includes_gas_coin,
             &object_data_source,
             command_results,
         )
-        .await;
+        .await,
+    );
+}
+
+#[derive(Clone)]
+pub struct TotalCoinAmount {
+    total_amount: u64,
+    coin_type: CoinType,
+    includes_gas_coin: bool,
+}
+
+// Total amount referred by a command Argument of type coin
+#[derive(Clone)]
+pub enum CommandArgumentAmount {
+    Coin { coin_type: CoinType, amount: u64 },
+    GasCoin,
+}
+
+fn to_total_coin_amount(c: CommandArgumentAmount) -> TotalCoinAmount {
+    match c {
+        CommandArgumentAmount::GasCoin => TotalCoinAmount {
+            total_amount: 0,
+            coin_type: SUI_COIN_TYPE,
+            includes_gas_coin: true,
+        },
+        CommandArgumentAmount::Coin { coin_type, amount } => TotalCoinAmount {
+            total_amount: amount,
+            coin_type,
+            includes_gas_coin: false,
+        },
     }
 }
 
-async fn get_coin_amount<OD: HasObjectData>(
-    coin: &Argument,
+fn add_to_total_coin_amount(
+    t: TotalCoinAmount,
+    c: CommandArgumentAmount,
+) -> Option<TotalCoinAmount> {
+    match c {
+        CommandArgumentAmount::GasCoin => {
+            if t.coin_type != SUI_COIN_TYPE || t.includes_gas_coin {
+                None
+            } else {
+                Some(TotalCoinAmount {
+                    includes_gas_coin: true,
+                    ..t
+                })
+            }
+        }
+        CommandArgumentAmount::Coin { coin_type, amount } => {
+            if t.coin_type != coin_type {
+                None
+            } else {
+                Some(TotalCoinAmount {
+                    total_amount: t.total_amount + amount,
+                    ..t
+                })
+            }
+        }
+    }
+}
+
+// Add up the amount from all coins, while checking that the coin types match
+async fn get_total_amount_for_coins<OD: HasObjectData>(
+    coins: &[Argument],
+    maybe_total_amount: Option<TotalCoinAmount>,
     inputs: &BTreeMap<u16, InputValue>,
-    total_amount: &mut u64,
-    coin_type: &mut Option<CoinType>,
-    includes_gas_coin: &mut bool,
     object_data_source: &OD,
     command_results: &BTreeMap<u16, CommandResult>,
-) {
-    info!("get_coin_amount for {:?}", coin);
-    match coin {
-        Argument::GasCoin => {
-            if let Some((id_, _, _)) = coin_type {
-                if *id_ != SUI_COIN_ID {
-                    info!("get_coin_amount mismatch in coin_id(s)");
+) -> TotalCoinAmount {
+    if let Some((first, remaining)) = coins.split_first() {
+        let amt = get_coin_arg_amount(first, inputs, object_data_source, command_results).await;
+        let mut total_amount = match maybe_total_amount {
+            None => to_total_coin_amount(amt),
+            Some(t) => match add_to_total_coin_amount(t, amt) {
+                Some(v) => v,
+                None => {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -1177,34 +1226,53 @@ async fn get_coin_amount<OD: HasObjectData>(
                     )
                     .await
                 }
-            } else {
-                *coin_type = Some(SUI_COIN_TYPE.clone());
+            },
+        };
+
+        for coin in remaining {
+            let amt = get_coin_arg_amount(coin, inputs, object_data_source, command_results).await;
+            match add_to_total_coin_amount(total_amount.clone(), amt) {
+                Some(v) => total_amount = v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
             }
-            *includes_gas_coin = true;
         }
+        total_amount
+    } else {
+        reject_on(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await
+    }
+}
+
+// Get the amount and coin type for the given Argument
+async fn get_coin_arg_amount<OD: HasObjectData>(
+    coin: &Argument,
+    inputs: &BTreeMap<u16, InputValue>,
+    object_data_source: &OD,
+    command_results: &BTreeMap<u16, CommandResult>,
+) -> CommandArgumentAmount {
+    info!("get_coin_arg_amount for {:?}", coin);
+
+    match coin {
+        Argument::GasCoin => CommandArgumentAmount::GasCoin,
         Argument::Input(input_ix) => match inputs.get(input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
-                info!("get_coin_amount trying object_data_source");
+                info!("get_coin_arg_amount trying object_data_source");
                 let coin_data = object_data_source.get_object_data(digest).await;
                 match coin_data {
-                    Some((coin_type_, amt)) => {
-                        if let Some(v) = coin_type {
-                            if *v != coin_type_ {
-                                info!("get_coin_amount mismatch in coin_type(s)");
-                                reject_on(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await
-                            }
-                        } else {
-                            *coin_type = Some(coin_type_.clone());
-                        }
-                        *total_amount += amt
-                    }
+                    Some((coin_type, amount)) => CommandArgumentAmount::Coin { coin_type, amount },
                     _ => {
-                        info!("get_coin_amount Coin Object not found");
+                        info!("get_coin_arg_amount Coin Object not found");
                         reject_on(
                             core::file!(),
                             core::line!(),
@@ -1214,24 +1282,12 @@ async fn get_coin_amount<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((coin_type_, amt))) => {
-                if let Some(v) = coin_type {
-                    if *v != *coin_type_ {
-                        info!("get_coin_amount mismatch in coin_type(s)");
-                        reject_on(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await
-                    }
-                } else {
-                    *coin_type = Some(coin_type_.clone());
-                }
-                *total_amount += amt;
-            }
+            Some(InputValue::Object((coin_type, amount))) => CommandArgumentAmount::Coin {
+                coin_type: coin_type.clone(),
+                amount: *amount,
+            },
             Some(_) => {
-                info!("get_coin_amount input refers to non ObjectRef");
+                info!("get_coin_arg_amount input refers to non ObjectRef");
                 reject_on(
                     core::file!(),
                     core::line!(),
@@ -1240,7 +1296,7 @@ async fn get_coin_amount<OD: HasObjectData>(
                 .await
             }
             None => {
-                info!("get_coin_amount input not found");
+                info!("get_coin_arg_amount input not found");
                 reject_on(
                     core::file!(),
                     core::line!(),
@@ -1250,22 +1306,12 @@ async fn get_coin_amount<OD: HasObjectData>(
             }
         },
         Argument::NestedResult(command_ix, coin_ix) => match command_results.get(command_ix) {
-            Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
-                if let Some(v) = coin_type {
-                    if *v != *coin_type_ {
-                        info!("get_coin_amount mismatch in coin_type(s)");
-                        reject_on(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await
+            Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
+                if let Some(amount) = coin_amounts.get(*coin_ix as usize) {
+                    CommandArgumentAmount::Coin {
+                        coin_type: coin_type.clone(),
+                        amount: *amount,
                     }
-                } else {
-                    *coin_type = Some(coin_type_.clone());
-                }
-                if let Some(amt) = coin_amounts.get(*coin_ix as usize) {
-                    *total_amount += amt;
                 } else {
                     reject_on(
                         core::file!(),
@@ -1285,22 +1331,12 @@ async fn get_coin_amount<OD: HasObjectData>(
             }
         },
         Argument::Result(command_ix) => match command_results.get(command_ix) {
-            Some(CommandResult::SplitCoinAmounts(coin_type_, coin_amounts)) => {
-                if let Some(v) = coin_type {
-                    if *v != *coin_type_ {
-                        info!("get_coin_amount mismatch in coin_type(s)");
-                        reject_on(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await
-                    }
-                } else {
-                    *coin_type = Some(coin_type_.clone());
-                }
+            Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
                 if coin_amounts.len() == 1 {
-                    *total_amount += coin_amounts[0];
+                    CommandArgumentAmount::Coin {
+                        coin_type: coin_type.clone(),
+                        amount: coin_amounts[0],
+                    }
                 } else {
                     reject_on(
                         core::file!(),
@@ -1310,22 +1346,10 @@ async fn get_coin_amount<OD: HasObjectData>(
                     .await
                 }
             }
-            Some(CommandResult::MergedCoin((coin_type_, amt))) => {
-                if let Some(v) = coin_type {
-                    if *v != *coin_type_ {
-                        info!("get_coin_amount mismatch in coin_type(s)");
-                        reject_on(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await
-                    }
-                } else {
-                    *coin_type = Some(coin_type_.clone());
-                }
-                *total_amount += amt;
-            }
+            Some(CommandResult::MergedCoin((coin_type, amount))) => CommandArgumentAmount::Coin {
+                coin_type: coin_type.clone(),
+                amount: *amount,
+            },
             _ => {
                 reject_on(
                     core::file!(),
@@ -1668,38 +1692,18 @@ async fn handle_merge_coins<OD: HasObjectData>(
 async fn handle_make_move_vec<OD: HasObjectData>(
     coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
     inputs: &mut BTreeMap<u16, InputValue>,
-    coin_type: &mut Option<CoinType>,
-    includes_gas_coin: &mut bool,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
 ) -> CommandResult {
-    let mut total_amount_2: u64 = 0;
-    for coin in &coins {
-        get_coin_amount(
-            coin,
-            inputs,
-            &mut total_amount_2,
-            coin_type,
-            includes_gas_coin,
-            &object_data_source,
-            command_results,
-        )
-        .await;
-    }
-    CommandResult::MoveVecMergedCoin((
-        match coin_type {
-            Some(v) => v.clone(),
-            _ => {
-                reject_on(
-                    core::file!(),
-                    core::line!(),
-                    SyscallError::NotSupported as u16,
-                )
-                .await
-            }
-        },
-        total_amount_2,
-    ))
+    let total_coin_amount = get_total_amount_for_coins(
+        coins.as_slice(),
+        None,
+        inputs,
+        &object_data_source,
+        command_results,
+    )
+    .await;
+    CommandResult::MoveVecMergedCoin(total_coin_amount)
 }
 
 pub struct TransactionKindParser<OD> {
