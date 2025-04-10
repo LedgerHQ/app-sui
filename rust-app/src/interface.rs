@@ -17,8 +17,7 @@ pub enum ParseChecks {
 // Payload for a public key request
 pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
-#[allow(dead_code)]
-pub struct SuiPubKeyAddress(ledger_device_sdk::ecc::ECPublicKey<65, 'E'>, SuiAddressRaw);
+pub struct SuiPubKeyAddress(SuiAddressRaw);
 
 use arrayvec::ArrayVec;
 use ledger_crypto_helpers::common::{Address, HexSlice};
@@ -37,16 +36,16 @@ impl Address<SuiPubKeyAddress, ledger_device_sdk::ecc::ECPublicKey<65, 'E'>> for
         let mut hasher: Blake2b = Hasher::new();
         hasher.update(&tmp);
         let hash: [u8; SUI_ADDRESS_LENGTH] = hasher.finalize();
-        Ok(SuiPubKeyAddress(key.clone(), hash))
+        Ok(SuiPubKeyAddress(hash))
     }
     fn get_binary_address(&self) -> &[u8] {
-        &self.1
+        &self.0
     }
 }
 
 impl core::fmt::Display for SuiPubKeyAddress {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "0x{}", HexSlice(&self.1))
+        write!(f, "0x{}", HexSlice(&self.0))
     }
 }
 
