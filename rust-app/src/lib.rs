@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(incomplete_features)]
 #![feature(stmt_expr_attributes)]
 #![feature(adt_const_params)]
 #![feature(type_alias_impl_trait)]

@@ -128,6 +128,9 @@ pub const fn move_object_parser<BS: Clone + Readable>(
                 MoveObjectType::StakedSui => (SUI_COIN_TYPE, true),
                 MoveObjectType::Coin(v) => (v, false),
             };
+
+            // A coin object is always of size 40, and StakedSui is 80
+            // Last 8 bytes contain the balance amount in both
             let amount: Option<u64> = match (d.len(), is_stake) {
                 (40, false) => Some(u64::from_le_bytes(
                     d.as_slice()[32..]

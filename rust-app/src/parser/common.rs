@@ -23,7 +23,6 @@ pub type Amount = U64LE;
 pub type U64LE = U64<{ Endianness::Little }>;
 pub type U16LE = U16<{ Endianness::Little }>;
 
-// TODO: confirm if 33 is indeed ok for all uses of SHA3_256_HASH
 #[allow(non_camel_case_types)]
 pub type SHA3_256_HASH = Array<Byte, 33>;
 

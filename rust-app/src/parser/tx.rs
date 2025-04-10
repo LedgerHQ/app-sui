@@ -326,59 +326,62 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                 }
                 1 => {
                     info!("CommandSchema: TransferObject");
-                    let v1 = <SubInterp<DefaultInterp> as AsyncParser<
+                    let objects = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, TRANSFER_OBJECT_ARRAY_LENGTH>,
                         BS,
                     >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
-                    let v2 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
+                    let recipient = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
                     )
                     .await;
-                    Command::TransferObject(v1, v2)
+                    Command::TransferObject(objects, recipient)
                 }
                 2 => {
                     info!("CommandSchema: SplitCoins");
-                    let v1 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
+                    let coin = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
                         &DefaultInterp,
                         input,
                     )
                     .await;
-                    let v2 = <SubInterp<DefaultInterp> as AsyncParser<
+                    let amounts = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, SPLIT_COIN_ARRAY_LENGTH>,
                         BS,
                     >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
-                    Command::SplitCoins(v1, v2)
+                    Command::SplitCoins(coin, amounts)
                 }
                 3 => {
                     info!("CommandSchema: MergeCoins");
-                    let v1 = <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
-                    let v2 = <SubInterp<DefaultInterp> as AsyncParser<
+                    let destination_coin =
+                        <DefaultInterp as AsyncParser<ArgumentSchema, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        )
+                        .await;
+                    let coins = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, MERGE_COIN_ARRAY_LENGTH>,
                         BS,
                     >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
-                    Command::MergeCoins(v1, v2)
+                    Command::MergeCoins(destination_coin, coins)
                 }
                 5 => {
                     info!("CommandSchema: MakeMoveVec");
+                    // We don't support TypeInput, so we parse success only if
+                    // the Option<TypeInput> is None (which is idential to a Vec of size 0)
                     <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
                         &SubInterp(DefaultInterp),
                         input,
                     )
                     .await;
-                    let v1 = <SubInterp<DefaultInterp> as AsyncParser<
+                    let args = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, MAKE_MOVE_VEC_ARRAY_LENGTH>,
                         BS,
                     >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
-                    Command::MakeMoveVec(v1)
+                    Command::MakeMoveVec(args)
                 }
                 _ => {
                     info!("CommandSchema: Unknown enum: {}", enum_variant);
@@ -481,6 +484,11 @@ pub enum ProgrammableTransaction {
     },
 }
 
+// As we parse each Command we need to keep track of what kind of a transaction are we parsing
+// Currently only three are supported: TransferTx, StakeTx and UnstakeTx
+// Command::SplitCoins, Command::MergeCoins, and Command::MakeMoveVec can be present in any of the three
+// Command::TransferObject can be present only in TransferTx
+// Command::MoveCall can be present only in StakeTx/UnstakeTx
 pub enum ProgrammableTransactionTypeState {
     UnknownTx,
     TransferTx,
@@ -575,16 +583,18 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             let mut recipient_addr = None;
 
             // Total amount, that we know of, being transferred to recipient
-            // Does not contain amount from GasCoin, in case the entire GasCoin is also being transferred
+            // This does not contain the amount being transeferred from the
+            // GasCoin (in case the entire GasCoin is also being transferred)
             let mut total_amount: u64 = 0;
 
             let mut coin_type: Option<CoinType> = None;
 
-            // Are we transferring entire gas coin?
+            // Are we transferring the entire gas coin?
             let mut includes_gas_coin: bool = false;
 
             // Amount added to GasCoin via MergeCoins
-            // as we don't know the GasCoin coin balance, we only track the any additions here
+            // As we don't know the GasCoin coin balance, we only track how much
+            // we have added to the GasCoin by merge of other coins
             let mut added_amount_to_gas_coin: u64 = 0;
 
             let mut tx_type: ProgrammableTransactionTypeState =
@@ -733,6 +743,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     };
 
                     if coin_type.0 != SUI_COIN_ID {
+                        // Transfer of GasCoin with non SUI coins is not supported
                         if includes_gas_coin {
                             reject_on(
                                 core::file!(),
@@ -857,6 +868,13 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_add_stake");
 
+        // Function args
+        // public entry fun request_add_stake(
+        //     wrapper: &mut SuiSystemState,
+        //     stake: Coin<SUI>,
+        //     validator_address: address,
+        //     ctx: &mut TxContext,
+
         if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
@@ -866,6 +884,7 @@ async fn handle_move_call<OD: HasObjectData>(
             .await
         }
 
+        // Obtain stake coin balance
         match args.get(1) {
             None => {
                 reject_on(
@@ -889,6 +908,7 @@ async fn handle_move_call<OD: HasObjectData>(
             }
         }
 
+        // Obtain validator_address
         match (get_arg_input(2), &recipient_addr) {
             (Some(InputValue::RecipientAddress(addr)), None) => {
                 *recipient_addr = Some(*addr);
@@ -908,6 +928,14 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_add_stake_mul_coin");
 
+        // Function args
+        // public entry fun request_add_stake_mul_coin(
+        //     wrapper: &mut SuiSystemState,
+        //     stakes: vector<Coin<SUI>>,
+        //     stake_amount: option::Option<u64>,
+        //     validator_address: address,
+        //     ctx: &mut TxContext,
+
         if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
@@ -917,6 +945,8 @@ async fn handle_move_call<OD: HasObjectData>(
             .await
         }
 
+        // 'stakes' has to be a vector, ie a result of a MakeMoveVec
+        // We should already have the sum of amounts of all coins in the vector by now
         let mut total_amount_2: u64 = 0;
         if let Some(CommandResult::MoveVecMergedCoin((t, amt))) =
             args.get(1).and_then(|v| match v {
@@ -935,6 +965,8 @@ async fn handle_move_call<OD: HasObjectData>(
             .await
         }
 
+        // The stake_amount can be optionally specified by the user
+        // In the abscence of this the entire amount of 'stakes' will be staked
         match get_arg_input(2) {
             Some(InputValue::OptionalAmount(Some(amt))) => {
                 *total_amount = *amt;
@@ -952,6 +984,7 @@ async fn handle_move_call<OD: HasObjectData>(
             }
         }
 
+        // Obtain validator_address
         match (get_arg_input(3), &recipient_addr) {
             (Some(InputValue::RecipientAddress(addr)), None) => {
                 *recipient_addr = Some(*addr);
@@ -971,6 +1004,12 @@ async fn handle_move_call<OD: HasObjectData>(
     {
         info!("MoveCall 0x3::sui_system::request_withdraw_stake");
 
+        // Function args
+        // public entry fun request_withdraw_stake(
+        //     wrapper: &mut SuiSystemState,
+        //     staked_sui: StakedSui,
+        //     ctx: &mut TxContext,
+
         if get_arg_input(0).and_then(is_sui_state).is_none() {
             reject_on(
                 core::file!(),
@@ -980,6 +1019,9 @@ async fn handle_move_call<OD: HasObjectData>(
             .await
         }
 
+        // Obtain staked_sui amount
+        // It is possible to unstake a part of staked amount by first doing
+        // 0x3::staking_pool::split on the staked sui coin
         match args.get(1) {
             None => {
                 reject_on(
@@ -1050,6 +1092,7 @@ async fn handle_move_call<OD: HasObjectData>(
     }
 }
 
+// Obtain the recipient address and total value of coins being transferred
 #[allow(clippy::too_many_arguments)]
 async fn handle_transfer_object<OD: HasObjectData>(
     coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
@@ -1295,6 +1338,7 @@ async fn get_coin_amount<OD: HasObjectData>(
     }
 }
 
+// Obtain the coin type and the array of amounts it is being split into
 async fn handle_split_coins<OD: HasObjectData>(
     coin: Argument,
     amounts: ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>,
@@ -1395,6 +1439,9 @@ async fn handle_split_coins<OD: HasObjectData>(
     CommandResult::SplitCoinAmounts(coin_type, coin_amounts)
 }
 
+// The array of 'coins' are merged into the 'dest_coin'
+// The value of the 'dest_coin' will be modified in place
+// 'dest_coin' can be a GasCoin, input object, or a result of a previous command
 async fn handle_merge_coins<OD: HasObjectData>(
     dest_coin: Argument,
     coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
@@ -1617,6 +1664,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
     }
 }
 
+// Obtains the total amount of all coins which are part of the resultant vector and the coin type
 async fn handle_make_move_vec<OD: HasObjectData>(
     coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
     inputs: &mut BTreeMap<u16, InputValue>,
@@ -1823,6 +1871,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 
                     let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
 
+                    // Try to find the total amount of all gas payment objects
+                    // This value may be necessary if the transaction contains transfer of entire GasCoin
                     let mut total_gas_amount: Option<u64> = Some(0);
                     for digest in gas_coins {
                         if let Some(amt0) = total_gas_amount {
@@ -1894,14 +1944,16 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, gas_coin_amount) = d.1;
-                    let total_amount_ = if includes_gas_coin {
-                        gas_coin_amount.map(|amt| amount + amt)
+                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let maybe_total_amount = if includes_gas_coin {
+                        // We will treat this as an unknown tx if we don't know the
+                        // total value of all gas payment objects
+                        maybe_gas_coin_amount.map(|amt| amount + amt)
                     } else {
                         Some(amount)
                     };
 
-                    total_amount_.map(|total_amount| KnownTx::TransferTx {
+                    maybe_total_amount.map(|total_amount| KnownTx::TransferTx {
                         recipient,
                         coin_type: SUI_COIN_TYPE,
                         total_amount,
@@ -1926,22 +1978,22 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, gas_coin_amount) = d.1;
-                    let total_amount_ = if includes_gas_coin {
-                        gas_coin_amount.map(|amt| amount + amt)
+                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let maybe_total_amount = if includes_gas_coin {
+                        // We will treat this as an unknown tx if we don't know the
+                        // total value of all gas payment objects
+                        maybe_gas_coin_amount.map(|amt| amount + amt)
                     } else {
                         Some(amount)
                     };
 
-                    info!("StakeTx: {}, {}", HexSlice(&recipient), amount);
-                    total_amount_.map(|total_amount| KnownTx::StakeTx {
+                    maybe_total_amount.map(|total_amount| KnownTx::StakeTx {
                         recipient,
                         total_amount,
                         gas_budget,
                     })
                 }
                 ProgrammableTransaction::UnstakeTx { total_amount } => {
-                    info!("UnstakeTx: {}", total_amount);
                     let (gas_budget, _) = d.1;
                     Some(KnownTx::UnstakeTx {
                         total_amount,
