@@ -66,7 +66,7 @@ pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
 // Outputs a string with the amount of SUI.
 //
 // Max sui amount 10_000_000_000 SUI.
-// So max string length is 11 (quotient) + 1 (dot) + 12 (reminder) + 4 (text) = 28
+// So max string length is 11 (quotient) + 1 (dot) + 12 (remainder) + 4 (text) = 28
 pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayString<28>, Error> {
     let (quotient, remainder_str) = get_amount_in_decimals(params.amount, SUI_COIN_DIVISOR);
 
