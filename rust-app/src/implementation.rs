@@ -284,7 +284,7 @@ impl HasObjectData for WithObjectData {
                         }
                     }
                     info!(
-                        "get_object_data: did not found object with digest {}",
+                        "get_object_data: did not find object with digest {}",
                         HexSlice(digest)
                     );
                     None

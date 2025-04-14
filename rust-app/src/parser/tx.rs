@@ -312,6 +312,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                         input,
                     )
                     .await;
+                    // TypeInput is not supported, hence vec of length 0
                     <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
                         &SubInterp(DefaultInterp),
                         input,
@@ -536,7 +537,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             }
 
-            // Handle inputs
+            // Parse inputs
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
@@ -596,7 +597,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             let mut tx_type: ProgrammableTransactionTypeState =
                 ProgrammableTransactionTypeState::UnknownTx;
 
-            // Handle commands
+            // Parse commands
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
@@ -671,6 +672,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             }
                         }
                         Command::TransferObject(coins, recipient_input) => {
+                            // Multiple TransferObject commands are supported as
+                            // long as the recipient and coin_type are same
                             match tx_type {
                                 ProgrammableTransactionTypeState::UnknownTx => {
                                     tx_type = ProgrammableTransactionTypeState::TransferTx;
@@ -732,6 +735,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             }
 
+            // We must have the coin_type info by now, irrespective of the tx type
             let (coin_type, mut total_amount, includes_gas_coin) = match total_coin_amount {
                 Some(v) => (v.coin_type, v.total_amount, v.includes_gas_coin),
                 _ => {
@@ -1171,7 +1175,7 @@ pub struct TotalCoinAmount {
     includes_gas_coin: bool,
 }
 
-// Total amount referred by a command Argument of type coin
+// Total amount referred by a command Argument (of type coin)
 #[derive(Clone)]
 pub enum CommandArgumentAmount {
     Coin { coin_type: CoinType, amount: u64 },
@@ -1272,6 +1276,8 @@ async fn get_total_amount_for_coins<OD: HasObjectData>(
 }
 
 // Get the amount and coin type for the given Argument
+// This will reject if the Argument is not referring to a coin
+// or if the amount and coin type info cannot be obtained
 async fn get_coin_arg_amount<OD: HasObjectData>(
     coin: &Argument,
     inputs: &BTreeMap<u16, InputValue>,

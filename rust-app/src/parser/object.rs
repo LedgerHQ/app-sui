@@ -22,7 +22,8 @@ pub type ObjectInnerSchema = (
 
 pub type MoveObject = (MoveObjectType, bool, SequenceNumber, ObjectContents);
 
-// Limited to parsing Coin
+// The object content parsing is limited to either a simple Coin (40 bytes) or StakedSui (80 bytes)
+// We will simply reject parsing objects with content size greater than OBJECT_CONTENTS_LEN
 pub const OBJECT_CONTENTS_LEN: usize = 80;
 pub type ObjectContents = Vec<Byte, OBJECT_CONTENTS_LEN>;
 pub type Coin = (UID, Amount);
@@ -30,7 +31,7 @@ pub type Coin = (UID, Amount);
 pub struct ObjectDataSchema;
 pub struct OwnerSchema;
 
-pub type TransactionDigest = SHA3_256_HASH;
+pub type TransactionDigest = Sha3_256Hash;
 pub type UID = ObjectID;
 
 pub type StorageRebate = U64LE;
