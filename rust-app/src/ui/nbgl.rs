@@ -112,6 +112,7 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
     ) -> Option<()> {
+        self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
@@ -160,6 +161,7 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
     ) -> Option<()> {
+        self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
