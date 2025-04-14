@@ -1,8 +1,8 @@
 use core::{convert::TryInto, fmt::Write};
 
 use arrayvec::ArrayString;
-#[allow(unused_imports)]
-use ledger_crypto_helpers::common::HexSlice;
+// #[allow(unused_imports)]
+// use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::{
     common::{Address, CryptographyError},
     eddsa::with_public_keys,
@@ -49,7 +49,7 @@ impl From<CryptographyError> for Error {
 pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
     let ref_addr = &params.ref_address;
     trace!("check_address: dpath: {:X?}", params.dpath);
-    trace!("check_address: ref: 0x{}", HexSlice(ref_addr));
+    // trace!("check_address: ref: 0x{}", HexSlice(ref_addr));
 
     Ok(with_public_keys(
         &params.dpath,
