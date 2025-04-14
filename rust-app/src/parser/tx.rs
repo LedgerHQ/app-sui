@@ -489,6 +489,7 @@ pub enum ProgrammableTransaction {
 // Command::SplitCoins, Command::MergeCoins, and Command::MakeMoveVec can be present in any of the three
 // Command::TransferObject can be present only in TransferTx
 // Command::MoveCall can be present only in StakeTx/UnstakeTx
+#[derive(PartialEq)]
 pub enum ProgrammableTransactionTypeState {
     UnknownTx,
     TransferTx,
@@ -630,14 +631,26 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 function,
                                 args,
                                 &inputs,
-                                &mut recipient_addr,
                                 self.object_data_source.clone(),
                                 &command_results,
                             ))
                             .await;
                             match res {
-                                Left((tx_type_, total_amt)) => {
+                                Left((tx_type_, total_amt, maybe_validator_addr)) => {
                                     tx_type = tx_type_;
+                                    if tx_type == ProgrammableTransactionTypeState::StakeTx {
+                                        match (recipient_addr, maybe_validator_addr) {
+                                            (None, Some(addr)) => recipient_addr = Some(addr),
+                                            _ => {
+                                                reject_on(
+                                                    core::file!(),
+                                                    core::line!(),
+                                                    SyscallError::NotSupported as u16,
+                                                )
+                                                .await
+                                            }
+                                        }
+                                    }
                                     // As we only support one MoveCall,
                                     // total_coin_amount should not be Some
                                     match total_coin_amount {
@@ -824,17 +837,22 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_move_call<OD: HasObjectData>(
     package: CoinID,
     module: ArrayVec<u8, STRING_LENGTH>,
     function: ArrayVec<u8, STRING_LENGTH>,
     args: ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
     inputs: &BTreeMap<u16, InputValue>,
-    recipient_addr: &mut Option<SuiAddressRaw>,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
-) -> Either<(ProgrammableTransactionTypeState, TotalCoinAmount), CommandResult> {
+) -> Either<
+    (
+        ProgrammableTransactionTypeState,
+        TotalCoinAmount,
+        Option<SuiAddressRaw>,
+    ),
+    CommandResult,
+> {
     if package != SUI_SYSTEM_ID {
         reject_on(
             core::file!(),
@@ -906,10 +924,12 @@ async fn handle_move_call<OD: HasObjectData>(
         };
 
         // Obtain validator_address
-        match (get_arg_input(2), &recipient_addr) {
-            (Some(InputValue::RecipientAddress(addr)), None) => {
-                *recipient_addr = Some(*addr);
-            }
+        match get_arg_input(2) {
+            Some(InputValue::RecipientAddress(addr)) => Left((
+                ProgrammableTransactionTypeState::StakeTx,
+                to_total_coin_amount(amt),
+                Some(*addr),
+            )),
             _ => {
                 reject_on(
                     core::file!(),
@@ -919,10 +939,6 @@ async fn handle_move_call<OD: HasObjectData>(
                 .await
             }
         }
-        Left((
-            ProgrammableTransactionTypeState::StakeTx,
-            to_total_coin_amount(amt),
-        ))
     } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake_mul_coin")
     {
@@ -980,10 +996,12 @@ async fn handle_move_call<OD: HasObjectData>(
         }
 
         // Obtain validator_address
-        match (get_arg_input(3), &recipient_addr) {
-            (Some(InputValue::RecipientAddress(addr)), None) => {
-                *recipient_addr = Some(*addr);
-            }
+        match get_arg_input(3) {
+            Some(InputValue::RecipientAddress(addr)) => Left((
+                ProgrammableTransactionTypeState::StakeTx,
+                total_amt,
+                Some(*addr),
+            )),
             _ => {
                 reject_on(
                     core::file!(),
@@ -993,7 +1011,6 @@ async fn handle_move_call<OD: HasObjectData>(
                 .await
             }
         }
-        Left((ProgrammableTransactionTypeState::StakeTx, total_amt))
     } else if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_withdraw_stake")
     {
@@ -1053,7 +1070,7 @@ async fn handle_move_call<OD: HasObjectData>(
             }
         };
 
-        Left((ProgrammableTransactionTypeState::UnstakeTx, total_amt))
+        Left((ProgrammableTransactionTypeState::UnstakeTx, total_amt, None))
     } else if core::str::from_utf8(module.as_slice()) == Ok("staking_pool")
         && core::str::from_utf8(function.as_slice()) == Ok("split")
     {
