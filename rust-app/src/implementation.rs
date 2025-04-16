@@ -702,7 +702,10 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             // Show prompts after all inputs have been parsed
             prompt_tx_params(&ui, path.as_slice(), tx_params).await;
         }
-    } else if !settings.get_blind_sign() || ctx.is_swap() {
+    } else if ctx.is_swap() {
+        // Reject unknown transactions in swap mode
+        reject::<()>(SyscallError::NotSupported as u16).await;
+    } else if !settings.get_blind_sign() {
         ui.warn_tx_not_recognized();
         reject::<()>(SyscallError::NotSupported as u16).await;
     }
