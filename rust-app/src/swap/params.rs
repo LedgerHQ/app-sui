@@ -93,8 +93,8 @@ fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
     }
 
     for i in (0..buf.len()).step_by(BIP32_PATH_SEGMENT_LEN) {
-        // For some reason SUI coin app expects path in little endian byte order
-        let path_seg = u32::from_le_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
+        // For swap params, path segments are stored in big endian
+        let path_seg = u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
 
         out_path[i / BIP32_PATH_SEGMENT_LEN] = path_seg;
     }
