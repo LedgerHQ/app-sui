@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.2.6
+* Change address size (64 => 66) in swap params
+* Fix BE dpath endianness in swap params
+
 ## 0.2.5
 * Fix displaying of UI warning in swap mode 
 

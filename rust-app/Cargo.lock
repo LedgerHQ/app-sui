@@ -463,9 +463,9 @@ dependencies = [
 
 [[package]]
 name = "ledger_device_sdk"
-version = "1.22.3"
+version = "1.22.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62a7e0741edfd8cbf83a2488dba2583535f9ff90a657812203d09c63bcd3222c"
+checksum = "a6be59f37c8910109f9b80da18693dd8b1eccb569c1b1270d133cc3af46435a9"
 dependencies = [
  "const-zero",
  "include_gif",
@@ -817,7 +817,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "sui"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",
