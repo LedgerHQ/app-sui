@@ -92,6 +92,8 @@ pub fn check_tx_params(expected: &TxParams, received: &TxParams) -> bool {
         && expected.destination_address == received.destination_address
 }
 
+// For some reason heavy inlining + lto cause UB here, so we disable it
+#[inline(never)]
 pub fn lib_main(arg0: u32) {
     let cmd = libcall::get_command(arg0);
 
