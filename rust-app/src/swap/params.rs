@@ -1,6 +1,5 @@
 use arrayvec::ArrayVec;
 use core::convert::{TryFrom, TryInto};
-use core::ffi::CStr;
 use core::mem;
 use ledger_device_sdk::libcall;
 
@@ -119,12 +118,15 @@ fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
     Ok(buf.len() / BIP32_PATH_SEGMENT_LEN)
 }
 
+// For some reason heavy inlining + lto cause UB here, so we disable it
+#[inline(never)]
 fn address_from_hex_cstr(c_str: *const u8) -> Result<SuiAddressRaw, Error> {
-    let str = unsafe {
-        CStr::from_ptr(c_str as *const i8)
-            .to_str()
-            .map_err(|_| Error::BadAddressASCII)?
-    };
+    // Calculate C-string length in the buffer
+    let mut str_len = 0;
+    while unsafe { *c_str.add(str_len) } != b'\0' && str_len <= SUI_PREFIXED_ADDRESS_STR_LENGTH {
+        str_len += 1;
+    }
+    let str = unsafe { core::slice::from_raw_parts(c_str, str_len) };
 
     if str.len() < SUI_PREFIXED_ADDRESS_STR_LENGTH {
         return Err(Error::BadAddressLength);
