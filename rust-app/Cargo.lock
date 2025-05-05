@@ -817,7 +817,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "sui"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",

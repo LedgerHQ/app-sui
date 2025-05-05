@@ -1,5 +1,8 @@
 # Change Log
 
+## 0.2.7
+* Fix bug in swap `check_address` fn
+
 ## 0.2.6
 * Change address size (64 => 66) in swap params
 * Fix BE dpath endianness in swap params
