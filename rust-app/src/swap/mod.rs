@@ -19,12 +19,12 @@ use ledger_log::{error, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams};
 
-use crate::interface::SuiPubKeyAddress;
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]
 use crate::main_nanos::app_main;
 #[cfg(any(target_os = "stax", target_os = "flex"))]
 use crate::main_stax::app_main;
 use crate::{ctx::RunCtx, parser::common::SUI_COIN_DIVISOR, utils::get_amount_in_decimals};
+use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 
 pub mod panic_handler;
 pub mod params;
@@ -50,6 +50,10 @@ pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
     let ref_addr = &params.ref_address;
     trace!("check_address: dpath: {:X?}", params.dpath);
     // trace!("check_address: ref: 0x{}", HexSlice(ref_addr));
+
+    if !params.dpath.starts_with(&BIP32_PREFIX[0..2]) {
+        return Err(Error::DecodeDPathError);
+    }
 
     Ok(with_public_keys(
         &params.dpath,
@@ -88,6 +92,8 @@ pub fn check_tx_params(expected: &TxParams, received: &TxParams) -> bool {
         && expected.destination_address == received.destination_address
 }
 
+// For some reason heavy inlining + lto cause UB here, so we disable it
+#[inline(never)]
 pub fn lib_main(arg0: u32) {
     let cmd = libcall::get_command(arg0);
 
