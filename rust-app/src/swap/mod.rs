@@ -1,4 +1,4 @@
-use core::{convert::TryInto, fmt::Write};
+use core::{convert::TryFrom, fmt::Write};
 
 use arrayvec::ArrayString;
 // #[allow(unused_imports)]
@@ -101,12 +101,10 @@ pub fn lib_main(arg0: u32) {
         LibCallCommand::SwapCheckAddress => {
             let mut raw_params = get_check_address_params(arg0);
 
-            let result: Result<_, Error> = try {
-                let params: CheckAddressParams = (&raw_params).try_into()?;
-                trace!("{:X?}", &params);
-
-                check_address(&params)?
-            };
+            let result = CheckAddressParams::try_from(&raw_params).and_then(|params| {
+                trace!("{:X?}", params);
+                check_address(&params)
+            });
 
             let is_matched = result.unwrap_or_else(|_error| {
                 error!("Error happened during CHECK_ADDRESS libcall:  {:?}", _error);
@@ -121,12 +119,10 @@ pub fn lib_main(arg0: u32) {
         LibCallCommand::SwapGetPrintableAmount => {
             let mut raw_params = get_printable_amount_params(arg0);
 
-            let result: Result<_, Error> = try {
-                let params: PrintableAmountParams = (&raw_params).try_into()?;
-                trace!("{:X?}", &params);
-
-                get_printable_amount(&params)?
-            };
+            let result = PrintableAmountParams::try_from(&raw_params).and_then(|params| {
+                trace!("{:X?}", params);
+                get_printable_amount(&params)
+            });
 
             let amount_str = result
                 .as_ref()
@@ -148,9 +144,8 @@ pub fn lib_main(arg0: u32) {
         LibCallCommand::SwapSignTransaction => {
             let mut raw_params = sign_tx_params(arg0);
 
-            let result: Result<_, Error> = try {
-                let params = (&raw_params).try_into()?;
-                trace!("{:X?}", &params);
+            let result = TxParams::try_from(&raw_params).map(|params| {
+                trace!("{:X?}", params);
 
                 // SAFETY: at this point, the app is initialized,
                 // so we can safely set the panic handler
@@ -162,7 +157,7 @@ pub fn lib_main(arg0: u32) {
                 app_main(&ctx);
 
                 ctx.is_swap_sign_succeeded()
-            };
+            });
 
             let is_ok = result.unwrap_or_else(|_error| {
                 error!(

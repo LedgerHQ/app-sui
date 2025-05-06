@@ -6,7 +6,6 @@
 // Hack to fix build with nightly-2024-11-22
 #![allow(incomplete_features)]
 #![cfg_attr(version("1.84"), feature(generic_const_exprs))]
-#![feature(try_blocks)]
 #![cfg_attr(all(target_family = "bolos", test), no_main)]
 #![cfg_attr(target_family = "bolos", feature(custom_test_frameworks))]
 #![reexport_test_harness_main = "test_main"]
