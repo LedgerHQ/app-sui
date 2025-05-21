@@ -1,10 +1,14 @@
 use crate::interface::*;
+use crate::parser::common::{CoinType, SUI_COIN_DIVISOR};
+use crate::ui::common::*;
 use crate::utils::*;
 
 extern crate alloc;
 use alloc::format;
+use alloc::string::ToString;
 
 use core::cell::RefCell;
+use either::*;
 use include_gif::include_gif;
 use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::HexHash;
@@ -47,42 +51,145 @@ impl UserInterface {
         address: &SuiPubKeyAddress,
         recipient: [u8; 32],
         total_amount: u64,
+        coin_type: CoinType,
         gas_budget: u64,
     ) -> Option<()> {
         self.do_refresh.replace(true);
-        let tx_fields = [
-            Field {
-                name: "From",
-                value: &format!("{address}"),
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let to = Field {
+            name: "To",
+            value: &format!("0x{}", HexSlice(&recipient)),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
             },
-            Field {
-                name: "To",
-                value: &format!("0x{}", HexSlice(&recipient)),
-            },
-            Field {
-                name: "Amount",
-                value: {
-                    let (quotient, remainder_str) = get_amount_in_decimals(total_amount);
-                    &format!("SUI {}.{}", quotient, remainder_str.as_str())
-                },
-            },
-            Field {
-                name: "Max Gas",
-                value: {
-                    let (quotient, remainder_str) = get_amount_in_decimals(gas_budget);
-                    &format!("SUI {}.{}", quotient, remainder_str.as_str())
-                },
-            },
-        ];
+        };
+        let ((amt_str, amt_val), coin_fields) = get_coin_and_amount_fields(total_amount, coin_type);
+        let amt = Field {
+            name: amt_str.as_str(),
+            value: amt_val.as_str(),
+        };
 
-        let success = NbglReview::new()
-            .glyph(&APP_ICON)
-            .titles(
-                "Review transaction to transfer SUI",
-                "",
-                "Sign transaction to transfer SUI",
-            )
-            .show(&tx_fields);
+        let do_review = |fields, ticker| {
+            let first_msg = &format!("Review transaction to transfer {ticker}");
+            let last_msg = &format!("Sign transaction to transfer {ticker}");
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(first_msg, "", last_msg)
+                .show(fields)
+        };
+        let success = match coin_fields {
+            Left(ticker) => do_review(&[from, to, amt, gas], ticker.as_str()),
+            Right((coin_str, id_str)) => {
+                let coin = Field {
+                    name: coin_str.as_str(),
+                    value: id_str.as_str(),
+                };
+                do_review(&[from, to, coin, amt, gas], "coins")
+            }
+        };
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_stake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        recipient: [u8; 32],
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        self.do_refresh.replace(true);
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let to = Field {
+            name: "Validator",
+            value: &format!("0x{}", HexSlice(&recipient)),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Stake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            let first_msg = "Review transaction to stake SUI".to_string();
+            let last_msg = "Sign transaction to stake SUI".to_string();
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(&first_msg, "", &last_msg)
+                .show(fields)
+        };
+        let success = do_review(&[from, amt, to, gas]);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_unstake_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        total_amount: u64,
+        gas_budget: u64,
+    ) -> Option<()> {
+        self.do_refresh.replace(true);
+        let from = Field {
+            name: "From",
+            value: &format!("{address}"),
+        };
+        let gas = Field {
+            name: "Max Gas",
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DIVISOR);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
+        };
+
+        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DIVISOR);
+        let amt = Field {
+            name: "Unstake amount",
+            value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
+        };
+
+        let do_review = |fields| {
+            let first_msg = "Review transaction to unstake SUI".to_string();
+            let last_msg = "Sign transaction to unstake SUI".to_string();
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(&first_msg, "", &last_msg)
+                .show(fields)
+        };
+        let success = do_review(&[from, amt, gas]);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);

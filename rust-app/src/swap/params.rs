@@ -3,7 +3,7 @@ use core::convert::{TryFrom, TryInto};
 use core::mem;
 use ledger_device_sdk::libcall;
 
-use crate::interface::SuiAddressRaw;
+use crate::parser::common::SuiAddressRaw;
 use crate::swap::Error;
 
 // Max SUI address str length is 32*2

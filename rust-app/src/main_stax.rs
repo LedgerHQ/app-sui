@@ -14,7 +14,6 @@ use ledger_device_sdk::io;
 use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
 use ledger_log::{info, trace};
 
-#[allow(dead_code)]
 pub fn app_main(ctx: &RunCtx) {
     let comm: SingleThreaded<RefCell<io::Comm>> = SingleThreaded(RefCell::new(io::Comm::new()));
 

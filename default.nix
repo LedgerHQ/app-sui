@@ -22,7 +22,7 @@ rec {
       installPhase = ''
         mkdir -p "$out/bin"
         if [ -d "${sdkSrc}" ]; then
-            cp "${sdkSrc}/ledger_device_sdk/link_wrap.sh" "$out/bin"
+            cp "${sdkSrc}/ledger_secure_sdk_sys/link_wrap.sh" "$out/bin"
         else
             cd "$out/bin"; tar xf "${sdkSrc}" --wildcards "*link_wrap.sh" --transform='s:.*/::'
         fi
@@ -239,7 +239,7 @@ rec {
         })
       ];
       shellHook = old.shellHook + ''
-        export TARGET_JSON="${alamgu.thunkSource ./dep/ledger-nanos-sdk}/ledger_device_sdk/${device}.json"
+        export TARGET_JSON="${alamgu.thunkSource ./dep/ledger-nanos-sdk}/ledger_secure_sdk_sys/${device}.json"
       '';
     });
 

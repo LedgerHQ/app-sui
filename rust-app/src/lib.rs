@@ -1,12 +1,11 @@
 #![no_std]
-#![allow(incomplete_features)]
 #![feature(stmt_expr_attributes)]
 #![feature(adt_const_params)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(not(version("1.83")), feature(const_mut_refs))]
 // Hack to fix build with nightly-2024-11-22
+#![allow(incomplete_features)]
 #![cfg_attr(version("1.84"), feature(generic_const_exprs))]
-#![feature(try_blocks)]
 #![cfg_attr(all(target_family = "bolos", test), no_main)]
 #![cfg_attr(target_family = "bolos", feature(custom_test_frameworks))]
 #![reexport_test_harness_main = "test_main"]
@@ -41,6 +40,8 @@ pub mod handle_apdu;
 
 #[cfg(target_family = "bolos")]
 pub mod implementation;
+
+pub mod parser;
 
 #[cfg(target_family = "bolos")]
 #[cfg(not(any(target_os = "stax", target_os = "flex")))]

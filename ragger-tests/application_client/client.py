@@ -82,10 +82,27 @@ class Client:
         response, chain_code_len, chain_code = pop_size_prefixed_buf_from_buf(response)
         return pub_key_len, pub_key, chain_code_len, chain_code
 
-
-    def sign_tx(self, path: str, transaction: bytes) -> bytes:
+    def sign_tx(self, path: str, transaction: bytes, object_list: Optional[list[bytes]] = None) -> bytes:
+        if object_list is None:
+            object_list = []
         tx_len = (len(transaction)).to_bytes(4, byteorder='little')
-        payload = [tx_len + transaction, pack_derivation_path(path)]
+        tx_data = tx_len + transaction
+        path_data = pack_derivation_path(path)
+
+        num_items = len(object_list).to_bytes(4, byteorder='little')  # First byte is number of items
+        list_data = bytearray(num_items)
+
+        # Add each item with its length prefix
+        for item in object_list:
+            item_len = len(item).to_bytes(4, byteorder='little')  # Length of each item
+            list_data.extend(item_len)
+            list_data.extend(item)
+
+        if len(object_list) > 0:
+            payload = [tx_data, path_data, bytes(list_data)]
+        else:
+            payload = [tx_data, path_data]
+
         return self.send_fn(cla=CLA,
                      ins=InsType.SIGN_TX,
                      p1=P1,
