@@ -1,5 +1,12 @@
 # Change Log
 
+## 1.1.0
+* Add swap token support
+
+## 1.0.0
+* Add token support
+* Add stacking support
+
 ## 0.2.7
 * Fix bug in swap `check_address` fn
 
