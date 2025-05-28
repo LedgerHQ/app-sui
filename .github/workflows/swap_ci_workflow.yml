@@ -13,8 +13,5 @@ jobs:
     job_functional_tests:
       uses: LedgerHQ/app-exchange/.github/workflows/reusable_swap_functional_tests.yml@develop
       with:
-        branch_for_exchange: 'bn-add-sui-swap-token-tests'
-        repo_for_exchange: 'hoodieshq/app-exchange'
-        repo_for_sui: 'hoodieshq/app-sui'
-        branch_for_sui: 'bn-add-swap-token-support'
+        branch_for_sui: ${{ github.ref }}
         test_filter: '"SUI or sui or Sui"'
