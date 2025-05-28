@@ -130,6 +130,22 @@ Sign a Transaction, using the key for the given derivation path
 |           | ...               |                                     |
 | `4`       | `bip32_path[n-1]` | `n`-th derivation step (big endian) |
 
+##### Parameter 3 (required only for clear signing of certain transactions)
+
+For clear signing of certain transactions in which the coin type and amount being transferred cannot be obtained from the transaction itself, the object data of the objects referenced in the transaction are required. In those cases the object data should be provided as the third parameter by appending the length prefixed data of each of object as described below. The order of objects in this list is irrelevant. Any object which cannot be parsed, or which is not required for obtaining the information will be ignored.
+
+It is advisable to provide the object data of all the coin type objects referenced in "gas_payment" and "inputs" of the transaction.
+In the abscence of this info the user may get a blind signing prompt.
+
+| Length             | Name               | Description                     |
+|--------------------|--------------------|---------------------------------|
+| `4`                | `n`                | Number of objects (big endian)  |
+| `4`                | `object[0].length` | Length of object 0 (big endian) |
+| `object[0].length` | `object[0]`        | Object data                     |
+|                    | ...                |                                 |
+| `4`                | `object[n].length` | Length of object n (big endian) |
+| `object[n].length` | `object[n]`        | Object data                     |
+
 **Output data**
 
 | Length       | Description     |

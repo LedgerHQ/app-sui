@@ -21,24 +21,22 @@ impl Default for Settings {
 impl Settings {
     #[inline(never)]
     pub fn get_mut(&mut self) -> &mut AtomicStorage<[u8; SETTINGS_SIZE]> {
-        #[allow(static_mut_refs)]
-        unsafe {
-            SETTINGS.get_mut()
-        }
+        let data = &raw mut SETTINGS;
+        unsafe { (*data).get_mut() }
     }
 
     #[inline(never)]
     pub fn get_blind_sign(&self) -> bool {
-        #[allow(static_mut_refs)]
-        let settings = unsafe { SETTINGS.get_ref() };
+        let data = &raw const SETTINGS;
+        let settings = unsafe { (*data).get_ref() };
         settings.get_ref()[BLINDSIGN_IX] == 1
     }
 
     // The inline(never) is important. Otherwise weird segmentation faults happen on speculos.
     #[inline(never)]
     pub fn set_blind_sign(&mut self, enabled: bool) {
-        #[allow(static_mut_refs)]
-        let settings = unsafe { SETTINGS.get_mut() };
+        let data = &raw mut SETTINGS;
+        let settings = unsafe { (*data).get_mut() };
         let mut switch_values: [u8; SETTINGS_SIZE] = *settings.get_ref();
         if enabled {
             switch_values[BLINDSIGN_IX] = 1;
