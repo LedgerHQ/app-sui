@@ -57,7 +57,7 @@ pub const SUI_SYSTEM_STATE_ID: CoinID = [
 // This does not contain the correct module and function names, as we don't have a way to create const ArrayVec with them
 pub const SUI_COIN_TYPE: CoinType = (SUI_COIN_ID, ArrayVec::new_const(), ArrayVec::new_const());
 
-pub const SUI_COIN_DIVISOR: u8 = 9;
+pub const SUI_COIN_DECIMALS: u8 = 9;
 
 pub type ObjectData = CoinData;
 

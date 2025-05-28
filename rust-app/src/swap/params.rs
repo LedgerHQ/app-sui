@@ -1,7 +1,7 @@
-use arrayvec::ArrayVec;
+use arrayvec::{ArrayString, ArrayVec};
 use core::convert::{TryFrom, TryInto};
 use core::mem;
-use ledger_device_sdk::libcall;
+use core::str;
 
 use crate::parser::common::SuiAddressRaw;
 use crate::swap::Error;
@@ -14,18 +14,24 @@ const SUI_PREFIXED_ADDRESS_STR_LENGTH: usize =
 const MAX_BIP32_PATH_LENGTH: usize = 5;
 const BIP32_PATH_SEGMENT_LEN: usize = mem::size_of::<u32>();
 
+// Should be enough for any coin ticker
+pub const MAX_SWAP_TICKER_LENGTH: usize = 15;
+// ticker length + ticker + decimals
+const COIN_CONFIG_BUF_SIZE: usize = 1 + MAX_SWAP_TICKER_LENGTH + 1;
+
 mod custom {
+    use super::COIN_CONFIG_BUF_SIZE;
     use super::SUI_PREFIXED_ADDRESS_STR_LENGTH;
     use ledger_device_sdk::libcall;
 
-    pub type CheckAddressParams = libcall::swap::CheckAddressParams<
-        { libcall::swap::DEFAULT_COIN_CONFIG_BUF_SIZE },
-        SUI_PREFIXED_ADDRESS_STR_LENGTH,
-    >;
-    pub type CreateTxParams = libcall::swap::CreateTxParams<
-        { libcall::swap::DEFAULT_COIN_CONFIG_BUF_SIZE },
-        SUI_PREFIXED_ADDRESS_STR_LENGTH,
-    >;
+    pub type CheckAddressParams =
+        libcall::swap::CheckAddressParams<COIN_CONFIG_BUF_SIZE, SUI_PREFIXED_ADDRESS_STR_LENGTH>;
+
+    pub type PrintableAmountParams =
+        libcall::swap::PrintableAmountParams<COIN_CONFIG_BUF_SIZE, SUI_PREFIXED_ADDRESS_STR_LENGTH>;
+
+    pub type CreateTxParams =
+        libcall::swap::CreateTxParams<COIN_CONFIG_BUF_SIZE, SUI_PREFIXED_ADDRESS_STR_LENGTH>;
 }
 
 #[derive(Debug)]
@@ -52,21 +58,66 @@ impl TryFrom<&custom::CheckAddressParams> for CheckAddressParams {
 }
 
 #[derive(Debug)]
+pub struct CoinConfig {
+    pub ticker: ArrayString<MAX_SWAP_TICKER_LENGTH>,
+    pub decimals: u8,
+}
+
+impl CoinConfig {
+    pub fn try_from_bytes(buf: &[u8]) -> Result<Option<Self>, Error> {
+        if buf.is_empty() {
+            return Ok(None);
+        }
+
+        // Decoding ticker
+        let ticker_len = buf[0] as usize;
+        let buf = &buf[1..];
+
+        if ticker_len > MAX_SWAP_TICKER_LENGTH || ticker_len > buf.len() {
+            return Err(Error::BadCoinConfigTicker);
+        }
+
+        let ticker_bytes = &buf[..ticker_len];
+        let ticker_str = str::from_utf8(ticker_bytes).map_err(|_| Error::BadCoinConfigTicker)?;
+        let ticker = ArrayString::from(ticker_str).map_err(|_| Error::BadCoinConfigTicker)?;
+
+        // Decoding decimals
+        let buf = &buf[ticker_len..];
+        // Decimals is the last byte in the buffer without encoded length
+        if buf.len() != 1 {
+            return Err(Error::DecodeCoinConfig);
+        }
+        let decimals = buf[0];
+
+        Ok(Some(CoinConfig { ticker, decimals }))
+    }
+}
+
+#[derive(Debug)]
 pub struct PrintableAmountParams {
+    pub coin_config: Option<CoinConfig>,
+    pub is_fee: bool,
     pub amount: u64,
 }
 
-impl TryFrom<&libcall::swap::PrintableAmountParams> for PrintableAmountParams {
+impl TryFrom<&custom::PrintableAmountParams> for PrintableAmountParams {
     type Error = Error;
 
-    fn try_from(params: &libcall::swap::PrintableAmountParams) -> Result<Self, Self::Error> {
+    fn try_from(params: &custom::PrintableAmountParams) -> Result<Self, Self::Error> {
+        let coin_config =
+            CoinConfig::try_from_bytes(&params.coin_config[..params.coin_config_len])?;
         let amount = u64::from_be_bytes(
             params.amount[params.amount.len() - mem::size_of::<u64>()..]
                 .try_into()
                 .map_err(|_| Error::WrongAmountLength)?,
         );
+        let is_fee = params.is_fee;
 
-        Ok(PrintableAmountParams { amount })
+        Ok(PrintableAmountParams {
+            coin_config,
+            amount,
+            is_fee,
+        })
     }
 }
 

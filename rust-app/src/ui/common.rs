@@ -1,4 +1,4 @@
-use crate::parser::common::{CoinType, SUI_COIN_DIVISOR, SUI_COIN_TYPE};
+use crate::parser::common::{CoinType, SUI_COIN_DECIMALS, SUI_COIN_TYPE};
 use crate::utils::*;
 
 extern crate alloc;
@@ -55,7 +55,7 @@ pub fn get_coin_and_amount_fields(
 #[inline(never)]
 fn get_known_coin_ticker(coin_type: &CoinType) -> Option<(ArrayString<8>, u8)> {
     if *coin_type == SUI_COIN_TYPE {
-        return Some((ArrayString::from("SUI").unwrap(), SUI_COIN_DIVISOR));
+        return Some((ArrayString::from("SUI").unwrap(), SUI_COIN_DECIMALS));
     }
 
     for k in KNOWN_COINS {
