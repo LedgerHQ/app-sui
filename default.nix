@@ -238,8 +238,11 @@ rec {
           sdkSrc = alamgu.thunkSource ./dep/ledger-nanos-sdk;
         })
       ];
-      shellHook = old.shellHook + ''
+      shellHook =
+        let ledger-secure-sdk-path = import ./dep/ledger-secure-sdk-${device}/thunk.nix;
+        in old.shellHook + ''
         export TARGET_JSON="${alamgu.thunkSource ./dep/ledger-nanos-sdk}/ledger_secure_sdk_sys/${device}.json"
+        export LEDGER_SDK_PATH="${ledger-secure-sdk-path}"
       '';
     });
 
