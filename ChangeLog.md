@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.2.0
+* Update hardcoded known coins
+
 ## 1.1.0
 * Add swap token support
 
