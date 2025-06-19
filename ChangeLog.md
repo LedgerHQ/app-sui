@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.2.1
+* Fix for heap memory exception when signing transactions with many inputs
+
 ## 1.2.0
 * Update hardcoded known coins
 
