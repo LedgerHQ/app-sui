@@ -39,7 +39,7 @@ ledger_secure_sdk_sys = "1.8.2"
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.22.8"
+version = "1.22.9"
 features = [ "speculos" ]
 
 [[bin]]
