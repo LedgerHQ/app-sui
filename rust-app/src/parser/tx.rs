@@ -523,7 +523,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 inputs: &BTreeMap<u16, InputValue>,
                 command_results: &BTreeMap<u16, CommandResult>,
             ) {
-                const MAX_HEAP_USAGE_ALLOWED: usize = 7 * 1024;
+                const MAX_HEAP_USAGE_ALLOWED: usize = 4800;
 
                 let v1 = estimate_btree_map_usage(inputs);
                 let v2 = estimate_btree_map_usage(command_results);
