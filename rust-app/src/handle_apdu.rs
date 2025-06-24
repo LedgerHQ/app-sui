@@ -41,8 +41,7 @@ pub fn handle_apdu_async(
                 trace!("Handling sign");
                 NoinlineFut(sign_apdu(io, settings, ui)).await;
             }
-            Ins::TestParsers => {
-            }
+            Ins::TestParsers => {}
             Ins::GetVersionStr => {}
             Ins::Exit => ledger_device_sdk::exit_app(0),
         }
