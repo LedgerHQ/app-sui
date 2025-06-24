@@ -7,7 +7,11 @@ use ledger_crypto_helpers::eddsa::Ed25519RawPubKeyAddress;
 use ledger_crypto_helpers::hasher::Base64Hash;
 use ledger_device_sdk::nbgl::*;
 
+#[cfg(any(target_os = "stax", target_os = "flex"))]
 pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("crab_64x64.gif", NBGL));
+
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("crab-small.gif", NBGL));
 
 #[derive(Copy, Clone)]
 pub struct UserInterface {
@@ -47,11 +51,11 @@ impl UserInterface {
         self.do_refresh.replace(true);
         let tx_fields = [
             Field {
-                name: "Transaction hash",
+                name: "Tx hash",
                 value: &format!("{hash}"),
             },
             Field {
-                name: "Sign for Address",
+                name: "Address",
                 value: &format!("{pkh}"),
             },
         ];
