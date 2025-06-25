@@ -156,7 +156,7 @@ def test_sign_tx_non_sui_transfer_rejected(backend, scenario_navigator, firmware
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name="test_sign_tx_non_sui_transfer_rejected"
                 , path=scenario_navigator.screenshot_path
@@ -283,7 +283,7 @@ def blind_sign_enabled(firmware, navigator):
 def toggle_blind_sign(firmware, navigator):
     if firmware.device.startswith("nano"):
         navigator.navigate(
-            instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK, NavInsID.BOTH_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK, NavInsID.LEFT_CLICK, NavInsID.LEFT_CLICK]
+            instructions=[NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK, NavInsID.BOTH_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK, NavInsID.LEFT_CLICK]
             , timeout=10
             , screen_change_before_first_instruction=False
         )
