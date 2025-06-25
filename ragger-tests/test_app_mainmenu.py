@@ -9,9 +9,16 @@ def test_app_mainmenu(firmware, navigator, test_name):
     if firmware.device.startswith("nano"):
         instructions = [
             NavInsID.RIGHT_CLICK,
+            NavInsID.BOTH_CLICK,
+            NavInsID.BOTH_CLICK,
+            NavInsID.RIGHT_CLICK,
+            NavInsID.BOTH_CLICK,
+            NavInsID.RIGHT_CLICK,
+            NavInsID.BOTH_CLICK,
             NavInsID.RIGHT_CLICK,
             NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK
+            NavInsID.BOTH_CLICK,
+            NavInsID.RIGHT_CLICK,
         ]
     else:
         instructions = [

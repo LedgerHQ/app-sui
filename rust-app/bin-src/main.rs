@@ -4,11 +4,7 @@
 #[cfg(not(target_family = "bolos"))]
 fn main() {}
 
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
-use alamgu_example::main_nanos::*;
-
-#[cfg(any(target_os = "stax", target_os = "flex"))]
-use alamgu_example::main_stax::*;
+use alamgu_example::app_main::*;
 
 ledger_device_sdk::set_panic!(ledger_device_sdk::exiting_panic);
 

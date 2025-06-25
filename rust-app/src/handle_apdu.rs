@@ -1,8 +1,6 @@
 use crate::implementation::*;
 use crate::interface::*;
 use crate::settings::*;
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
-use crate::test_parsers::*;
 use crate::ui::UserInterface;
 use crate::utils::*;
 
@@ -43,10 +41,7 @@ pub fn handle_apdu_async(
                 trace!("Handling sign");
                 NoinlineFut(sign_apdu(io, settings, ui)).await;
             }
-            Ins::TestParsers => {
-                #[cfg(not(any(target_os = "stax", target_os = "flex")))]
-                NoinlineFut(test_parsers(io)).await;
-            }
+            Ins::TestParsers => {}
             Ins::GetVersionStr => {}
             Ins::Exit => ledger_device_sdk::exit_app(0),
         }

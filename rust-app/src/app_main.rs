@@ -43,10 +43,14 @@ pub fn app_main() {
         core::mem::size_of::<Option<APDUsFuture>>()
     );
 
+    #[cfg(any(target_os = "stax", target_os = "flex"))]
     let settings_strings = [[
         "Blind Signing",
         "Sign transactions for which details cannot be verified",
     ]];
+
+    #[cfg(not(any(target_os = "stax", target_os = "flex")))]
+    let settings_strings = [["Blind Signing", ""]];
 
     let main_menu = SingleThreaded(RefCell::new(
         NbglHomeAndSettings::new()
