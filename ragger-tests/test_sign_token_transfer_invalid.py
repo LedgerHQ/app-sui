@@ -103,7 +103,7 @@ def test_sign_tx_usdc_and_wusdc(backend, scenario_navigator, firmware, navigator
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
@@ -282,7 +282,7 @@ def test_sign_tx_usdc_and_sui(backend, scenario_navigator, firmware, navigator):
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
