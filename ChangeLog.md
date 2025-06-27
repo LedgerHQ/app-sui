@@ -1,5 +1,9 @@
 # Change Log
 
+## 1.3.0
+* Add personal message signing support
+* Use NBGL on NanoS+ and NanoX
+
 ## 1.2.1
 * Fix for heap memory exception when signing transactions with many inputs
 
