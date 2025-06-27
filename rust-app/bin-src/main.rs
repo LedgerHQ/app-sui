@@ -4,11 +4,7 @@
 #[cfg(not(target_family = "bolos"))]
 fn main() {}
 
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
-use sui::main_nanos::*;
-
-#[cfg(any(target_os = "stax", target_os = "flex"))]
-use sui::main_stax::*;
+use sui::app_main::*;
 
 use sui::{
     ctx::RunCtx,
