@@ -3,6 +3,12 @@ set -eu
 
 OUT_DIR=/app/docker-outputs
 
+python3 -m venv ragger-env
+
+source ragger-env/bin/activate
+
+pip install -r ragger-tests/requirements.txt
+
 for device in nanosplus nanox flex stax
 do
     cd rust-app
@@ -12,3 +18,5 @@ do
     chown -R $HOST_UID:$HOST_GID rust-app/target/ ragger-tests/
     cp rust-app/target/$device/release/$APP_NAME $OUT_DIR/$device
 done
+
+rm -rf ragger-env

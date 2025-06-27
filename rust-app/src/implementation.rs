@@ -202,12 +202,44 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             if ctx.is_swap() {
                 // Reject unknown transactions in swap mode
                 reject::<()>(SyscallError::NotSupported as u16).await;
-            } else if !settings.get_blind_sign() {
-                ui.warn_tx_not_recognized();
-                reject::<()>(SyscallError::NotSupported as u16).await;
             }
         }
     }
+
+    // Do personal message signing after confirm the message intent and size
+    // This is done here, after the handling of KnownTx, due to stack size issues
+    let blind_signing_required = if is_unknown_txn {
+        let mut bs = input[0].clone();
+        NoinlineFut(async move {
+            let intent: Option<[u8; 3]> = TryFuture(bs.read()).await;
+            let msg_length = length - 3;
+
+            use crate::ui::common::MESSAGE_MAX_LENGTH;
+            if intent == Some([3, 0, 0]) && msg_length < MESSAGE_MAX_LENGTH {
+                info!("Signing personal message");
+
+                let mut msg_contents = ArrayVec::new();
+                for _ in 0..msg_length {
+                    let b: [u8; 1] = bs.read().await;
+                    msg_contents.push(b[0]);
+                }
+                if ui.confirm_personal_message(msg_contents).is_none() {
+                    reject::<()>(StatusWords::UserCancelled as u16).await;
+                };
+
+                false
+            } else {
+                if !settings.get_blind_sign() {
+                    ui.warn_tx_not_recognized();
+                    reject::<()>(SyscallError::NotSupported as u16).await;
+                }
+                true
+            }
+        })
+        .await
+    } else {
+        false
+    };
 
     NoinlineFut(async move {
         let mut hasher: Blake2b = Hasher::new();
@@ -225,7 +257,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
         }
         let hash: HexHash<32> = hasher.finalize();
-        if is_unknown_txn {
+        if blind_signing_required {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {
                 reject::<()>(StatusWords::UserCancelled as u16).await;

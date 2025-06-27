@@ -44,22 +44,13 @@ pub mod implementation;
 pub mod parser;
 
 #[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
-pub mod menu;
-
-#[cfg(target_family = "bolos")]
 pub mod settings;
-
-#[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
-pub mod main_nanos;
 
 #[cfg(target_family = "bolos")]
 pub mod ui;
 
 #[cfg(target_family = "bolos")]
-#[cfg(any(target_os = "stax", target_os = "flex"))]
-pub mod main_stax;
+pub mod app_main;
 
 #[cfg(target_family = "bolos")]
 pub mod swap;

@@ -7,6 +7,7 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::ToString;
 
+use arrayvec::ArrayVec;
 use core::cell::RefCell;
 use either::*;
 use include_gif::include_gif;
@@ -14,7 +15,11 @@ use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::HexHash;
 use ledger_device_sdk::nbgl::*;
 
+#[cfg(any(target_os = "stax", target_os = "flex"))]
 pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_64x64.gif", NBGL));
+
+#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui-small.gif", NBGL));
 
 #[derive(Copy, Clone)]
 pub struct UserInterface {
@@ -192,6 +197,45 @@ impl UserInterface {
         let success = do_review(&[from, amt, gas]);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_personal_message(
+        &self,
+        msg_contents: ArrayVec<u8, MESSAGE_MAX_LENGTH>,
+    ) -> Option<()> {
+        self.do_refresh.replace(true);
+        let do_review = |fields| {
+            let first_msg = "Review message".to_string();
+            let last_msg = "Sign message".to_string();
+            NbglReview::new()
+                .glyph(&APP_ICON)
+                .titles(&first_msg, "", &last_msg)
+                .show(fields)
+        };
+        let success = {
+            if let Some(msg) = is_printable_ascii(&msg_contents) {
+                let m = Field {
+                    name: "Message",
+                    value: msg,
+                };
+                do_review(&[m])
+            } else {
+                let m = Field {
+                    name: "Message (bytes)",
+                    value: &format!("0x{}", HexSlice(&msg_contents)),
+                };
+                do_review(&[m])
+            }
+        };
+
+        NbglReviewStatus::new()
+            .status_type(StatusType::Message)
             .show(success);
         if success {
             Some(())

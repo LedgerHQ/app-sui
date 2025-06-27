@@ -8,6 +8,22 @@ use arrayvec::ArrayString;
 use arrayvec::ArrayVec;
 use either::*;
 use ledger_crypto_helpers::common::HexSlice;
+use ledger_log::info;
+
+#[cfg(target_os = "nanox")]
+pub const MESSAGE_MAX_LENGTH: usize = 1024 * 2;
+
+#[cfg(not(target_os = "nanox"))]
+pub const MESSAGE_MAX_LENGTH: usize = 1024 * 4;
+
+pub fn is_printable_ascii(data: &ArrayVec<u8, MESSAGE_MAX_LENGTH>) -> Option<&str> {
+    if data.iter().all(|&b| b > 0) {
+        core::str::from_utf8(data.as_slice()).ok()
+    } else {
+        info!("is_printable_ascii: input contains NUL char");
+        None
+    }
+}
 
 #[inline(never)]
 pub fn get_coin_and_amount_fields(
