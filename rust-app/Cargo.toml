@@ -57,7 +57,7 @@ overflow-checks = false
 lto = "fat"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "nanox", "flex", "stax"))'] }
 
 [package.metadata.ledger]
 name = "Sui"
