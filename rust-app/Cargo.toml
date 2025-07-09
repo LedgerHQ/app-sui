@@ -79,3 +79,8 @@ icon = "sui_32x32.gif"
 
 [package.metadata.ledger.flex]
 icon = "sui_40x40.gif"
+
+[patch.crates-io]
+ledger_device_sdk = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "pr-io-revamp" }
+ledger_secure_sdk_sys = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "pr-io-revamp"}
+include_gif = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "pr-io-revamp" }
