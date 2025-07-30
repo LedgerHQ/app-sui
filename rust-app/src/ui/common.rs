@@ -433,4 +433,11 @@ const KNOWN_COINS: [KnownCoin; 50] = [
         divisor: 9,
         ticker: "WAL",
     },
+    KnownCoin {
+        coin_id: hex!("4c981f3ff786cdb9e514da897ab8a953647dae2ace9679e8358eec1e3e8871ac"),
+        module: "dmc",
+        function: "DMC",
+        divisor: 9,
+        ticker: "DMC",
+    },
 ];
