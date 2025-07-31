@@ -82,7 +82,7 @@ struct KnownCoin<'a> {
 
 use hex_literal::hex;
 
-const KNOWN_COINS: [KnownCoin; 50] = [
+const KNOWN_COINS: [KnownCoin; 51] = [
     KnownCoin {
         coin_id: hex!("a8816d3a6e3136e86bc2873b1f94a15cadc8af2703c075f2d546c2ae367f4df9"),
         module: "ocean",
