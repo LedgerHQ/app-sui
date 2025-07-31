@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.2.2
+* Added hardcoded known coin DMC
+
 ## 1.2.1
 * Fix for heap memory exception when signing transactions with many inputs
 

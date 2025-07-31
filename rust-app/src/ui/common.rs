@@ -82,7 +82,7 @@ struct KnownCoin<'a> {
 
 use hex_literal::hex;
 
-const KNOWN_COINS: [KnownCoin; 50] = [
+const KNOWN_COINS: [KnownCoin; 51] = [
     KnownCoin {
         coin_id: hex!("a8816d3a6e3136e86bc2873b1f94a15cadc8af2703c075f2d546c2ae367f4df9"),
         module: "ocean",
@@ -432,5 +432,12 @@ const KNOWN_COINS: [KnownCoin; 50] = [
         function: "WAL",
         divisor: 9,
         ticker: "WAL",
+    },
+    KnownCoin {
+        coin_id: hex!("4c981f3ff786cdb9e514da897ab8a953647dae2ace9679e8358eec1e3e8871ac"),
+        module: "dmc",
+        function: "DMC",
+        divisor: 9,
+        ticker: "DMC",
     },
 ];
