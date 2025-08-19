@@ -116,7 +116,7 @@ impl UserInterface {
                 "Ledger by P2P"
             } else {
                 &format!("0x{}", HexSlice(&recipient))
-            }
+            },
         };
         let gas = Field {
             name: "Max Gas",
