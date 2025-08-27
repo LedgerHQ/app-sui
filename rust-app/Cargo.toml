@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "1.2.1"
+version = "1.2.2"
 authors = ["Obsidian Systems"]
 edition = "2018"
 autobins = false
@@ -32,14 +32,14 @@ extra_debug = ["ledger-log/log_trace"]
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = "1.22.9"
-ledger_secure_sdk_sys = "1.8.2"
+ledger_device_sdk = "1.24.1"
+ledger_secure_sdk_sys = "1.10.0"
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.22.9"
+version = "1.24.1"
 features = [ "speculos" ]
 
 [[bin]]
