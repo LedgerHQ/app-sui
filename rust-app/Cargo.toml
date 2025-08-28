@@ -81,4 +81,4 @@ icon = "sui_32x32.gif"
 icon = "sui_40x40.gif"
 
 [package.metadata.ledger.apex_p]
-icon = "sui-small.gif"
+icon = "sui_32x32.png"
