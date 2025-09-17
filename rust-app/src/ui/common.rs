@@ -9,6 +9,9 @@ use arrayvec::ArrayVec;
 use either::*;
 use ledger_crypto_helpers::common::HexSlice;
 
+pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
+    hex!("3d9fb148e35ef4d74fcfc36995da14fc504b885d5f2bfeca37d6ea2cc044a32d");
+
 #[inline(never)]
 pub fn get_coin_and_amount_fields(
     total_amount: u64,

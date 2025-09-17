@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.2.2
+* Use 'Ledger by P2P' instead of Ledger validator address when staking
+
 ## 1.2.1
 * Fix for heap memory exception when signing transactions with many inputs
 

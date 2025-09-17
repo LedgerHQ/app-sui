@@ -112,7 +112,11 @@ impl UserInterface {
         };
         let to = Field {
             name: "Validator",
-            value: &format!("0x{}", HexSlice(&recipient)),
+            value: if recipient == LEDGER_STAKE_ADDRESS {
+                "Ledger by P2P"
+            } else {
+                &format!("0x{}", HexSlice(&recipient))
+            },
         };
         let gas = Field {
             name: "Max Gas",
