@@ -14,6 +14,9 @@ use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::HexHash;
 use ledger_device_sdk::nbgl::*;
 
+#[cfg(target_os = "apex_p")]
+pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_48x48.png", NBGL));
+#[cfg(any(target_os = "stax", target_os = "flex"))]
 pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_64x64.gif", NBGL));
 
 #[derive(Copy, Clone)]

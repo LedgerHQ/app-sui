@@ -4,10 +4,10 @@
 #[cfg(not(target_family = "bolos"))]
 fn main() {}
 
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
 use sui::main_nanos::*;
 
-#[cfg(any(target_os = "stax", target_os = "flex"))]
+#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 use sui::main_stax::*;
 
 use sui::{

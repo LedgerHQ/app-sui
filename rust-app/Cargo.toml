@@ -16,7 +16,7 @@ zeroize = { version = "1.5.2", default-features = false }
 num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
 pin-project = "1.0.10"
-include_gif = "1.0.1"
+include_gif = "1.2.3"
 hex = { version = "0.4.3", default-features = false }
 hex-literal = { version = "0.4.1" }
 defer = "0.2.1"
@@ -32,14 +32,14 @@ extra_debug = ["ledger-log/log_trace"]
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = "1.24.1"
-ledger_secure_sdk_sys = "1.10.0"
+ledger_device_sdk = "1.24.6"
+ledger_secure_sdk_sys = "1.11.1"
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
 ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.24.1"
+version = "1.24.6"
 features = [ "speculos" ]
 
 [[bin]]
@@ -60,7 +60,7 @@ overflow-checks = false
 lto = "fat"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax", "apex_p"))'] }
 
 [package.metadata.ledger]
 name = "Sui"
@@ -79,3 +79,6 @@ icon = "sui_32x32.gif"
 
 [package.metadata.ledger.flex]
 icon = "sui_40x40.gif"
+
+[package.metadata.ledger.apex_p]
+icon = "sui_32x32.png"

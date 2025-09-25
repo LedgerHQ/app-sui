@@ -44,21 +44,21 @@ pub mod implementation;
 pub mod parser;
 
 #[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
 pub mod menu;
 
 #[cfg(target_family = "bolos")]
 pub mod settings;
 
 #[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex")))]
+#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
 pub mod main_nanos;
 
 #[cfg(target_family = "bolos")]
 pub mod ui;
 
 #[cfg(target_family = "bolos")]
-#[cfg(any(target_os = "stax", target_os = "flex"))]
+#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 pub mod main_stax;
 
 #[cfg(target_family = "bolos")]
