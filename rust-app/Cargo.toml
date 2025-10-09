@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "1.2.2"
+version = "1.2.3"
 authors = ["Obsidian Systems"]
 edition = "2018"
 autobins = false
