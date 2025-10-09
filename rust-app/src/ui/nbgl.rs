@@ -37,7 +37,7 @@ impl UserInterface {
         self.do_refresh.replace(true);
         let success = NbglAddressReview::new()
             .glyph(&APP_ICON)
-            .verify_str("Provide Public Key")
+            .review_title("Provide Public Key")
             .show(&format!("{address}"));
         NbglReviewStatus::new()
             .status_type(StatusType::Address)
