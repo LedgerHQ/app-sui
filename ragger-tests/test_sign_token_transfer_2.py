@@ -116,6 +116,8 @@ def test_sign_tx_usdc_merge_three(backend, scenario_navigator, firmware, navigat
     client = Client(backend, use_block_protocol=True)
     path = "m/44'/784'/0'/0'/0'"
 
+    client.provide_dynamic_token("USDC", 6, "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7", "usdc", "USDC")
+
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32
 
@@ -261,6 +263,8 @@ def test_sign_tx_usdc_merge_split(backend, scenario_navigator, firmware, navigat
     client = Client(backend, use_block_protocol=True)
     path = "m/44'/784'/0'/0'/0'"
 
+    client.provide_dynamic_token("USDC", 6, "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7", "usdc", "USDC")
+
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32
 
@@ -376,6 +380,8 @@ def test_sign_tx_usdc_merge_split(backend, scenario_navigator, firmware, navigat
 def test_sign_tx_usdc_transfer_two(backend, scenario_navigator, firmware, navigator):
     client = Client(backend, use_block_protocol=True)
     path = "m/44'/784'/0'/0'/0'"
+
+    client.provide_dynamic_token("USDC", 6, "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7", "usdc", "USDC")
 
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32

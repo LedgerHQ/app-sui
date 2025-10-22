@@ -1,7 +1,10 @@
-use crate::ctx::RunCtx;
+use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{CoinType, HasObjectData, ObjectData, ObjectDigest};
+use crate::parser::common::{
+    CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
+};
 use crate::parser::object::{compute_object_hash, object_parser};
+use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
 use crate::swap;
@@ -9,12 +12,14 @@ use crate::swap::params::TxParams;
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
-use arrayvec::ArrayVec;
+use arrayvec::{ArrayString, ArrayVec};
 use ledger_crypto_helpers::common::{try_option, Address};
 use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::{StatusWords, SyscallError};
-use ledger_log::info;
+use ledger_device_sdk::tlv::tlv_dynamic_token::{parse_dynamic_token_tlv, DynamicTokenOut};
+use ledger_device_sdk::tlv::TlvError;
+use ledger_log::{info, trace};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
@@ -80,9 +85,10 @@ async fn prompt_tx_params(
         destination_address,
     }: TxParams,
     coin_type: CoinType,
+    ctx: &RunCtx,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee))
+        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee, ctx))
     })
     .ok()
     .is_none()
@@ -150,7 +156,14 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 check_tx_params(expected, &tx_params).await;
             } else {
                 // Show prompts after all inputs have been parsed
-                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, coin_type)).await;
+                NoinlineFut(prompt_tx_params(
+                    &ui,
+                    path.as_slice(),
+                    tx_params,
+                    coin_type,
+                    ctx,
+                ))
+                .await;
             }
         }
         Some(KnownTx::StakeTx {
@@ -245,6 +258,100 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     // Does nothing if not a swap mode
     ctx.set_swap_sign_success();
+}
+
+pub async fn validate_tlv(io: HostIO, ctx: &RunCtx) {
+    const TLV_ERROR_OFFSET: u16 = 0x7000;
+
+    let mut input = match io.get_params::<4>() {
+        Some(bs) => bs,
+        None => reject(SyscallError::InvalidParameter as u16).await,
+    };
+
+    trace!("validate_tlv\n");
+
+    let first: [u8; 2] = input[0].read().await;
+    let length = u16::from_le_bytes(first);
+
+    trace!("data length: {}\n", HexSlice(&first));
+
+    let mut tlv = input[0].clone();
+
+    let mut b_arr: ArrayVec<u8, 1024> = ArrayVec::new();
+
+    const CHUNK_SIZE: usize = 10;
+    let (chunks, rem) = (length as usize / CHUNK_SIZE, length as usize % CHUNK_SIZE);
+    for _ in 0..chunks {
+        let b: [u8; CHUNK_SIZE] = tlv.read().await;
+        let _ = b_arr.try_extend_from_slice(&b);
+    }
+
+    for _ in 0..rem {
+        let b: [u8; 1] = tlv.read().await;
+        let _ = b_arr.try_extend_from_slice(&b);
+    }
+
+    let mut out = DynamicTokenOut::default();
+
+    match parse_dynamic_token_tlv(b_arr.as_slice() as &[u8], &mut out) {
+        Ok(()) => trace!("tlv parsing succeed\n"),
+        Err(err) => {
+            trace!("tlv parsing failed: {}\n", err as u8);
+            trace!("tlv data: {}\n", HexSlice(&b_arr));
+            reject::<()>(TLV_ERROR_OFFSET + err as u16).await;
+            return;
+        }
+    };
+
+    trace!("TUID: {}\n", HexSlice(&out.tuid));
+
+    let mut tuid: Tuid = Default::default();
+    match parse_tuid(&out.tuid, &mut tuid) {
+        Ok(()) => trace!("tuid parsing succeed\n"),
+        Err(err) => {
+            trace!("Tuid parsing failed: {}\n", err as u8);
+            reject::<()>(TLV_ERROR_OFFSET + err as u16).await;
+            return;
+        }
+    };
+
+    trace!(
+        "token contract: \nPACKAGE ADDRESS - {}\nMODULE - {}\nSTRUCT - {}\n",
+        HexSlice(&tuid.package_addr),
+        tuid.module.as_str(),
+        tuid.struct_name.as_str(),
+    );
+
+    let module: ArrayString<COIN_STRING_LENGTH> = match ArrayString::from(tuid.module.as_str()) {
+        Ok(a) => a,
+        Err(_err) => {
+            trace!("Module parsing failed: {}\n", _err);
+            reject::<()>(TLV_ERROR_OFFSET + TlvError::UnexpectedEof as u16).await;
+            return;
+        }
+    };
+    let function: ArrayString<COIN_STRING_LENGTH> =
+        match ArrayString::from(tuid.struct_name.as_str()) {
+            Ok(a) => a,
+            Err(_err) => {
+                trace!("Function parsing failed: {}\n", _err);
+                reject::<()>(TLV_ERROR_OFFSET + TlvError::UnexpectedEof as u16).await;
+                return;
+            }
+        };
+
+    let ticker: ArrayString<TICKER_LENGTH> = match ArrayString::from(out.ticker.as_str()) {
+        Ok(a) => a,
+        Err(_err) => {
+            trace!("Ticker parsing failed: {}\n", _err);
+            reject::<()>(TLV_ERROR_OFFSET + TlvError::UnexpectedEof as u16).await;
+            return;
+        }
+    };
+
+    ctx.set_token(tuid.package_addr, module, function, out.magnitude, ticker);
+
+    io.result_final(&[]).await;
 }
 
 #[derive(Clone)]

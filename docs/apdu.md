@@ -152,6 +152,53 @@ In the abscence of this info the user may get a blind signing prompt.
 |--------------|-----------------|
 | `<variable>` | Signature bytes |
 
+
+### PROVIDE_TOKEN_DYNAMIC_DESCRIPTOR
+
+Provides a token dynamic descriptor by parsing TLV (Type-Length-Value) data.
+This APDU enables the app receive tokens information dynamically; new tokens support will not require new app code changes, and the data is signed to confirm its trusted source. Without this APDU, token transactions will not show to the user the correct ticker and value.
+
+*The APDU needs to be sent before the SIGN_TX one.*
+
+*The app supports one token dynamic descriptor per time, if another token transaction needs to be signed, the token dynamic descriptor APDU needs to be sent with the new token data before the signing.*
+
+#### Encoding
+
+**Command**
+
+| *CLA* | *INS* |
+|-------|-------|
+| 00    | 22    |
+
+**Input data**
+
+The input is raw TLV data with the following structure:
+
+| Field          | Tag  | Length     | Type               | Description                                      |
+|----------------|------|------------|--------------------|--------------------------------------------------|
+| STRUCTURE_TYPE | 0x01 | 1 byte     | required byte      | Overall structure type                           |
+| VERSION        | 0x02 | 1 byte     | required byte      | Version of the serialization format              |
+| COIN_TYPE      | 0x03 | 4 bytes    | required bytes[]   | Coin Type as defined in SLIP-44                  |
+| APP_NAME       | 0x04 | var        | required string    | Name of the App/Coin. Case sensitive.            |
+| TICKER         | 0x05 | var        | required string    | Token ticker displayed on the device             |
+| MAGNITUDE      | 0x06 | 1 byte     | required uint      | Token magnitude                                  |
+| TUID           | 0x07 | var        | required TLV       | Token unique identifier (nested TLV structure)   |
+| SIGNATURE      | 0x08 | var        | required bytes[]   | Signature for validation                         |
+
+##### TUID field
+| Field                 | Tag  | Length   | Type             | Description                      |
+|:----------------------|:-----|:---------|:-----------------|:---------------------------------|
+| TOKEN_PACKAGE_ADDRESS | 0x10 | 32 bytes | required bytes[] | Package address (fixed 32 bytes) |
+| TOKEN_MODULE_NAME     | 0x11 | var      | required string  | Module name                      |
+| TOKEN_STRUCT_NAME     | 0x12 | var      | required string  | Function name                    |
+
+**Output data**
+
+| Length | Description |
+|--------|-------------|
+| -      | No output data; success indicated by SW_OK, or error status |
+
+
 ## Status Words
 
 | SW     | SW name                       | Description                                                |

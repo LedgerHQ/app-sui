@@ -1,3 +1,4 @@
+use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::{CoinType, SUI_COIN_DECIMALS};
 use crate::ui::common::*;
@@ -56,6 +57,7 @@ impl UserInterface {
         total_amount: u64,
         coin_type: CoinType,
         gas_budget: u64,
+        ctx: &RunCtx,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
@@ -74,7 +76,8 @@ impl UserInterface {
                 &format!("SUI {}.{}", quotient, remainder_str.as_str())
             },
         };
-        let ((amt_str, amt_val), coin_fields) = get_coin_and_amount_fields(total_amount, coin_type);
+        let ((amt_str, amt_val), coin_fields) =
+            get_coin_and_amount_fields(total_amount, coin_type, ctx);
         let amt = Field {
             name: amt_str.as_str(),
             value: amt_val.as_str(),

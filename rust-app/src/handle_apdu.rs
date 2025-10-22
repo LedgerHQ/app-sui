@@ -43,6 +43,10 @@ pub fn handle_apdu_async(
                 trace!("Handling sign");
                 NoinlineFut(sign_apdu(io, ctx, settings, ui)).await;
             }
+            Ins::ProvideTrustedDynamicDescriptor => {
+                trace!("Handling provide trusted dynamic descriptor");
+                NoinlineFut(validate_tlv(io, ctx)).await;
+            }
             Ins::GetVersionStr => {}
             Ins::Exit if ctx.is_swap() => unsafe { ledger_device_sdk::sys::os_lib_end() },
             Ins::Exit => ledger_device_sdk::exit_app(0),
