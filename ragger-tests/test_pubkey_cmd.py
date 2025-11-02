@@ -1,3 +1,4 @@
+from time import time
 import pytest
 
 from application_client.client import Client, Errors
@@ -35,3 +36,17 @@ def test_get_public_key_confirm_accepted(backend, scenario_navigator, firmware, 
         assert address.hex() == "56b19e720f3bfa8caaef806afdd5dfaffd0d6ec9476323a14d1638ad734b2ba5"
 
     run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, check_result)
+
+# In this test we check that an incomplete GET_PUBLIC_KEY command followed by a new GET_PUBLIC_KEY does not panic the app
+def test_incomplete_command_does_not_panic_followed_by_next_command(backend, scenario_navigator, firmware, navigator):
+    for path in [ "m/44'/784'/0'"]:
+        client = Client(backend, use_block_protocol=True)
+
+        # Incomplete GET_PUBLIC_KEY command (just first part)
+        client.exchange_raw(bytes.fromhex("0002000021005060b9150c06381181d0f9964338489391a2c45b2134260a8b568f6ada00bf48"))
+
+        # Now send a new GET_PUBLIC_KEY command
+        with pytest.raises(ExceptionRAPDU) as e:
+            client.get_public_key(path=path)
+
+        assert e.value.status == 0x2
