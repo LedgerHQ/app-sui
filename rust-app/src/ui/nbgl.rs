@@ -9,7 +9,7 @@ use alloc::string::ToString;
 
 use core::cell::RefCell;
 use either::*;
-use include_gif::include_gif;
+use ledger_device_sdk::include_gif;
 use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::HexHash;
 use ledger_device_sdk::nbgl::*;

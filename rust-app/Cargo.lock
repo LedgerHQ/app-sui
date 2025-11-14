@@ -44,7 +44,6 @@ dependencies = [
  "ledger-log",
  "ledger-parser-combinators",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "pin-project",
 ]
 
@@ -348,8 +347,6 @@ dependencies = [
 [[package]]
 name = "include_gif"
 version = "1.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed329eea6ba198654ceab2c4dd41637d4890dc3c2bba845a57b5f81dac6d6a6"
 dependencies = [
  "flate2",
  "image",
@@ -393,20 +390,17 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 [[package]]
 name = "ledger-crypto-helpers"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-crypto-helpers#081b417dfe6641011200ecb4661347baf1339fd6"
 dependencies = [
  "arrayvec",
  "base64",
  "ledger-log",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "zeroize",
 ]
 
 [[package]]
 name = "ledger-log"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-log#4ffdefafa0674163d98db01b9516d660663d429d"
 dependencies = [
  "arrayvec",
  "ledger_device_sdk",
@@ -415,7 +409,6 @@ dependencies = [
 [[package]]
 name = "ledger-parser-combinators"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=async-split-take-2#6709be04d967c90a5082036ed5640c70cbc84d11"
 dependencies = [
  "arrayvec",
  "bstringify",
@@ -423,7 +416,6 @@ dependencies = [
  "generic-array",
  "ledger-log",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "num-derive",
  "num-traits",
  "paste",
@@ -434,19 +426,15 @@ dependencies = [
 [[package]]
 name = "ledger-prompts-ui"
 version = "0.1.0"
-source = "git+https://github.com/alamgu/ledger-prompts-ui#9f851a336b248e7458916e8deccf793bea73faa7"
 dependencies = [
  "arrayvec",
- "include_gif",
  "ledger-log",
  "ledger_device_sdk",
 ]
 
 [[package]]
 name = "ledger_device_sdk"
-version = "1.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd619c7297c16fca15868aaa2d5ed2389486a998f44a9be8c5a5bc99c1d03678"
+version = "1.28.0"
 dependencies = [
  "const-zero",
  "include_gif",
@@ -459,9 +447,7 @@ dependencies = [
 
 [[package]]
 name = "ledger_secure_sdk_sys"
-version = "1.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01092d78056ad8d81fb475089763153a18f99631c8e77a3c76fe822b00ffdb3c"
+version = "1.11.6"
 dependencies = [
  "bindgen",
  "cc",
@@ -775,13 +761,11 @@ dependencies = [
  "either",
  "hex",
  "hex-literal",
- "include_gif",
  "ledger-crypto-helpers",
  "ledger-log",
  "ledger-parser-combinators",
  "ledger-prompts-ui",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "num_enum",
  "pin-cell",
  "pin-project",
