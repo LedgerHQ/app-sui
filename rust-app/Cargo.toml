@@ -8,10 +8,10 @@ resolver = "2"
 
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
-ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers" }
-ledger-log = { git = "https://github.com/alamgu/ledger-log" }
-ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="async-split-take-2" }
-alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block" }
+ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers", branch = "y333/rust_sdk_single_crate"}
+ledger-log = { git = "https://github.com/alamgu/ledger-log", branch = "y333/rust_sdk_single_crate" }
+ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="y333/rust_sdk_single_crate" }
+alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block", branch = "y333/rust_sdk_single_crate" }
 zeroize = { version = "1.5.2", default-features = false }
 num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
@@ -34,7 +34,7 @@ pending_review_screen = []
 ledger_device_sdk = { version = "1.28.0", features=["sys"] }
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
-ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
+ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui", branch = "y333/rust_sdk_single_crate"}
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
 version = "1.28.0"
@@ -83,14 +83,3 @@ icon = "sui_32x32.png"
 
 [patch.crates-io]
 ledger_device_sdk = {path = "../../ledger-device-rust-sdk/ledger_device_sdk" }
-
-[patch."https://github.com/alamgu/ledger-crypto-helpers"]
-ledger-crypto-helpers = { path = "../../alamgu/ledger-crypto-helpers" }
-[patch."https://github.com/alamgu/ledger-log"]
-ledger-log = { path = "../../alamgu/ledger-log" }
-[patch."https://github.com/alamgu/ledger-parser-combinators"]
-ledger-parser-combinators = { path = "../../alamgu/ledger-parser-combinators" }
-[patch."https://github.com/alamgu/alamgu-async-block"]
-alamgu-async-block = { path = "../../alamgu/alamgu-async-block" }
-[patch."https://github.com/alamgu/ledger-prompts-ui"]
-ledger-prompts-ui = { path = "../../alamgu/ledger-prompts-ui" }
