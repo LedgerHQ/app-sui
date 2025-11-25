@@ -38,7 +38,7 @@ dependencies = [
 [[package]]
 name = "alamgu-async-block"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/alamgu-async-block#b4e8152e5b09f48d74e2322ceb72957391aa0872"
+source = "git+https://github.com/alamgu/alamgu-async-block#039d5d69954697b67d6b5013bd27726717f08371"
 dependencies = [
  "arrayvec",
  "ledger-log",
@@ -392,7 +392,7 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 [[package]]
 name = "ledger-crypto-helpers"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-crypto-helpers?branch=y333%2Frust_sdk_single_crate#f82acec6a2c809d79a2829f45ea1fd4812a070c5"
+source = "git+https://github.com/alamgu/ledger-crypto-helpers#5b3643b9a1e161f9d595617c248ac02429d98ef8"
 dependencies = [
  "arrayvec",
  "base64",
@@ -404,7 +404,7 @@ dependencies = [
 [[package]]
 name = "ledger-log"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-log?branch=y333%2Frust_sdk_single_crate#dcc67effe0d102180678b5e6a07adb1904c6b4f2"
+source = "git+https://github.com/alamgu/ledger-log#4c5eda5d3bd3c59d0af75332f0a5c6960c4ed5af"
 dependencies = [
  "arrayvec",
  "ledger_device_sdk",
@@ -413,7 +413,7 @@ dependencies = [
 [[package]]
 name = "ledger-parser-combinators"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=y333%2Frust_sdk_single_crate#e65072b68009ff53543792e984d84d4ce75b65c7"
+source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=async-split-take-2#1af33cf25c8bdc46fd8bf2c3a8316ec3d78ba445"
 dependencies = [
  "arrayvec",
  "bstringify",
@@ -431,7 +431,7 @@ dependencies = [
 [[package]]
 name = "ledger-prompts-ui"
 version = "0.1.0"
-source = "git+https://github.com/alamgu/ledger-prompts-ui?branch=y333%2Frust_sdk_single_crate#459acacaf0bea593c509e6bc8142d41f53e5a662"
+source = "git+https://github.com/alamgu/ledger-prompts-ui#eb91484bbd3ded94e658efea1628db82638b6196"
 dependencies = [
  "arrayvec",
  "ledger-log",

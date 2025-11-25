@@ -8,10 +8,10 @@ resolver = "2"
 
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
-ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers", branch = "y333/rust_sdk_single_crate"}
-ledger-log = { git = "https://github.com/alamgu/ledger-log", branch = "y333/rust_sdk_single_crate" }
-ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="y333/rust_sdk_single_crate" }
-alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block", branch = "y333/rust_sdk_single_crate" }
+ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers" }
+ledger-log = { git = "https://github.com/alamgu/ledger-log" }
+ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="async-split-take-2" }
+alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block" }
 zeroize = { version = "1.5.2", default-features = false }
 num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
@@ -34,7 +34,7 @@ pending_review_screen = []
 ledger_device_sdk = { version = "1.29.0", features=["sys"] }
 
 [target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
-ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui", branch = "y333/rust_sdk_single_crate"}
+ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
 version = "1.29.0"
