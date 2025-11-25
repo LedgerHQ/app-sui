@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.2.4
+* Fix bug that causes a panic when an incomplete command is sent
+
 ## 1.2.2
 * Use 'Ledger by P2P' instead of Ledger validator address when staking
 
@@ -24,7 +27,7 @@
 * Fix BE dpath endianness in swap params
 
 ## 0.2.5
-* Fix displaying of UI warning in swap mode 
+* Fix displaying of UI warning in swap mode
 
 ## 0.2.4
 * Add swap support

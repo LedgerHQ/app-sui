@@ -131,6 +131,10 @@ class Client:
 
         return result
 
+    def exchange_raw(self, payload: bytes) -> bytes:
+        rapdu = self.backend.exchange_raw(data=payload)
+        return rapdu.data
+
     # Block Protocol
     def send_with_blocks(self, cla, ins, p1, p2, payload: [bytes], extra_data: Dict[str, bytes] = {}) -> bytes:
         chunk_size = 180
