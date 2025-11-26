@@ -38,13 +38,12 @@ dependencies = [
 [[package]]
 name = "alamgu-async-block"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/alamgu-async-block#b4e8152e5b09f48d74e2322ceb72957391aa0872"
+source = "git+https://github.com/alamgu/alamgu-async-block#039d5d69954697b67d6b5013bd27726717f08371"
 dependencies = [
  "arrayvec",
  "ledger-log",
  "ledger-parser-combinators",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "pin-project",
 ]
 
@@ -393,20 +392,19 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 [[package]]
 name = "ledger-crypto-helpers"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-crypto-helpers#081b417dfe6641011200ecb4661347baf1339fd6"
+source = "git+https://github.com/alamgu/ledger-crypto-helpers#5b3643b9a1e161f9d595617c248ac02429d98ef8"
 dependencies = [
  "arrayvec",
  "base64",
  "ledger-log",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "zeroize",
 ]
 
 [[package]]
 name = "ledger-log"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-log#4ffdefafa0674163d98db01b9516d660663d429d"
+source = "git+https://github.com/alamgu/ledger-log#4c5eda5d3bd3c59d0af75332f0a5c6960c4ed5af"
 dependencies = [
  "arrayvec",
  "ledger_device_sdk",
@@ -415,7 +413,7 @@ dependencies = [
 [[package]]
 name = "ledger-parser-combinators"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=async-split-take-2#6709be04d967c90a5082036ed5640c70cbc84d11"
+source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=async-split-take-2#1af33cf25c8bdc46fd8bf2c3a8316ec3d78ba445"
 dependencies = [
  "arrayvec",
  "bstringify",
@@ -423,7 +421,6 @@ dependencies = [
  "generic-array",
  "ledger-log",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "num-derive",
  "num-traits",
  "paste",
@@ -434,10 +431,9 @@ dependencies = [
 [[package]]
 name = "ledger-prompts-ui"
 version = "0.1.0"
-source = "git+https://github.com/alamgu/ledger-prompts-ui#9f851a336b248e7458916e8deccf793bea73faa7"
+source = "git+https://github.com/alamgu/ledger-prompts-ui#eb91484bbd3ded94e658efea1628db82638b6196"
 dependencies = [
  "arrayvec",
- "include_gif",
  "ledger-log",
  "ledger_device_sdk",
 ]
@@ -767,7 +763,7 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "sui"
-version = "1.2.4"
+version = "1.2.5"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",
@@ -775,13 +771,11 @@ dependencies = [
  "either",
  "hex",
  "hex-literal",
- "include_gif",
  "ledger-crypto-helpers",
  "ledger-log",
  "ledger-parser-combinators",
  "ledger-prompts-ui",
  "ledger_device_sdk",
- "ledger_secure_sdk_sys",
  "num_enum",
  "pin-cell",
  "pin-project",
