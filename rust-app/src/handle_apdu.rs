@@ -13,13 +13,14 @@ use ledger_log::trace;
 pub type APDUsFuture<'ctx> = impl Future<Output = ()> + 'ctx;
 
 #[inline(never)]
+#[define_opaque(APDUsFuture)]
 pub fn handle_apdu_async(
     io: HostIO,
     ins: Ins,
     ctx: &RunCtx,
     settings: Settings,
     ui: UserInterface,
-) -> APDUsFuture {
+) -> APDUsFuture<'_> {
     trace!("Constructing future");
     async move {
         trace!("Dispatching");
