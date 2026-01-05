@@ -37,7 +37,7 @@ fn hex_decode(hex: &str) -> Option<Vec<u8>> {
         chars = &chars_utf8[2..];
     }
 
-    if chars.len() % 2 != 0 {
+    if !chars.len().is_multiple_of(2) {
         return None; // Must be even length
     }
 
