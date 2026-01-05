@@ -30,6 +30,7 @@ use core::convert::TryFrom;
 use core::future::Future;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
+#[define_opaque(BipParserImplT)]
 pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 
 // Need a path of length 5, as make_bip32_path panics with smaller paths

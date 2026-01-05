@@ -155,7 +155,7 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
 }
 
 fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
-    if buf.len() % BIP32_PATH_SEGMENT_LEN != 0 {
+    if !buf.len().is_multiple_of(BIP32_PATH_SEGMENT_LEN) {
         return Err(Error::DecodeDPathError);
     }
 
