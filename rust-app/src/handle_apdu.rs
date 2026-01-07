@@ -13,13 +13,14 @@ use ledger_log::trace;
 pub type APDUsFuture<'ctx> = impl Future<Output = ()> + 'ctx;
 
 #[inline(never)]
+#[define_opaque(APDUsFuture)]
 pub fn handle_apdu_async(
     io: HostIO,
     ins: Ins,
     ctx: &RunCtx,
     settings: Settings,
     ui: UserInterface,
-) -> APDUsFuture {
+) -> APDUsFuture<'_> {
     trace!("Constructing future");
     async move {
         trace!("Dispatching");
@@ -43,8 +44,12 @@ pub fn handle_apdu_async(
                 trace!("Handling sign");
                 NoinlineFut(sign_apdu(io, ctx, settings, ui)).await;
             }
+            Ins::ProvideTrustedDynamicDescriptor => {
+                trace!("Handling provide trusted dynamic descriptor");
+                NoinlineFut(validate_tlv(io, ctx)).await;
+            }
             Ins::GetVersionStr => {}
-            Ins::Exit if ctx.is_swap() => unsafe { ledger_secure_sdk_sys::os_lib_end() },
+            Ins::Exit if ctx.is_swap() => unsafe { ledger_device_sdk::sys::os_lib_end() },
             Ins::Exit => ledger_device_sdk::exit_app(0),
         }
     }

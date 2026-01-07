@@ -56,6 +56,7 @@ pub enum Ins {
     VerifyAddress = 1,
     GetPubkey = 2,
     Sign = 3,
+    ProvideTrustedDynamicDescriptor = 0x22,
     GetVersionStr = 0xfe,
     Exit = 0xff,
 }

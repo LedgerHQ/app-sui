@@ -28,7 +28,7 @@ pub fn custom_panic(info: &PanicInfo) -> ! {
     let mut comm = io::Comm::new();
     comm.reply(io::StatusWords::Panic);
 
-    ledger_secure_sdk_sys::exit_app(0);
+    ledger_device_sdk::sys::exit_app(0);
 }
 
 ledger_device_sdk::set_panic!(custom_panic);
