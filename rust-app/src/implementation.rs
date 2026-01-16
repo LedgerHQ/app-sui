@@ -1,3 +1,4 @@
+use crate::ctx_sync::block_protocol::BlockProtocolHandler;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
 use crate::parser::common::{
@@ -36,6 +37,47 @@ pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 // Need a path of length 5, as make_bip32_path panics with smaller paths
 pub const BIP32_PREFIX: [u32; 5] =
     ledger_device_sdk::ecc::make_bip32_path(b"m/44'/784'/123'/0'/0'");
+
+pub fn get_address_apdu_sync(protocol_handler: &mut BlockProtocolHandler, comm: &mut ledger_device_sdk::io::Comm, path: &[u8], prompt: bool) {
+    let mut bip32path = ArrayVec::<u32, 10>::new();
+
+    let _length = path[0] as usize;
+
+    path[1..].chunks(4).map(|chunk| {
+        let mut arr = [0u8; 4];
+        arr.copy_from_slice(chunk);
+        u32::from_le_bytes(arr)
+    }).for_each(|val| {
+        bip32path.try_push(val).ok();
+    });
+
+    if !bip32path.starts_with(&BIP32_PREFIX[0..2]) {
+        info!("Invalid BIP32 path\n");
+    }
+
+    let mut rv = ArrayVec::<u8, 220>::new();
+    if with_public_keys(&bip32path, true, |key, address: &SuiPubKeyAddress| {
+        try_option(|| -> Option<()> {
+            if prompt {
+                // Synchronous confirmation not implemented
+                info!("Prompting for address confirmation not implemented in sync mode\n");
+            }
+            let key_bytes = ed25519_public_key_bytes(key);
+            rv.try_push(u8::try_from(key_bytes.len()).ok()?).ok()?;
+            rv.try_extend_from_slice(key_bytes).ok()?;
+            // And we'll send the address along;
+            let binary_address = address.get_binary_address();
+            rv.try_push(u8::try_from(binary_address.len()).ok()?).ok()?;
+            rv.try_extend_from_slice(binary_address).ok()?;
+            let _ = protocol_handler.result_final(comm, &rv);
+            Some(())
+        }())
+    })
+    .is_err()
+    {
+        info!("Error when computing public key");
+    }
+}
 
 pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     let input = match io.get_params::<1>() {
@@ -121,6 +163,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
+    info!("apdu sign tx length: {}\n", length);
+
     let known_txn = {
         let mut txn = input[0].clone();
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
@@ -130,6 +174,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         })
         .await
     };
+
+    info!("End of tx_parse");
 
     let is_unknown_txn = known_txn.is_none();
 

@@ -60,12 +60,19 @@ pub mod ui;
 #[cfg(target_family = "bolos")]
 #[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 pub mod main_stax;
+#[cfg(target_family = "bolos")]
+#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
+pub mod main_stax_sync;
+
 
 #[cfg(target_family = "bolos")]
 pub mod swap;
 
 #[cfg(target_family = "bolos")]
 pub mod ctx;
+
+#[cfg(target_family = "bolos")]
+pub mod ctx_sync;
 
 #[cfg(all(target_family = "bolos", test))]
 use core::panic::PanicInfo;

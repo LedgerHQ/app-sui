@@ -7,8 +7,11 @@ fn main() {}
 #[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
 use sui::main_nanos::*;
 
-#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
+#[cfg(all(any(target_os = "stax", target_os = "flex", target_os = "apex_p"), not(feature = "sync")))]
 use sui::main_stax::*;
+
+#[cfg(all(any(target_os = "stax", target_os = "flex", target_os = "apex_p"), feature = "sync"))]
+use sui::main_stax_sync::*;
 
 use sui::{
     ctx::RunCtx,
