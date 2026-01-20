@@ -9,7 +9,6 @@ use core::future::Future;
 use ledger_log::*;
 pub use num_traits::FromPrimitive;
 
-trait IsLengthDelimited {}
 
 pub fn parse_varint<'a: 'c, 'c, T, BS: Readable>(input: &'a mut BS) -> impl Future<Output = T> + 'c
 where

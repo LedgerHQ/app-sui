@@ -3,7 +3,6 @@ use core::convert::TryFrom;
 use core::marker::ConstParamTy;
 use ledger_device_sdk::io::{ApduHeader, StatusWords};
 use ledger_parser_combinators::core_parsers::*;
-use ledger_parser_combinators::endianness::*;
 use num_enum::TryFromPrimitive;
 
 #[derive(ConstParamTy, PartialEq, Eq)]

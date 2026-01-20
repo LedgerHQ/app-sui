@@ -2,7 +2,6 @@
 #![allow(incomplete_features)]
 #![feature(adt_const_params)]
 #![feature(generic_const_exprs)]
-#![feature(const_refs_to_cell)]
 
 #[cfg(test)]
 extern crate std;

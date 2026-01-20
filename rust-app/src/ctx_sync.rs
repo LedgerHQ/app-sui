@@ -31,6 +31,12 @@ pub enum State {
     ReadyToSign { tx_hash: [u8; 32], path: ArrayVec<u32, 10> },
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Context {
     pub fn new() -> Self {
         Context {
@@ -38,7 +44,7 @@ impl Context {
             state: State::Idle,
         }
     }
-    
+
     /// Process incoming APDU and coordinate with block protocol
     pub fn handle_apdu(&mut self, comm: &mut Comm, ins: Ins) -> Result<(), Reply> {
         // Process block protocol command first

@@ -333,7 +333,6 @@ impl HostIO {
         {
             let mut params = ArrayVec::<ByteStream, N>::new();
             for param in self.get_comm().ok()?.get_data().ok()?[1..].chunks_exact(HASH_LEN) {
-                /// Print debug info about the current ByteStream being created
                 info!("Creating ByteStream for chunk: {:02x?}", param);
                 params
                     .try_push(ByteStream {
@@ -351,6 +350,7 @@ impl HostIO {
 }
 
 /// A block must be at least [HASH_LEN] bytes long.
+#[allow(dead_code)]
 pub struct Block([u8]);
 
 impl Block {

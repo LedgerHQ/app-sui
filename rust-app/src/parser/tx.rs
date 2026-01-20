@@ -12,7 +12,6 @@ use ledger_log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
-use ledger_parser_combinators::endianness::*;
 use ledger_parser_combinators::interp::*;
 
 // Tx Schema

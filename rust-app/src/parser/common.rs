@@ -2,7 +2,6 @@ use arrayvec::ArrayVec;
 use core::future::Future;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
-use ledger_parser_combinators::endianness::*;
 use ledger_parser_combinators::interp::*;
 
 // Schema
