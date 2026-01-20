@@ -40,7 +40,11 @@ where
     fn def_parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         <DefaultInterp as AsyncParser<T, BS>>::parse(&DefaultInterp, input)
     }
-    type State<'c> = impl Future<Output = <DefaultInterp as HasOutput<Self>>::Output> + 'c where BS: 'c, T: 'c;
+    type State<'c>
+        = impl Future<Output = <DefaultInterp as HasOutput<Self>>::Output> + 'c
+    where
+        BS: 'c,
+        T: 'c;
 }
 
 pub static mut REJECTED_CODE: u16 = 0;
@@ -156,7 +160,11 @@ where
     T: DefaultArray,
     S: AsyncParser<T, BS>,
 {
-    type State<'c> = impl Future<Output = [<S as HasOutput<T>>::Output; N]> + 'c where BS: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = [<S as HasOutput<T>>::Output; N]> + 'c
+    where
+        BS: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut accumulator = ArrayVec::<<S as HasOutput<T>>::Output, N>::new();
@@ -179,7 +187,10 @@ impl HasOutput<Byte> for DefaultInterp {
 }
 
 impl<BS: Readable> AsyncParser<Byte, BS> for DefaultInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let [u] = input.read().await;
@@ -206,7 +217,10 @@ impl<const N: usize> HasOutput<Array<Byte, N>> for DefaultInterp {
 /// Overlap is not permitted, but this doesn't overlap because we've disabled the default
 /// implementation.
 impl<const N: usize, BS: Readable> AsyncParser<Array<Byte, N>, BS> for DefaultInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move { input.read().await }
     }
@@ -221,7 +235,10 @@ macro_rules! number_parser {
         where
             $t: Convert<E>,
         {
-            type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+            type State<'c>
+                = impl Future<Output = Self::Output> + 'c
+            where
+                BS: 'c;
             fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
                 async move { Convert::<E>::deserialize(input.read::<$size>().await) }
             }
@@ -246,9 +263,15 @@ where
     DefaultInterp: AsyncParser<T, BS>,
 {
     #[cfg(not(version("1.62")))] // This may need to be "fixed" based on testing on versions above 1.62
-    type State<'c> = impl Future<Output = Self::Output> where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output>
+    where
+        BS: 'c;
     #[cfg(version("1.62"))]
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         <SubInterp<DefaultInterp> as AsyncParser<Array<T, N>, BS>>::parse(
             &SubInterp(DefaultInterp),
@@ -267,7 +290,11 @@ where
     DefaultInterp: AsyncParser<N, BS>,
     <DefaultInterp as HasOutput<N>>::Output: TryInto<usize>,
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let length: usize = match DefaultInterp.parse(input).await.try_into() {
@@ -297,7 +324,10 @@ where
     <DefaultInterp as HasOutput<N>>::Output: TryInto<usize>,
     DefaultInterp: AsyncParser<I, BS>,
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let length: usize =
@@ -329,7 +359,12 @@ impl<
         BS: Readable,
     > AsyncParser<T, BS> for Action<S, F>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             match self.1(self.0.parse(input).await) {
@@ -362,7 +397,12 @@ impl<
         BS: Readable,
     > AsyncParser<T, BS> for FutAction<S, F>
 {
-    type State<'c> = impl 'c + Future<Output = Self::Output> where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl 'c + Future<Output = Self::Output>
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             match self.1(self.0.parse(input).await).await {
@@ -380,7 +420,13 @@ impl<A, R, S, SR> HasOutput<A> for Action<S, fn(&SR, &mut Option<R>) -> Option<(
 impl<A, R, S: AsyncParser<A, BS>, BS: Readable> AsyncParser<A, BS>
     for Action<S, fn(&<S as HasOutput<A>>::Output, &mut Option<R>) -> Option<()>>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, R: 'c, <S as HasOutput<A>>::Output: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        R: 'c,
+        <S as HasOutput<A>>::Output: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut destination = None;
@@ -406,7 +452,13 @@ impl<T, S: AsyncParser<T, BS>, R, BS: Readable> AsyncParser<T, BS>
     for FAction<S, <S as HasOutput<T>>::Output, R>
 {
     // FAction<S, fn(<S as HasOutput<T>>::Output) -> Option<R>> {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, R: 'c, <S as HasOutput<T>>::Output: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        R: 'c,
+        <S as HasOutput<T>>::Output: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             match self.1(self.0.parse(input).await) {
@@ -429,7 +481,10 @@ pub struct HashIntercept<BS, X, F>(pub BS, pub X, pub F);
 impl<BS: 'static + Readable, X: 'static, F: Fn(&mut X, &[u8])> Readable
     for HashIntercept<BS, X, F>
 {
-    type OutFut<'a, const N: usize> = impl core::future::Future<Output = [u8; N]> + 'a where F: 'a;
+    type OutFut<'a, const N: usize>
+        = impl core::future::Future<Output = [u8; N]> + 'a
+    where
+        F: 'a;
     fn read<'a: 'b, 'b, const N: usize>(&'a mut self) -> Self::OutFut<'b, N> {
         async move {
             let d = self.0.read().await;
@@ -448,7 +503,11 @@ impl<
         BS: 'static + Readable + Clone,
     > AsyncParser<A, BS> for ObserveBytes<X, F, S>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where S: 'c, F: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        S: 'c,
+        F: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut hi = HashIntercept(input.clone(), (self.0)(), self.1);
@@ -534,7 +593,12 @@ impl<
         F: Fn(<S as HasOutput<T>>::Output) -> Option<R>,
     > LengthDelimitedParser<T, BS> for Action<S, F>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
             match self.1(self.0.parse(input, length).await) {
@@ -554,7 +618,12 @@ impl<
         BS: Readable,
     > LengthDelimitedParser<T, BS> for FutAction<S, F>
 {
-    type State<'c> = impl 'c + Future<Output = Self::Output> where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl 'c + Future<Output = Self::Output>
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
             match self.1(self.0.parse(input, length).await).await {
@@ -583,7 +652,12 @@ impl<
         F: Fn(<S as HasOutput<T>>::Output) -> Fut,
     > LengthDelimitedParser<T, BS> for Bind<S, F>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move { self.1(self.0.parse(input, length).await).await }
     }
@@ -597,14 +671,22 @@ impl<
         F: Fn(<S as HasOutput<T>>::Output) -> Fut,
     > AsyncParser<T, BS> for Bind<S, F>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, F: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        F: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move { self.1(self.0.parse(input).await).await }
     }
 }
 
 impl<Schema, BS: Readable> LengthDelimitedParser<Schema, BS> for DropInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
             #[cfg(feature = "logging")]
