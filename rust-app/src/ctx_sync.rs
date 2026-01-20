@@ -1,6 +1,6 @@
 use crate::{interface::Ins, parser::tx::KnownTx};
-use ledger_device_sdk::io::{Comm, Reply};
 use arrayvec::ArrayVec;
+use ledger_device_sdk::io::{Comm, Reply};
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -22,13 +22,22 @@ pub enum State {
     /// Need to request first chunk
     NeedInputParam { param_index: usize },
     /// Parsing transaction data
-    ParsingTransaction { buffer: Vec<u8>, bytes_needed: usize },
+    ParsingTransaction {
+        buffer: Vec<u8>,
+        bytes_needed: usize,
+    },
     /// Computing public key
     ComputingPublicKey { buffer: Vec<u8> },
     /// Ready to show clear signing UI
-    ReadyForUI { tx: KnownTx, path: ArrayVec<u32, 10> },
+    ReadyForUI {
+        tx: KnownTx,
+        path: ArrayVec<u32, 10>,
+    },
     /// User approved, ready to sign
-    ReadyToSign { tx_hash: [u8; 32], path: ArrayVec<u32, 10> },
+    ReadyToSign {
+        tx_hash: [u8; 32],
+        path: ArrayVec<u32, 10>,
+    },
 }
 
 impl Default for Context {
@@ -49,7 +58,7 @@ impl Context {
     pub fn handle_apdu(&mut self, comm: &mut Comm, ins: Ins) -> Result<(), Reply> {
         // Process block protocol command first
         let action = self.protocol.process_command(comm)?;
-        
+
         ledger_log::info!("Block protocol action: {:x?}", action);
         match action {
             BlockAction::StartIns => {
@@ -74,10 +83,9 @@ impl Context {
         // Handle current state
         self.handle_state(comm)
     }
-    
+
     fn handle_state(&mut self, comm: &mut Comm) -> Result<(), Reply> {
         match &self.state {
-
             State::Idle => {
                 // Waiting for START
                 Ok(())
@@ -102,21 +110,44 @@ impl Context {
             }
 
             State::ComputingPublicKey { buffer } => {
-                crate::implementation::get_address_apdu_sync(&mut self.protocol, comm, buffer, false);
+                crate::implementation::get_address_apdu_sync(
+                    &mut self.protocol,
+                    comm,
+                    buffer,
+                    false,
+                );
                 Ok(())
             }
-            
-            State::ParsingTransaction { buffer, bytes_needed } => {
+
+            State::ParsingTransaction {
+                buffer,
+                bytes_needed,
+            } => {
                 if buffer.len() >= *bytes_needed {
                     // Have enough data, parse it
                     let _tx = KnownTx::TransferTx {
                         recipient: [0u8; 32],
-                        coin_type: (crate::parser::common::SUI_COIN_ID, ArrayVec::new(), ArrayVec::new()),
+                        coin_type: (
+                            crate::parser::common::SUI_COIN_ID,
+                            ArrayVec::new(),
+                            ArrayVec::new(),
+                        ),
                         total_amount: 0,
                         gas_budget: 0,
-                    };//parse_transaction(&buffer)?;
-                    self.state = State::ReadyForUI { 
-                        tx: KnownTx::TransferTx { recipient: [0u8; 32], coin_type: (crate::parser::common::SUI_COIN_ID, ArrayVec::new(), ArrayVec::new()), total_amount: 0, gas_budget: 0 }, path: ArrayVec::new() };
+                    }; //parse_transaction(&buffer)?;
+                    self.state = State::ReadyForUI {
+                        tx: KnownTx::TransferTx {
+                            recipient: [0u8; 32],
+                            coin_type: (
+                                crate::parser::common::SUI_COIN_ID,
+                                ArrayVec::new(),
+                                ArrayVec::new(),
+                            ),
+                            total_amount: 0,
+                            gas_budget: 0,
+                        },
+                        path: ArrayVec::new(),
+                    };
                     self.handle_state(comm)
                 } else {
                     // Need more data, request next chunk
@@ -124,18 +155,21 @@ impl Context {
                     Ok(())
                 }
             }
-            
-            State::ReadyToSign { tx_hash: _, path: _ } => {
+
+            State::ReadyToSign {
+                tx_hash: _,
+                path: _,
+            } => {
                 // Sign and return
-                let signature = [0u8; 32];//sign_ed25519(path, tx_hash)?;
+                let signature = [0u8; 32]; //sign_ed25519(path, tx_hash)?;
                 self.protocol.result_final(comm, &signature)?;
                 Ok(())
             }
-            
+
             _ => Ok(()),
         }
     }
-    
+
     fn start(&mut self, ins: Ins) -> Result<(), Reply> {
         // Initialize state based on instruction
         match ins {
@@ -154,14 +188,16 @@ impl Context {
         }
         Ok(())
     }
-    
+
     fn process_chunk(&mut self, ins: Ins, data: &[u8]) -> Result<(), Reply> {
         match (ins, &self.state) {
             (Ins::GetPubkey, State::NeedInputParam { .. }) => {
                 // Received BIP32 path
                 ledger_log::info!("Received BIP32 path chunk");
 
-                self.state = State::ComputingPublicKey{ buffer: data[32..].to_vec() };
+                self.state = State::ComputingPublicKey {
+                    buffer: data[32..].to_vec(),
+                };
             }
             // (Ins::Sign, CommandState::NeedInputParam { param_index }) if *param_index == 0 => {
             //     // Received transaction data

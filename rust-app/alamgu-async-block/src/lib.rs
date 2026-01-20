@@ -82,11 +82,13 @@
 use arrayvec::ArrayVec;
 use core::future::Future;
 use core::pin::Pin;
-use ledger_log::*;
-use ledger_parser_combinators::async_parser::{reject, Readable, UnwrappableReadable, REJECTED_CODE};
-use ledger_device_sdk::sys::*;
 use ledger_device_sdk::io;
 use ledger_device_sdk::io::SyscallError;
+use ledger_device_sdk::sys::*;
+use ledger_log::*;
+use ledger_parser_combinators::async_parser::{
+    reject, Readable, UnwrappableReadable, REJECTED_CODE,
+};
 
 use core::cell::{Ref, RefCell, RefMut};
 use core::convert::TryFrom;
@@ -337,7 +339,10 @@ impl HostIO {
                 params
                     .try_push(ByteStream {
                         host_io: self,
-                        current_chunk: param.try_into().or(Err(SyscallError::InvalidParameter)).ok()?,
+                        current_chunk: param
+                            .try_into()
+                            .or(Err(SyscallError::InvalidParameter))
+                            .ok()?,
                         current_offset: 0,
                     })
                     .ok()?;
@@ -461,8 +466,7 @@ pub static RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
 pub fn poll_with_trivial_context<Fut: Future + ?Sized>(
     f: Pin<&mut Fut>,
 ) -> core::task::Poll<Fut::Output> {
-    let waker =
-        unsafe { Waker::from_raw(RawWaker::new(&(), pic_rs(&RAW_WAKER_VTABLE))) };
+    let waker = unsafe { Waker::from_raw(RawWaker::new(&(), pic_rs(&RAW_WAKER_VTABLE))) };
     let mut ctxd = Context::from_waker(&waker);
     let r = f.poll(&mut ctxd);
     core::mem::forget(ctxd);
@@ -548,7 +552,11 @@ pub fn poll_apdu_handlers<'a: 'b, 'b, F: Future<Output = ()>, Ins, A: Fn(HostIO,
 
     loop {
         // And run the future for this APDU.
-        match poll_with_trivial_context(s.as_mut().as_pin_mut().ok_or(Reply::from(SyscallError::InvalidState))?) {
+        match poll_with_trivial_context(
+            s.as_mut()
+                .as_pin_mut()
+                .ok_or(Reply::from(SyscallError::InvalidState))?,
+        ) {
             Poll::Pending => {
                 // Then, check that if we're waiting that we've actually given the host something to do.
                 // In case of ResultFinal allow the Future to run to completion, and reset the state.

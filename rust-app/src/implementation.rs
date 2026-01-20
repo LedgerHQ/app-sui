@@ -1,5 +1,5 @@
-use crate::ctx_sync::block_protocol::BlockProtocolHandler;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
+use crate::ctx_sync::block_protocol::BlockProtocolHandler;
 use crate::interface::*;
 use crate::parser::common::{
     CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
@@ -38,18 +38,26 @@ pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 pub const BIP32_PREFIX: [u32; 5] =
     ledger_device_sdk::ecc::make_bip32_path(b"m/44'/784'/123'/0'/0'");
 
-pub fn get_address_apdu_sync(protocol_handler: &mut BlockProtocolHandler, comm: &mut ledger_device_sdk::io::Comm, path: &[u8], prompt: bool) {
+pub fn get_address_apdu_sync(
+    protocol_handler: &mut BlockProtocolHandler,
+    comm: &mut ledger_device_sdk::io::Comm,
+    path: &[u8],
+    prompt: bool,
+) {
     let mut bip32path = ArrayVec::<u32, 10>::new();
 
     let _length = path[0] as usize;
 
-    path[1..].chunks(4).map(|chunk| {
-        let mut arr = [0u8; 4];
-        arr.copy_from_slice(chunk);
-        u32::from_le_bytes(arr)
-    }).for_each(|val| {
-        bip32path.try_push(val).ok();
-    });
+    path[1..]
+        .chunks(4)
+        .map(|chunk| {
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(chunk);
+            u32::from_le_bytes(arr)
+        })
+        .for_each(|val| {
+            bip32path.try_push(val).ok();
+        });
 
     if !bip32path.starts_with(&BIP32_PREFIX[0..2]) {
         info!("Invalid BIP32 path\n");

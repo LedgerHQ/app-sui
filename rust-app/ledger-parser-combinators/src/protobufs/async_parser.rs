@@ -9,7 +9,6 @@ use core::future::Future;
 use ledger_log::*;
 pub use num_traits::FromPrimitive;
 
-
 pub fn parse_varint<'a: 'c, 'c, T, BS: Readable>(input: &'a mut BS) -> impl Future<Output = T> + 'c
 where
     T: Default + core::ops::Shl<Output = T> + core::ops::AddAssign + core::convert::From<u8>,
@@ -89,7 +88,10 @@ impl HasOutput<Bool> for DefaultInterp {
 }
 
 impl<BS: Readable> AsyncParser<Bool, BS> for DefaultInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move { parse_varint::<'c, 'c, u16, BS>(input).await == 1 }
     }
@@ -103,7 +105,10 @@ impl<BS: Readable> AsyncParser<Fixed64, BS> for DefaultInterp {
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move { input.read().await }
     }
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
 }
 
 impl<const N: usize> HasOutput<String> for Buffer<N> {
@@ -131,7 +136,10 @@ impl<const N: usize, BS: Readable> LengthDelimitedParser<String, BS> for Buffer<
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         read_arrayvec_n(input, length)
     }
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
 }
 
 impl<const N: usize> HasOutput<Bytes> for Buffer<N> {
@@ -145,7 +153,10 @@ impl<const N: usize, BS: Readable> LengthDelimitedParser<Bytes, BS> for Buffer<N
         trace!("Buffering siz {}", core::mem::size_of_val(&f));
         f
     }
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
 }
 
 impl<const FIELD_NUMBER: u32, Schema: ProtobufWireFormat, Value: HasOutput<Schema>>
@@ -197,7 +208,12 @@ impl<Schema, M: LengthDelimitedParser<Schema, BS>, BS: Readable> LengthDelimited
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         self.1.parse(input, length)
     }
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, M: 'c, Schema: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        M: 'c,
+        Schema: 'c;
 }
 
 pub use paste::paste;
@@ -503,7 +519,10 @@ impl<E: 'static + TrieLookup + core::fmt::Debug, BS: Readable> LengthDelimitedPa
 where
     [(); E::N]: Sized,
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
             let mut cursor = E::start();
@@ -539,7 +558,11 @@ impl<Schema, O> HasOutput<Schema> for RejectInterp<O> {
 }
 
 impl<Schema, O, BS: Readable> LengthDelimitedParser<Schema, BS> for RejectInterp<O> {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, O: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        O: 'c;
 
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, _input: &'a mut BS, _length: usize) -> Self::State<'c> {
         reject(PARSE_ERROR_CODE)
@@ -767,7 +790,11 @@ impl<
         BS: 'static + Readable + Clone,
     > LengthDelimitedParser<A, BS> for ObserveBytes<X, F, S>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where S: 'c, F: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        S: 'c,
+        F: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
             let mut hi = HashIntercept(input.clone(), (self.0)(), self.1);

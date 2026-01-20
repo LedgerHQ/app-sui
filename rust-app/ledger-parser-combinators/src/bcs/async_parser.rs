@@ -9,7 +9,10 @@ impl HasOutput<bool> for DefaultInterp {
 }
 
 impl<BS: Readable> AsyncParser<bool, BS> for DefaultInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let [byte]: [u8; 1] = input.read().await;
@@ -29,7 +32,11 @@ impl<T, S: HasOutput<T>> HasOutput<Option<T>> for SubInterp<S> {
 impl<T, S: HasOutput<T> + AsyncParser<T, BS>, BS: Readable> AsyncParser<Option<T>, BS>
     for SubInterp<S>
 {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c, S: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c,
+        S: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let [byte]: [u8; 1] = input.read().await;
@@ -78,7 +85,10 @@ impl HasOutput<ULEB128> for DefaultInterp {
 
 // Parsing logic copied from bcs repo
 impl<BS: Readable> AsyncParser<ULEB128, BS> for DefaultInterp {
-    type State<'c> = impl Future<Output = Self::Output> + 'c where BS: 'c;
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut value: u64 = 0;

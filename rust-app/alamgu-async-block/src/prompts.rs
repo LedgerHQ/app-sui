@@ -5,8 +5,8 @@ use core::str::from_utf8;
 
 use ledger_device_sdk::buttons::*;
 use ledger_device_sdk::ui::bagls::*;
-use ledger_device_sdk::ui::layout::*;
 use ledger_device_sdk::ui::gadgets::{clear_screen, get_event};
+use ledger_device_sdk::ui::layout::*;
 
 #[derive(Clone, Debug)]
 pub struct PromptQueue {

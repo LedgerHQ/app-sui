@@ -1,15 +1,14 @@
 use crate::ctx::RunCtx;
+use crate::ctx_sync::Context;
 use crate::interface::*;
 use crate::settings::*;
 use crate::ui::APP_ICON;
-use crate::ctx_sync::Context;
 
 use ledger_device_sdk::io::Comm;
 use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
 use ledger_log::{info, trace};
 
 pub fn app_main(_ctx: &RunCtx) {
-
     let mut comm = Comm::new().set_expected_cla(0x00);
     let mut cmd_ctx = Context::new();
 
@@ -27,13 +26,12 @@ pub fn app_main(_ctx: &RunCtx) {
     ]];
 
     let mut menu = NbglHomeAndSettings::new()
-            .glyph(&APP_ICON)
-            .settings(settings.get_mut(), &settings_strings)
-            .infos("Sui", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS"));        
+        .glyph(&APP_ICON)
+        .settings(settings.get_mut(), &settings_strings)
+        .infos("Sui", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS"));
     menu.show_and_return();
 
     loop {
-
         let ins: Ins = comm.next_command();
 
         match cmd_ctx.handle_apdu(&mut comm, ins) {

@@ -21,7 +21,10 @@
 #![cfg_attr(all(target_family = "bolos", test), no_main)]
 #![cfg_attr(target_family = "bolos", feature(custom_test_frameworks))]
 #![reexport_test_harness_main = "test_main"]
-#![cfg_attr(target_family = "bolos", test_runner(ledger_device_sdk::testing::sdk_test_runner))]
+#![cfg_attr(
+    target_family = "bolos",
+    test_runner(ledger_device_sdk::testing::sdk_test_runner)
+)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(non_local_definitions)]
 

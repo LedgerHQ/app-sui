@@ -64,7 +64,6 @@ pub mod main_stax;
 #[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 pub mod main_stax_sync;
 
-
 #[cfg(target_family = "bolos")]
 pub mod swap;
 
