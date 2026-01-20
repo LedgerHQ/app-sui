@@ -31,4 +31,4 @@ optional = true
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies]
 testmacro = "0.1.0"
-ledger_device_sdk = { version = "1.29.0", features = ["speculos"] }
+ledger_device_sdk = { version = "1.31.0", features = ["speculos"] }
