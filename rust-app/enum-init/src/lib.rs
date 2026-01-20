@@ -171,7 +171,7 @@ fn snake_ident(ident: &proc_macro2::Ident) -> proc_macro2::Ident {
     )
 }
 
-fn generics_just_vars(generics: &syn::Generics) -> syn::TypeGenerics {
+fn generics_just_vars(generics: &syn::Generics) -> syn::TypeGenerics<'_> {
     generics.split_for_impl().1
 }
 

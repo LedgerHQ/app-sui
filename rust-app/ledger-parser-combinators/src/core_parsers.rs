@@ -1,5 +1,3 @@
-use crate::endianness::Endianness;
-
 pub use crate::schema::*;
 
 // use generic_array::{ArrayLength, GenericArray};

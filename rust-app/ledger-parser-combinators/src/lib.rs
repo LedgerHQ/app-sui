@@ -5,12 +5,10 @@
 #![feature(negative_impls)]
 #![feature(trace_macros)]
 #![feature(log_syntax)]
-#![feature(pin_macro)]
 #![feature(type_alias_impl_trait)]
 #![feature(generic_const_exprs)]
 #![feature(cfg_version)]
 #![feature(macro_metavar_expr)]
-#![cfg_attr(target_family = "bolos", feature(asm_const))]
 #![cfg_attr(
     not(version("1.56")),
     feature(bindings_after_at),
@@ -25,6 +23,7 @@
 #![reexport_test_harness_main = "test_main"]
 #![cfg_attr(target_family = "bolos", test_runner(ledger_device_sdk::testing::sdk_test_runner))]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(non_local_definitions)]
 
 #[macro_use]
 extern crate enum_init;

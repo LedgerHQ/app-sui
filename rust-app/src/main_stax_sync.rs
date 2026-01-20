@@ -8,7 +8,7 @@ use ledger_device_sdk::io::Comm;
 use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
 use ledger_log::{info, trace};
 
-pub fn app_main(ctx: &RunCtx) {
+pub fn app_main(_ctx: &RunCtx) {
 
     let mut comm = Comm::new().set_expected_cla(0x00);
     let mut cmd_ctx = Context::new();
@@ -38,7 +38,7 @@ pub fn app_main(ctx: &RunCtx) {
 
         match cmd_ctx.handle_apdu(&mut comm, ins) {
             Ok(()) => {}
-            Err(e) => {
+            Err(_e) => {
                 trace!("Error during APDU handling: {:?}", e);
                 comm.reply(ledger_device_sdk::io::StatusWords::Unknown);
             }

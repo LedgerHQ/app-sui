@@ -565,6 +565,7 @@ impl<
     }
 }
 
+#[allow(dead_code)]
 struct Bind<S, F>(S, F);
 
 impl<T, S: HasOutput<T>, R, Fut: Future<Output = R>, F: Fn(<S as HasOutput<T>>::Output) -> Fut>

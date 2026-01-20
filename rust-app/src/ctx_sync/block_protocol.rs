@@ -63,6 +63,12 @@ pub struct BlockProtocolHandler {
     result_buffer: ArrayVec<u8, 256>,
 }
 
+impl Default for BlockProtocolHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockProtocolHandler {
     pub fn new() -> Self {
         BlockProtocolHandler {
