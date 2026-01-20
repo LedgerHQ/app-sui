@@ -38,10 +38,9 @@ dependencies = [
 [[package]]
 name = "alamgu-async-block"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/alamgu-async-block#039d5d69954697b67d6b5013bd27726717f08371"
 dependencies = [
  "arrayvec",
- "ledger-log",
+ "ledger-log 0.2.1",
  "ledger-parser-combinators",
  "ledger_device_sdk",
  "pin-project",
@@ -325,7 +324,6 @@ dependencies = [
 [[package]]
 name = "enum-init"
 version = "0.1.0"
-source = "git+https://github.com/alamgu/enum-init#5706da92215f1a5816d704229f8924d95d954a77"
 dependencies = [
  "Inflector",
  "proc-macro2",
@@ -612,13 +610,20 @@ checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 [[package]]
 name = "ledger-crypto-helpers"
 version = "0.2.1"
-source = "git+https://github.com/alamgu/ledger-crypto-helpers#5b3643b9a1e161f9d595617c248ac02429d98ef8"
 dependencies = [
  "arrayvec",
  "base64",
- "ledger-log",
+ "ledger-log 0.2.1",
  "ledger_device_sdk",
  "zeroize",
+]
+
+[[package]]
+name = "ledger-log"
+version = "0.2.1"
+dependencies = [
+ "arrayvec",
+ "ledger_device_sdk",
 ]
 
 [[package]]
@@ -633,15 +638,13 @@ dependencies = [
 [[package]]
 name = "ledger-parser-combinators"
 version = "0.1.2"
-source = "git+https://github.com/alamgu/ledger-parser-combinators?branch=async-split-take-2#1af33cf25c8bdc46fd8bf2c3a8316ec3d78ba445"
 dependencies = [
  "arrayvec",
  "bstringify",
  "enum-init",
  "generic-array",
- "ledger-log",
- "ledger_device_sdk",
- "num-derive 0.3.3",
+ "ledger-log 0.2.1",
+ "num-derive",
  "num-traits",
  "paste",
  "pin-project",
@@ -654,7 +657,7 @@ version = "0.1.0"
 source = "git+https://github.com/alamgu/ledger-prompts-ui#eb91484bbd3ded94e658efea1628db82638b6196"
 dependencies = [
  "arrayvec",
- "ledger-log",
+ "ledger-log 0.2.1 (git+https://github.com/alamgu/ledger-log)",
  "ledger_device_sdk",
 ]
 
@@ -1282,7 +1285,7 @@ dependencies = [
  "hex",
  "hex-literal",
  "ledger-crypto-helpers",
- "ledger-log",
+ "ledger-log 0.2.1",
  "ledger-parser-combinators",
  "ledger-prompts-ui",
  "ledger_device_sdk",
@@ -1420,7 +1423,6 @@ dependencies = [
 [[package]]
 name = "trie-enum"
 version = "0.1.0"
-source = "git+https://github.com/alamgu/trie-enum#0dedf0d0a941fc47b830d25d008f5ea42fdd3db4"
 dependencies = [
  "paste",
 ]

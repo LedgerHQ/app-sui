@@ -8,10 +8,10 @@ resolver = "2"
 
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
-ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers" }
-ledger-log = { git = "https://github.com/alamgu/ledger-log" }
-ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="async-split-take-2" }
-alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block" }
+ledger-crypto-helpers = { path = "./ledger-crypto-helpers" }
+ledger-log = { path = "./ledger-log" }
+ledger-parser-combinators = { path = "./ledger-parser-combinators" }
+alamgu-async-block = { path = "./alamgu-async-block" }
 zeroize = { version = "1.5.2", default-features = false }
 num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"

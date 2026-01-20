@@ -1,0 +1,16 @@
+[package]
+name = "ledger-crypto-helpers"
+version = "0.2.1"
+edition = "2018"
+
+[dev-dependencies]
+ledger_device_sdk = { version = "1.29.0", features = [ "sys", "speculos" ] }
+testmacro = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git" }
+hex-literal = "0.3"
+
+[dependencies]
+arrayvec = { version = "0.7.1", default-features = false }
+base64 = { version = "0.13.0", default-features = false }
+ledger-log = { path = "../ledger-log" }
+ledger_device_sdk = { version = "1.29.0", features = ["sys"] }
+zeroize = { version = "1.5.2", default-features = false }

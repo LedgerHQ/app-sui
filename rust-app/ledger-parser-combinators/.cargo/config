@@ -1,0 +1,35 @@
+[target.'cfg(target_os = "bolos")'.unstable]
+build-std = ["core"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.nanosplus]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+  "--emit=metadata,link,obj,llvm-ir,llvm-bc"
+]
+runner = "speculos --display headless -m nanosp -a 5 "
+
+[target.nanos]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+  "--emit=metadata,link,obj,llvm-ir,llvm-bc"
+]
+runner = "speculos --display headless -m nanos "
+
+[target.nanox]
+rustflags = [
+  "-C", "codegen-units=1",
+  "-C", "save-temps", # Fixes incremental builds by keeping .bc and .ll files
+  "-C", "embed-bitcode",
+  "--emit=metadata,link,obj,llvm-ir,llvm-bc"
+]
+runner = "speculos --display headless -m nanox "
+
+[alias]
+tt = "test --features extra_debug"
+br = "build --release"
+stackcheck = "stack-sizes --release --bin rust-app --target=thumbv6m-none-eabi"

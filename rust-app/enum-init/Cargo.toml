@@ -1,0 +1,15 @@
+[package]
+name = "enum-init"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0.91", features = ["full"] }
+proc-macro2 = "1.0.37"
+quote = "1.0.18"
+inflector = { version = "0.2.1", package = 'Inflector' }
