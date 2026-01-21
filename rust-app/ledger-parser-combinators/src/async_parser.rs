@@ -16,8 +16,7 @@ use core::convert::TryInto;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::Context;
-#[cfg(feature = "logging")]
-use ledger_log::*;
+use ledger_device_sdk::log::*;
 use pin_project::pin_project;
 
 pub trait HasDefParser<BS: Readable>
@@ -54,7 +53,6 @@ pub const PARSE_ERROR_CODE: u16 = 0x6850;
 
 /// Reject the parse.
 pub fn reject<T>(error_code: u16) -> impl Future<Output = T> {
-    #[cfg(feature = "logging")]
     error!("Rejecting parse");
     // Do some out-of-band rejection thingie
     unsafe {
@@ -65,7 +63,6 @@ pub fn reject<T>(error_code: u16) -> impl Future<Output = T> {
 
 #[allow(unused_variables)]
 pub fn reject_on<T>(file: &'static str, line: u32, error_code: u16) -> impl Future<Output = T> {
-    #[cfg(feature = "logging")]
     error!("Rejecting, {}:{}", file, line);
     unsafe {
         REJECTED_CODE = error_code;
@@ -689,12 +686,10 @@ impl<Schema, BS: Readable> LengthDelimitedParser<Schema, BS> for DropInterp {
         BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         async move {
-            #[cfg(feature = "logging")]
             trace!("Dropping");
             for _ in 0..length {
                 let [_]: [u8; 1] = input.read().await;
             }
-            #[cfg(feature = "logging")]
             trace!("Dropped");
         }
     }

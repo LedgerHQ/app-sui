@@ -4,12 +4,12 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use ledger_device_sdk::log::trace;
 use ledger_device_sdk::tag_to_flag_u64;
 use ledger_device_sdk::tlv::tlv_generic::{
     parse, Handler, ParseCfg, Received, Result, Tag, TlvData,
 };
 use ledger_device_sdk::tlv::TlvError;
-use ledger_log::trace;
 
 #[cfg(feature = "speculos")]
 use ledger_crypto_helpers::common::HexSlice;

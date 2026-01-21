@@ -32,7 +32,7 @@ pub fn custom_panic(info: &PanicInfo) -> ! {
         swap_panic_handler(info);
     }
 
-    ledger_log::error!("Panic happened! {:#?}", info);
+    ledger_device_sdk::log::error!("Panic happened! {:#?}", info);
 
     let mut comm = io::Comm::new();
     comm.reply(io::StatusWords::Panic);

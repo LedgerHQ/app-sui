@@ -6,7 +6,7 @@ use crate::ui::APP_ICON;
 
 use ledger_device_sdk::io::Comm;
 use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
-use ledger_log::{info, trace};
+use ledger_device_sdk::{info, trace};
 
 pub fn app_main(_ctx: &RunCtx) {
     let mut comm = Comm::new().set_expected_cla(0x00);
@@ -36,7 +36,8 @@ pub fn app_main(_ctx: &RunCtx) {
 
         match cmd_ctx.handle_apdu(&mut comm, ins) {
             Ok(()) => {}
-            Err(_e) => {
+            Err(e) => {
+                let _ = e;
                 trace!("Error during APDU handling: {:?}", e);
                 comm.reply(ledger_device_sdk::io::StatusWords::Unknown);
             }

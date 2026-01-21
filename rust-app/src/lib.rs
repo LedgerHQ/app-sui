@@ -17,7 +17,7 @@
 #![cfg_attr(all(not(version("1.65"))), feature(generic_associated_types))]
 #![cfg_attr(version("1.71"), feature(impl_trait_in_assoc_type))]
 
-pub use ledger_log::*;
+pub use ledger_device_sdk::log::*;
 
 #[cfg(feature = "pending_review_screen")]
 mod pending;

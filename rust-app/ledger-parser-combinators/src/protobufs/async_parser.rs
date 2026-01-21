@@ -6,7 +6,7 @@ use crate::protobufs::schema::*;
 use arrayvec::ArrayVec;
 use core::future::Future;
 #[cfg(feature = "logging")]
-use ledger_log::*;
+use ledger_device_sdk::log::*;
 pub use num_traits::FromPrimitive;
 
 pub fn parse_varint<'a: 'c, 'c, T, BS: Readable>(input: &'a mut BS) -> impl Future<Output = T> + 'c
