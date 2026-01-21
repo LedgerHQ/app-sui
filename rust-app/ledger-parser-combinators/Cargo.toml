@@ -21,14 +21,15 @@ num-traits = { version = "0.2.14", default-features = false }
 num-derive = "0.3.3"
 trie-enum = { path = "../trie-enum" }
 pin-project = "1.0.12"
+ledger_device_sdk = { version = "1.31.0" }
 
-[dependencies.ledger-log]
-path = "../ledger-log"
-optional = true
 
 [features]
-"logging" = [ "ledger-log" ]
+"logging" = [ "ledger_device_sdk/debug" ]
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies]
 testmacro = "0.1.0"
-ledger_device_sdk = { version = "1.31.0", features = ["speculos"] }
+ledger_device_sdk = { version = "1.31.0", features = ["unit_test"] }
+
+[patch.crates-io]
+ledger_device_sdk = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "y333/feature_log" }

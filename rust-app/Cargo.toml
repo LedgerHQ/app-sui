@@ -9,7 +9,6 @@ resolver = "2"
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
 ledger-crypto-helpers = { path = "./ledger-crypto-helpers" }
-ledger-log = { path = "./ledger-log" }
 ledger-parser-combinators = { path = "./ledger-parser-combinators" }
 alamgu-async-block = { path = "./alamgu-async-block" }
 zeroize = { version = "1.5.2", default-features = false }
@@ -26,9 +25,8 @@ either = { version = "1.14.0", default-features = false }
 [features]
 default = [ ]
 sync = []
-# Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable speculos logging and change log level.
-speculos = [ "ledger_device_sdk/speculos", "ledger_device_sdk/debug", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
-extra_debug = ["ledger-log/log_trace"]
+# Pass --features speculos to enable logging and change log level.
+speculos = [ "ledger_device_sdk/unit_test", "ledger_device_sdk/debug", "ledger_device_sdk/log_trace", "ledger-parser-combinators/logging" ]
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
@@ -39,7 +37,7 @@ ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
 version = "1.31.0"
-features = [ "sys", "speculos" ]
+features = [ "sys", "unit_test" ]
 
 [[bin]]
 name = "sui"
@@ -81,3 +79,6 @@ icon = "sui_40x40.gif"
 
 [package.metadata.ledger.apex_p]
 icon = "sui_32x32.png"
+
+[patch.crates-io]
+ledger_device_sdk = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "y333/feature_log" }

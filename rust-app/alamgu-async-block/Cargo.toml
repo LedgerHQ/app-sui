@@ -7,7 +7,6 @@ edition = "2018"
 
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
-ledger-log = { path = "../ledger-log" }
 pin-project = "1.0.10"
 ledger_device_sdk = { version = "1.31.0", features=["sys"] }
 ledger-parser-combinators = { path = "../ledger-parser-combinators" }
@@ -15,3 +14,6 @@ ledger-parser-combinators = { path = "../ledger-parser-combinators" }
 [features]
 default = []
 prompts = []
+
+[patch.crates-io]
+ledger_device_sdk = {git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "y333/feature_log" }

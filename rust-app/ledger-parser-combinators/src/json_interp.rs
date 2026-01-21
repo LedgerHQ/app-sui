@@ -7,7 +7,7 @@ pub use bstringify::bstringify;
 #[allow(unused_imports)]
 use core::fmt::Write;
 #[cfg(feature = "logging")]
-use ledger_log::trace;
+use ledger_device_sdk::log::trace;
 pub use paste::paste;
 
 #[cfg(all(target_family = "bolos", test))]

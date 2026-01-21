@@ -8,8 +8,8 @@ use crate::ui::UserInterface;
 use alamgu_async_block::*;
 
 use ledger_device_sdk::io;
+use ledger_device_sdk::log::{info, trace};
 use ledger_device_sdk::uxapp::{UxEvent, BOLOS_UX_OK};
-use ledger_log::{info, trace};
 use ledger_prompts_ui::{handle_menu_button_event, show_menu};
 
 use core::cell::RefCell;

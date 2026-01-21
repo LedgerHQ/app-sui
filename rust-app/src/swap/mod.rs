@@ -15,7 +15,7 @@ use ledger_device_sdk::libcall::{
     },
     LibCallCommand,
 };
-use ledger_log::{error, trace};
+use ledger_device_sdk::log::{error, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 

@@ -11,8 +11,8 @@ use core::pin::Pin;
 use pin_cell::*;
 
 use ledger_device_sdk::io;
+use ledger_device_sdk::log::{info, trace};
 use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
-use ledger_log::{info, trace};
 
 pub fn app_main(ctx: &RunCtx) {
     let comm: SingleThreaded<RefCell<io::Comm>> = SingleThreaded(RefCell::new(io::Comm::new()));

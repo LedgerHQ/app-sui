@@ -1,7 +1,7 @@
 /*use arrayvec::{CapacityError};
 use core::default::Default;
 use core::ops::{Deref,DerefMut};
-use ledger_log::*;
+use ledger_device_sdk::log::*;
 use nanos_sdk::bindings::*;
 use nanos_sdk::io::SyscallError;
 use zeroize::{DefaultIsZeroes, Zeroizing};

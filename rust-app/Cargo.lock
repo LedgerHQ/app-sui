@@ -40,7 +40,6 @@ name = "alamgu-async-block"
 version = "0.1.2"
 dependencies = [
  "arrayvec",
- "ledger-log 0.2.1",
  "ledger-parser-combinators",
  "ledger_device_sdk",
  "pin-project",
@@ -522,8 +521,7 @@ checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 [[package]]
 name = "include_gif"
 version = "1.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c5148da8ab53eb3a387c221059d5a1ec3d4788d6088d4a8f127d6768dce74f4"
+source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
 dependencies = [
  "flate2",
  "image",
@@ -613,17 +611,8 @@ version = "0.2.1"
 dependencies = [
  "arrayvec",
  "base64",
- "ledger-log 0.2.1",
  "ledger_device_sdk",
  "zeroize",
-]
-
-[[package]]
-name = "ledger-log"
-version = "0.2.1"
-dependencies = [
- "arrayvec",
- "ledger_device_sdk",
 ]
 
 [[package]]
@@ -643,7 +632,7 @@ dependencies = [
  "bstringify",
  "enum-init",
  "generic-array",
- "ledger-log 0.2.1",
+ "ledger_device_sdk",
  "num-derive 0.3.3",
  "num-traits",
  "paste",
@@ -657,15 +646,14 @@ version = "0.1.0"
 source = "git+https://github.com/alamgu/ledger-prompts-ui#eb91484bbd3ded94e658efea1628db82638b6196"
 dependencies = [
  "arrayvec",
- "ledger-log 0.2.1 (git+https://github.com/alamgu/ledger-log)",
+ "ledger-log",
  "ledger_device_sdk",
 ]
 
 [[package]]
 name = "ledger_device_sdk"
 version = "1.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fe7be5b4feee567b15740b77fc8cc66a41ecbd4fbc06ba712e93139e437a395"
+source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
 dependencies = [
  "const-zero",
  "include_gif",
@@ -680,8 +668,7 @@ dependencies = [
 [[package]]
 name = "ledger_secure_sdk_sys"
 version = "1.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8070f2a42ced44947ce2a63869256db36cd680fce48dff0026da46581d5a96"
+source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
 dependencies = [
  "bindgen",
  "cc",
@@ -1285,7 +1272,6 @@ dependencies = [
  "hex",
  "hex-literal",
  "ledger-crypto-helpers",
- "ledger-log 0.2.1",
  "ledger-parser-combinators",
  "ledger-prompts-ui",
  "ledger_device_sdk",

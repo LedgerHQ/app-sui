@@ -8,7 +8,7 @@ use core::convert::TryFrom;
 use core::future::Future;
 use either::*;
 use ledger_device_sdk::io::SyscallError;
-use ledger_log::info;
+use ledger_device_sdk::log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;

@@ -59,16 +59,16 @@ impl Context {
         // Process block protocol command first
         let action = self.protocol.process_command(comm)?;
 
-        ledger_log::info!("Block protocol action: {:x?}", action);
+        ledger_device_sdk::log::info!("Block protocol action: {:x?}", action);
         match action {
             BlockAction::StartIns => {
                 // START command received, begin processing
-                ledger_log::info!("Starting instruction processing for {:?}", ins);
+                ledger_device_sdk::log::info!("Starting instruction processing for {:?}", ins);
                 self.start(ins)?;
             }
             BlockAction::ChunkReceived(chunk) => {
                 // Continue processing with received chunk
-                ledger_log::info!("Received chunk of size {}", chunk.len());
+                ledger_device_sdk::log::info!("Received chunk of size {}", chunk.len());
                 self.process_chunk(ins, &chunk)?;
             }
             BlockAction::PutAcknowledged => {
@@ -193,7 +193,7 @@ impl Context {
         match (ins, &self.state) {
             (Ins::GetPubkey, State::NeedInputParam { .. }) => {
                 // Received BIP32 path
-                ledger_log::info!("Received BIP32 path chunk");
+                ledger_device_sdk::log::info!("Received BIP32 path chunk");
 
                 self.state = State::ComputingPublicKey {
                     buffer: data[32..].to_vec(),

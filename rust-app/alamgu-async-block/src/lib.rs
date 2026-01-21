@@ -84,8 +84,8 @@ use core::future::Future;
 use core::pin::Pin;
 use ledger_device_sdk::io;
 use ledger_device_sdk::io::SyscallError;
+use ledger_device_sdk::log::*;
 use ledger_device_sdk::sys::*;
-use ledger_log::*;
 use ledger_parser_combinators::async_parser::{
     reject, Readable, UnwrappableReadable, REJECTED_CODE,
 };

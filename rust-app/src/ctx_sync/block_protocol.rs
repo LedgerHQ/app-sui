@@ -118,7 +118,7 @@ impl BlockProtocolHandler {
                 // Verify hash of received data
                 let received_hash = sha256(payload);
                 if &received_hash != requested_hash {
-                    ledger_log::info!(
+                    ledger_device_sdk::log::info!(
                         "Hash mismatch: expected {:x?}, got {:x?}",
                         requested_hash,
                         received_hash

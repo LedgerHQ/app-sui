@@ -6,7 +6,7 @@ use core::future::Future;
 use ledger_crypto_helpers::common::HexSlice;
 use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::SyscallError;
-use ledger_log::info;
+use ledger_device_sdk::log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
