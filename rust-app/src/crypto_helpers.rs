@@ -1,7 +1,7 @@
 pub mod common;
-pub mod hasher;
 pub mod ed25519;
 pub mod eddsa;
+pub mod hasher;
 
 #[cfg(test)]
 #[no_mangle]

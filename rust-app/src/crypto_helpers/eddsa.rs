@@ -67,7 +67,8 @@ where
             cx_edwards_compress_point_no_throw(
                 CX_CURVE_Ed25519,
                 pubkey.pubkey.as_mut_ptr(),
-                pubkey.keylength)           
+                pubkey.keylength,
+            )
         };
         if err != 0 {
             Err(SyscallError::from(err))

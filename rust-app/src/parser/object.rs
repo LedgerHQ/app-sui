@@ -1,10 +1,10 @@
+#[cfg(feature = "speculos")]
+use crate::crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use crate::parser::common::*;
 use arrayvec::ArrayVec;
 use core::convert::TryInto;
 use core::future::Future;
-#[cfg(feature = "speculos")]
-use crate::crypto_helpers::common::HexSlice;
-use crate::crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
 use ledger_device_sdk::io::SyscallError;
 use ledger_device_sdk::log::info;
 use ledger_parser_combinators::async_parser::*;

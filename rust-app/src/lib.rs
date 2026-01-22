@@ -44,7 +44,6 @@ pub mod implementation;
 #[cfg(target_family = "bolos")]
 pub mod crypto_helpers;
 
-
 pub mod parser;
 
 #[cfg(target_family = "bolos")]
