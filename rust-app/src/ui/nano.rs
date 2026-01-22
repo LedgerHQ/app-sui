@@ -7,9 +7,9 @@ use crate::utils::*;
 extern crate alloc;
 use alloc::format;
 
-use either::*;
 use crate::crypto_helpers::common::HexSlice;
 use crate::crypto_helpers::hasher::HexHash;
+use either::*;
 
 use ledger_device_sdk::buttons::ButtonEvent;
 use ledger_device_sdk::ui::bitmaps::{CHECKMARK, CROSS, EYE, WARNING};

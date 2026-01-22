@@ -5,10 +5,10 @@ use crate::utils::*;
 extern crate alloc;
 use alloc::format;
 
-use arrayvec::{ArrayString, ArrayVec};
+use crate::crypto_helpers::common::HexSlice;
+use arrayvec::ArrayString;
 use either::*;
 use hex_literal::hex;
-use crate::crypto_helpers::common::HexSlice;
 
 use ledger_device_sdk::log::trace;
 

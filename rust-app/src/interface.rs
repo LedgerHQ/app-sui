@@ -18,10 +18,10 @@ pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
 pub struct SuiPubKeyAddress(SuiAddressRaw);
 
-use arrayvec::ArrayVec;
 use crate::crypto_helpers::common::{Address, HexSlice};
 use crate::crypto_helpers::eddsa::ed25519_public_key_bytes;
 use crate::crypto_helpers::hasher::{Blake2b, Hasher};
+use arrayvec::ArrayVec;
 use ledger_device_sdk::io::SyscallError;
 
 impl Address<SuiPubKeyAddress, ledger_device_sdk::ecc::ECPublicKey<65, 'E'>> for SuiPubKeyAddress {

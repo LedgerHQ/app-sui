@@ -8,10 +8,10 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::ToString;
 
-use core::cell::RefCell;
-use either::*;
 use crate::crypto_helpers::common::HexSlice;
 use crate::crypto_helpers::hasher::HexHash;
+use core::cell::RefCell;
+use either::*;
 use ledger_device_sdk::include_gif;
 use ledger_device_sdk::nbgl::*;
 

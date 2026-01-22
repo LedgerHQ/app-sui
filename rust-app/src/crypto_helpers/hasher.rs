@@ -1,4 +1,3 @@
-use core::convert::TryInto;
 use core::default::Default;
 use core::fmt;
 use core::fmt::Write;
@@ -203,7 +202,7 @@ impl<const N: usize> Hasher for SHA3<N> {
     }
 
     fn clear(&mut self) {
-        unsafe { cx_sha3_init_no_throw(&mut self.0, (N * 8).try_into().unwrap()) };
+        unsafe { cx_sha3_init_no_throw(&mut self.0, N * 8) };
     }
 
     fn update(&mut self, bytes: &[u8]) {
