@@ -606,16 +606,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03087c2bad5e1034e8cace5926dec053fb3790248370865f5117a7d0213354c8"
 
 [[package]]
-name = "ledger-crypto-helpers"
-version = "0.2.1"
-dependencies = [
- "arrayvec",
- "base64",
- "ledger_device_sdk",
- "zeroize",
-]
-
-[[package]]
 name = "ledger-log"
 version = "0.2.1"
 source = "git+https://github.com/alamgu/ledger-log#4c5eda5d3bd3c59d0af75332f0a5c6960c4ed5af"
@@ -1267,11 +1257,11 @@ version = "1.4.0"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",
+ "base64",
  "defer",
  "either",
  "hex",
  "hex-literal",
- "ledger-crypto-helpers",
  "ledger-parser-combinators",
  "ledger-prompts-ui",
  "ledger_device_sdk",

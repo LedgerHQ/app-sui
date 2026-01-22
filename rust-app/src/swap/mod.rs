@@ -2,8 +2,8 @@ use core::{convert::TryFrom, fmt::Write};
 
 use arrayvec::ArrayString;
 // #[allow(unused_imports)]
-// use ledger_crypto_helpers::common::HexSlice;
-use ledger_crypto_helpers::{
+// use crate::crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::{
     common::{Address, CryptographyError},
     eddsa::with_public_keys,
 };

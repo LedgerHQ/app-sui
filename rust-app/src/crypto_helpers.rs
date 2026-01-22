@@ -1,17 +1,5 @@
-#![no_std]
-#![cfg_attr(test, no_main)]
-#![feature(custom_test_frameworks)]
-#![reexport_test_harness_main = "test_main"]
-#![test_runner(ledger_device_sdk::testing::sdk_test_runner)]
-#![allow(incomplete_features)]
-#![feature(generic_const_exprs)]
-#![cfg_attr(test, feature(asm_const))]
-#![feature(cfg_version)]
-
 pub mod common;
 pub mod hasher;
-#[macro_use]
-mod internal;
 pub mod ed25519;
 pub mod eddsa;
 

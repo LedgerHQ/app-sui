@@ -1950,7 +1950,7 @@ pub enum KnownTx {
 }
 
 #[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,

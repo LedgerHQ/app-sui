@@ -8,7 +8,7 @@ use alloc::format;
 use arrayvec::{ArrayString, ArrayVec};
 use either::*;
 use hex_literal::hex;
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 use ledger_device_sdk::log::trace;
 
