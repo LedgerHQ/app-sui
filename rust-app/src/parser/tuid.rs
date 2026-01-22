@@ -12,7 +12,7 @@ use ledger_device_sdk::tlv::tlv_generic::{
 use ledger_device_sdk::tlv::TlvError;
 
 #[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 // Tags
 const PACKAGE_ADDRESS_TAG: Tag = 0x10;

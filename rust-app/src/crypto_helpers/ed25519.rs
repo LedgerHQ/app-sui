@@ -2,7 +2,7 @@ use arrayvec::ArrayVec;
 use core::default::Default;
 use ledger_device_sdk::ecc::{ECPrivateKey, Ed25519Stream, SeedDerive};
 
-use crate::common::*;
+use crate::crypto_helpers::common::*;
 
 #[derive(Default)]
 pub struct Ed25519 {

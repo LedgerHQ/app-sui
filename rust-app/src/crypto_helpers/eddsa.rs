@@ -3,7 +3,7 @@ use ledger_device_sdk::ecc::*;
 use ledger_device_sdk::io::SyscallError;
 use ledger_device_sdk::sys::*;
 
-use crate::common::*;
+use crate::crypto_helpers::common::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EdDSASignature(pub [u8; 64]);
@@ -61,12 +61,22 @@ where
     let mut pubkey = privkey
         .public_key()
         .map_err(Into::<CryptographyError>::into)?;
-    call_c_api_function!(cx_edwards_compress_point_no_throw(
-        CX_CURVE_Ed25519,
-        pubkey.pubkey.as_mut_ptr(),
-        pubkey.keylength
-    ))
-    .map_err(Into::<CryptographyError>::into)?;
+
+    let out = {
+        let err = unsafe {
+            cx_edwards_compress_point_no_throw(
+                CX_CURVE_Ed25519,
+                pubkey.pubkey.as_mut_ptr(),
+                pubkey.keylength)           
+        };
+        if err != 0 {
+            Err(SyscallError::from(err))
+        } else {
+            Ok(())
+        }
+    };
+    out.map_err(Into::<CryptographyError>::into)?;
+
     pubkey.keylength = 33;
     let pkh = <A as Address<A, Ed25519PublicKey>>::get_address(&pubkey)
         .map_err(Into::<CryptographyError>::into)?;

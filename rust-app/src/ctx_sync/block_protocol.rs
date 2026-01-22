@@ -1,5 +1,5 @@
 use arrayvec::ArrayVec;
-use ledger_crypto_helpers::hasher::{Hasher, SHA256};
+use crate::crypto_helpers::hasher::{Hasher, SHA256};
 use ledger_device_sdk::io::{Comm, Reply, StatusWords};
 
 extern crate alloc;

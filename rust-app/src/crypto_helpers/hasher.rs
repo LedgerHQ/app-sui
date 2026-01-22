@@ -51,7 +51,7 @@ impl<const N: usize> Hash<N> for HexHash<N> {
 
 impl<const N: usize> fmt::Display for HexHash<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", crate::common::HexSlice(&self.0))
+        write!(f, "{}", crate::crypto_helpers::common::HexSlice(&self.0))
     }
 }
 
