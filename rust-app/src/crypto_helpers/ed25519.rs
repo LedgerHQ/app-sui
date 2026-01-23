@@ -27,7 +27,6 @@ impl Ed25519 {
         } else {
             ledger_device_sdk::ecc::Ed25519::derive_from_path(&path)
         };
-        ledger_device_sdk::ecc::Ed25519::derive_from_path(&path);
         self.ctx.init(&self.sk)?;
         Ok(())
     }

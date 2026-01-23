@@ -1,6 +1,6 @@
 use crate::crypto_helpers::common::{try_option, Address};
 use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
-use crate::crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
+use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::ctx_sync::block_protocol::BlockProtocolHandler;
 use crate::interface::*;
@@ -17,6 +17,7 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::{ArrayString, ArrayVec};
+use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::{StatusWords, SyscallError};
 use ledger_device_sdk::log::{info, trace};
 use ledger_device_sdk::tlv::tlv_dynamic_token::{parse_dynamic_token_tlv, DynamicTokenOut};
@@ -278,21 +279,23 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     }
 
     NoinlineFut(async move {
-        let mut hasher: Blake2b = Hasher::new();
+        let mut hasher = ledger_device_sdk::hash::blake2::Blake2b_256::new();
         {
             let mut txn = input[0].clone();
             const CHUNK_SIZE: usize = 128;
             let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
             for _ in 0..chunks {
                 let b: [u8; CHUNK_SIZE] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
             for _ in 0..rem {
                 let b: [u8; 1] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
         }
-        let hash: HexHash<32> = hasher.finalize();
+        let mut hash: HexHash<32> = Default::default();
+        let _ = hasher.finalize(&mut hash.0);
+
         if is_unknown_txn {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {
