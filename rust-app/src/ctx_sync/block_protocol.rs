@@ -1,6 +1,9 @@
-use crate::crypto_helpers::hasher::{Hasher, SHA256};
 use arrayvec::ArrayVec;
-use ledger_device_sdk::io::{Comm, Reply, StatusWords};
+use ledger_device_sdk::{
+    hash::sha2::Sha2_256,
+    hash::HashInit,
+    io::{Comm, Reply, StatusWords},
+};
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -230,7 +233,9 @@ pub enum BlockAction {
 }
 
 fn sha256(data: &[u8]) -> Hash {
-    let mut hasher = SHA256::new();
-    hasher.update(data);
-    hasher.finalize()
+    let mut hasher = Sha2_256::new();
+    let _ = hasher.update(data);
+    let mut output: [u8; HASH_LEN] = [0; HASH_LEN];
+    let _ = hasher.finalize(&mut output);
+    output
 }

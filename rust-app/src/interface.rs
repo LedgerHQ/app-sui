@@ -1,6 +1,7 @@
 use crate::parser::common::*;
 use core::convert::TryFrom;
 use core::marker::ConstParamTy;
+use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::{ApduHeader, StatusWords};
 use ledger_parser_combinators::core_parsers::*;
 use num_enum::TryFromPrimitive;
@@ -20,7 +21,6 @@ pub struct SuiPubKeyAddress(SuiAddressRaw);
 
 use crate::crypto_helpers::common::{Address, HexSlice};
 use crate::crypto_helpers::eddsa::ed25519_public_key_bytes;
-use crate::crypto_helpers::hasher::{Blake2b, Hasher};
 use arrayvec::ArrayVec;
 use ledger_device_sdk::io::SyscallError;
 
@@ -32,9 +32,10 @@ impl Address<SuiPubKeyAddress, ledger_device_sdk::ecc::ECPublicKey<65, 'E'>> for
         let mut tmp = ArrayVec::<u8, 33>::new();
         let _ = tmp.try_push(0); // SIGNATURE_SCHEME_TO_FLAG['ED25519']
         let _ = tmp.try_extend_from_slice(key_bytes);
-        let mut hasher: Blake2b = Hasher::new();
-        hasher.update(&tmp);
-        let hash: [u8; SUI_ADDRESS_LENGTH] = hasher.finalize();
+        let mut hasher = ledger_device_sdk::hash::blake2::Blake2b_256::new();
+        let _ = hasher.update(&tmp);
+        let mut hash: [u8; SUI_ADDRESS_LENGTH] = Default::default();
+        let _ = hasher.finalize(&mut hash);
         Ok(SuiPubKeyAddress(hash))
     }
     fn get_binary_address(&self) -> &[u8] {
