@@ -6,8 +6,6 @@ use crate::json::*;
 pub use bstringify::bstringify;
 #[allow(unused_imports)]
 use core::fmt::Write;
-#[cfg(feature = "logging")]
-use ledger_device_sdk::log::trace;
 pub use paste::paste;
 
 #[cfg(all(target_family = "bolos", test))]
@@ -382,16 +380,7 @@ impl<T, S: JsonInterp<T>> InterpParser<Json<T>> for Json<S> {
                     cursor = new_cursor;
                     continue;
                 }
-                Err(Some(a)) => {
-                    #[cfg(feature = "logging")]
-                    trace!(
-                        "Json parser rejected on token: {:?} after: {}",
-                        token,
-                        core::str::from_utf8(&chunk[0..chunk.len() - cursor.len()])
-                            .unwrap_or("UTF8FAILED")
-                    );
-                    Err((Some(a), new_cursor))
-                }
+                Err(Some(a)) => Err((Some(a), new_cursor)),
             };
         }
     }
@@ -1250,8 +1239,6 @@ impl<T, S: JsonInterp<T>, RV: Debug + Summable<<S as ParserCommon<T>>::Returning
                 }
                 (Item(ref mut s, ref mut sub_destination), tok) => {
                     <S as JsonInterp<T>>::parse(&self.0, s, tok, sub_destination)?;
-                    #[cfg(feature = "logging")]
-                    trace!("destination {:?}", destination);
                     destination
                         .as_mut()
                         .ok_or(Some(OOB::Reject))?
@@ -1330,8 +1317,6 @@ impl<
                 }
                 (Item(ref mut s, ref mut sub_destination), tok) => {
                     <S as JsonInterp<T>>::parse(&self.0, s, tok, sub_destination)?;
-                    #[cfg(feature = "logging")]
-                    trace!("destination {:?}", destination);
                     destination
                         .as_mut()
                         .ok_or(Some(OOB::Reject))?
@@ -1864,15 +1849,11 @@ macro_rules! define_json_struct_interp {
                             match &key[..] {
                                 $(
                                     $crate::json_interp::bstringify!($field) => {
-                                        #[cfg(feature = "logging")]
-                                        trace!("json-struct-interp parser: checking key {:?}\n", core::str::from_utf8(key));
                                         $crate::interp_parser::set_from_thunk(state, || [<$name State>]::[<Field $field:camel>](<[<Field $field:camel Interp>] as ParserCommon<$schemaType>>::init(&self.[<field_ $field:snake>])));
                                     }
                                 )*
                                 ,
                                 _ => {
-                                    #[cfg(feature = "logging")]
-                                    error!("json-struct-interp parser: Got unexpected key {:?}\n", core::str::from_utf8(key));
                                     return Err(Some($crate::interp_parser::OOB::Reject)) }
                             }
                         }

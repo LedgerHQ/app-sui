@@ -5,8 +5,6 @@ use crate::protobufs::interp::*;
 use crate::protobufs::schema::*;
 use arrayvec::ArrayVec;
 use core::future::Future;
-#[cfg(feature = "logging")]
-use ledger_device_sdk::log::*;
 pub use num_traits::FromPrimitive;
 
 pub fn parse_varint<'a: 'c, 'c, T, BS: Readable>(input: &'a mut BS) -> impl Future<Output = T> + 'c
@@ -22,8 +20,6 @@ where
             if 7 * n as usize > (core::mem::size_of::<T>() - 1) * 8
                 && 0 != ((current & 0x7f) >> (core::mem::size_of::<T>() * 8 - (7 * n as usize)))
             {
-                #[cfg(feature = "logging")]
-                trace!("Malformed varint");
                 reject_on(core::file!(), core::line!(), PARSE_ERROR_CODE).await
             }
             accumulator += core::convert::Into::<T>::into(current & 0x7f)
@@ -149,8 +145,6 @@ impl<const N: usize> HasOutput<Bytes> for Buffer<N> {
 impl<const N: usize, BS: Readable> LengthDelimitedParser<Bytes, BS> for Buffer<N> {
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS, length: usize) -> Self::State<'c> {
         let f = read_arrayvec_n(input, length);
-        #[cfg(feature = "logging")]
-        trace!("Buffering siz {}", core::mem::size_of_val(&f));
         f
     }
     type State<'c>
@@ -295,67 +289,39 @@ macro_rules! define_message {
                         {
                         // First, structural check:
                         let mut ii = input.clone();
-                        #[cfg(feature = "logging")]
-                        info!("{} structural check", stringify!($name));
-                        #[cfg(feature = "logging")]
-                        info!("ii size: {}", core::mem::size_of_val(&ii));
                         loop {
-                            #[cfg(feature = "logging")]
-                            info!("{} structural field", stringify!($name));
                             // Probably should check for presence of all expected fields here as
                             // well. On the other hand, fields that we specify an interpretation
                             // for are _required_.
                             let tag : u32 = parse_varint(&mut ii).await;
-                            #[cfg(feature = "logging")]
-                            info!("Field tag: {:X}", tag);
                             let wire = match ProtobufWire::from_u32(tag & 0x07) { Some(w) => w, None => {
-                                #[cfg(feature = "logging")]
-                                error!("Wrong wire type {:X}", tag);
                                 reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await}
                             };
-                            #[cfg(feature = "logging")]
-                            info!("FieldP type: {:?}", wire);
                             skip_field(wire, &mut ii).await;
                             if ii.index()-start_index == length {
                                 break;
                             }
                             if ii.index()-start_index > length {
-                                #[cfg(feature = "logging")]
-                                error!("Length too long");
                                 return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                             }
                         }
-                        #[cfg(feature = "logging")]
-                        trace!("Structural done for {}, parsing fields", stringify!($name));
                         }
                         $(
                             {
                             let mut ii = input.clone();
                             let mut seen = false;
-                            #[cfg(feature = "logging")]
-                            trace!("Seek and Parse for field {}", stringify!($field));
                             loop {
                                 let tag : u32 = parse_varint(&mut ii).await;
                                 let wire = match ProtobufWire::from_u32(tag & 0x07) { Some(w) => w, None => reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await, };
-                                #[cfg(feature = "logging")]
-                                trace!("Next field, tag: {} wire: {:?}", tag >> 3, wire);
                                 if tag >> 3 == $number {
                                     if wire != $schemaType::FORMAT {
-                                        #[cfg(feature = "logging")]
-                                        error!("Format wrong for schema");
                                         return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                     }
-                                    #[cfg(feature = "logging")]
-                                    trace!("Calling subparser {}", stringify!($field));
                                     define_message! { @call_parser_for, $parseTrait, (&mut ii), self.[<field_ $field:snake>] };
-                                    #[cfg(feature = "logging")]
-                                    trace!("Subparser done");
                                     if(seen && ! $repeated) {
                                         // Rejecting because of multiple fields on non-repeating;
                                         // protobuf spec says we should "take the last value" but
                                         // our flow doesn't permit this.
-                                        #[cfg(feature = "logging")]
-                                        trace!("Non-repeated field repeated");
                                         return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                     }
                                     seen = true;
@@ -367,8 +333,6 @@ macro_rules! define_message {
                                     break;
                                 }
                                 if ii.index()-start_index > length {
-                                    #[cfg(feature = "logging")]
-                                    error!("Length too long");
                                     return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                 }
                             }
@@ -377,8 +341,6 @@ macro_rules! define_message {
                         skip_input(input, length).await;
 
                     };
-                    #[cfg(feature = "logging")]
-                    trace!("Future size for {}: {}", stringify!($name), core::mem::size_of_val(&rv));
                     rv
                 }
                 type State<'c> = impl Future<Output = Self::Output> + 'c where $([<Field $field:camel Interp>]: 'c),*;
@@ -407,20 +369,12 @@ macro_rules! define_message {
                             loop {
                                 let tag : u32 = parse_varint(input).await;
                                 let wire = match ProtobufWire::from_u32(tag & 0x07) { Some(w) => w, None => reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await, };
-                                #[cfg(feature = "logging")]
-                                trace!("Next field, tag: {} wire: {:?}", tag >> 3, wire);
                                 match tag >> 3 {
                                     $($number => {
                                     if wire != $schemaType::FORMAT {
-                                        #[cfg(feature = "logging")]
-                                        error!("Format wrong for schema");
                                         return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                     }
-                                    #[cfg(feature = "logging")]
-                                    trace!("Calling subparser {}", stringify!($field));
                                     result.[<field_ $field:snake>] = Some(define_message! { @call_parser_for, $parseTrait, (input), self.[<field_ $field:snake>] });
-                                    #[cfg(feature = "logging")]
-                                    trace!("Subparser done");
                                     /*if(seen && ! $repeated) {
                                         // Rejecting because of multiple fields on non-repeating;
                                         // protobuf spec says we should "take the last value" but
@@ -436,8 +390,6 @@ macro_rules! define_message {
                                     break;
                                 }
                                 if input.index()-start > length {
-                                    #[cfg(feature = "logging")]
-                                    error!("Length too long");
                                     return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                 }
                             }
@@ -617,25 +569,17 @@ macro_rules! any_of {
                     let start = input.index();
                     let mut discriminator = None;
                     let mut rv: Option<O> = None;
-                    #[cfg(feature = "logging")]
-                    trace!("Starting any-of");
                     {
                         let mut ii = input.clone();
                         loop {
                             let tag : u32 = parse_varint(&mut ii).await;
                             let wire = match $crate::protobufs::schema::ProtobufWire::from_u32(tag & 0x07) { Some(w) => w, None => {
-                                #[cfg(feature = "logging")]
-                                trace!("Invalid Protobuf Wire Format");
                                 reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await} };
                             if tag >> 3 == 1 {
                                 if wire != $crate::protobufs::schema::ProtobufWire::LengthDelimited {
-                                    #[cfg(feature = "logging")]
-                                    trace!("Wire is not length-delimited on url");
                                     return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                 }
                                 if(discriminator.is_some()) {
-                                    #[cfg(feature = "logging")]
-                                    trace!("No support for multiple URLs in any messages");
                                     return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                 }
                                 let length : usize = parse_varint(&mut ii).await;
@@ -650,8 +594,6 @@ macro_rules! any_of {
                                     }
                                 }
                                 discriminator = discrim_parse.get_val();
-                                #[cfg(feature = "logging")]
-                                trace!("Got a discriminator");
                             } else {
                                 skip_field(wire, &mut ii).await;
                                 // Skip it
@@ -660,8 +602,6 @@ macro_rules! any_of {
                                 break;
                             }
                             if ii.index()-start >= length {
-                                #[cfg(feature = "logging")]
-                                trace!("Bad length");
                                 return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                             }
                         }
@@ -671,8 +611,6 @@ macro_rules! any_of {
                         None => { rv = Some(self.default.parse(input, length).await); }
                         $(
                             Some([<$name Discriminator>]::$variant) => {
-                                #[cfg(feature = "logging")]
-                                trace!("Parsing value for discriminator {:?}", discriminator);
                                 loop {
                                     let tag : u32 = parse_varint(input).await;
                                     let wire = match $crate::protobufs::schema::ProtobufWire::from_u32(tag & 0x07) { Some(w) => w, None => reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await, };
@@ -687,11 +625,7 @@ macro_rules! any_of {
                                             // our flow doesn't permit this.
                                             return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                         }
-                                        #[cfg(feature = "logging")]
-                                        trace!("Parsing actual value");
                                         rv = Some(self.[<$variant:snake>].parse(input, length).await);
-                                        #[cfg(feature = "logging")]
-                                        trace!("Parsed");
                                     } else {
                                         skip_field(wire, input).await;
                                         // Skip it
@@ -700,8 +634,6 @@ macro_rules! any_of {
                                         break;
                                     }
                                     if input.index()-start >= length {
-                                        #[cfg(feature = "logging")]
-                                        trace!("Bad length");
                                         return reject_on(core::file!(),core::line!(), PARSE_ERROR_CODE).await;
                                     }
                                 }
@@ -711,11 +643,9 @@ macro_rules! any_of {
 
                     match rv {
                         Some(r) => {
-                            #[cfg(feature = "logging")]
-                            trace!("Good value"); r },
+                            r },
                         None => {
-                            #[cfg(feature = "logging")]
-                            trace!("No value in Any"); reject(PARSE_ERROR_CODE).await }
+                            reject(PARSE_ERROR_CODE).await }
                     }
                 }
             }
