@@ -4,17 +4,26 @@
 #[cfg(not(target_family = "bolos"))]
 fn main() {}
 
-#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
-use sui::main_nanos::*;
-
 #[cfg(all(
-    any(target_os = "stax", target_os = "flex", target_os = "apex_p"),
+    any(
+        target_os = "stax",
+        target_os = "flex",
+        target_os = "apex_p",
+        target_os = "nanosplus",
+        target_os = "nanox"
+    ),
     not(feature = "sync")
 ))]
 use sui::main_stax::*;
 
 #[cfg(all(
-    any(target_os = "stax", target_os = "flex", target_os = "apex_p"),
+    any(
+        target_os = "stax",
+        target_os = "flex",
+        target_os = "apex_p",
+        target_os = "nanosplus",
+        target_os = "nanox"
+    ),
     feature = "sync"
 ))]
 use sui::main_stax_sync::*;
