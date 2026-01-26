@@ -85,7 +85,7 @@ use core::pin::Pin;
 use ledger_device_sdk::io;
 use ledger_device_sdk::io::SyscallError;
 use ledger_device_sdk::log::*;
-use ledger_device_sdk::sys::*;
+use ledger_device_sdk::{hash::sha2::Sha2_256, hash::HashInit, Pic};
 use ledger_parser_combinators::async_parser::{
     reject, Readable, UnwrappableReadable, REJECTED_CODE,
 };
@@ -95,9 +95,6 @@ use core::convert::TryFrom;
 use core::convert::TryInto;
 use core::task::*;
 use ledger_device_sdk::io::Reply; //, BorrowMutError};
-
-#[cfg(feature = "prompts")]
-pub mod prompts;
 
 #[repr(u8)]
 #[derive(Debug, PartialEq)]
@@ -456,17 +453,17 @@ impl UnwrappableReadable for ByteStream {
     }
 }
 
-pub static RAW_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
-    |a| RawWaker::new(a, &RAW_WAKER_VTABLE),
+pub static RAW_WAKER_VTABLE: Pic<RawWakerVTable> = Pic::new(RawWakerVTable::new(
+    |a| RawWaker::new(a, RAW_WAKER_VTABLE.get_ref()),
     |_| {},
     |_| {},
     |_| {},
-);
+));
 
 pub fn poll_with_trivial_context<Fut: Future + ?Sized>(
     f: Pin<&mut Fut>,
 ) -> core::task::Poll<Fut::Output> {
-    let waker = unsafe { Waker::from_raw(RawWaker::new(&(), pic_rs(&RAW_WAKER_VTABLE))) };
+    let waker = unsafe { Waker::from_raw(RawWaker::new(&(), RAW_WAKER_VTABLE.get_ref())) };
     let mut ctxd = Context::from_waker(&waker);
     let r = f.poll(&mut ctxd);
     core::mem::forget(ctxd);
@@ -478,13 +475,9 @@ pub fn poll_with_trivial_context<Fut: Future + ?Sized>(
 
 fn sha256_hash(data: &[u8]) -> [u8; 32] {
     let mut rv = [0; 32];
-    unsafe {
-        let mut hasher = cx_sha256_s::default();
-        cx_sha256_init_no_throw(&mut hasher);
-        let hasher_ref = &mut hasher as *mut cx_sha256_s as *mut cx_hash_t;
-        cx_hash_update(hasher_ref, data.as_ptr(), data.len());
-        cx_hash_final(hasher_ref, rv.as_mut_ptr());
-    }
+    let mut hasher = Sha2_256::new();
+    let _ = hasher.update(data);
+    let _ = hasher.finalize(&mut rv);
     rv
 }
 
