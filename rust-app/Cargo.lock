@@ -623,7 +623,6 @@ dependencies = [
  "bstringify",
  "enum-init",
  "generic-array",
- "ledger_device_sdk",
  "num-derive 0.3.3",
  "num-traits",
  "paste",
