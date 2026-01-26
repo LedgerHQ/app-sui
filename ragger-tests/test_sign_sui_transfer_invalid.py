@@ -105,7 +105,7 @@ def test_sign_tx_sui_multi_recipient(backend, scenario_navigator, firmware, navi
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
@@ -146,7 +146,7 @@ def test_sign_tx_sui_whole_gas_coin_missing_obj(backend, scenario_navigator, fir
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
@@ -185,7 +185,7 @@ def test_sign_tx_sui_whole_input_coin_missing_obj(backend, scenario_navigator, f
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
@@ -318,7 +318,7 @@ def test_sign_tx_sui_and_move_call(backend, scenario_navigator, firmware, naviga
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
@@ -459,7 +459,7 @@ def test_sign_multiple_move_call(backend, scenario_navigator, firmware, navigato
     def nav_task():
         if firmware.device.startswith("nano"):
             navigator.navigate_and_compare(
-                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK]
+                instructions=[NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, NavInsID.BOTH_CLICK]
                 , timeout=10
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path

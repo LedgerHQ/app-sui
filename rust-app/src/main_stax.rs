@@ -2,7 +2,7 @@ use crate::ctx::RunCtx;
 use crate::handle_apdu::*;
 use crate::interface::*;
 use crate::settings::*;
-use crate::ui::{UserInterface, APP_ICON};
+use crate::ui::{UserInterface, APP_ICON_HOME};
 
 use alamgu_async_block::*;
 
@@ -59,12 +59,15 @@ pub fn app_main(ctx: &RunCtx) {
 
     let settings_strings = [[
         "Blind Signing",
+        #[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
         "Sign transactions for which details cannot be verified",
+        #[cfg(any(target_os = "nanosplus", target_os = "nanox"))]
+        "Transactions",
     ]];
 
     let main_menu = SingleThreaded(RefCell::new(
         NbglHomeAndSettings::new()
-            .glyph(&APP_ICON)
+            .glyph(&APP_ICON_HOME)
             .settings(settings.get_mut(), &settings_strings)
             .infos("Sui", env!("CARGO_PKG_VERSION"), env!("CARGO_PKG_AUTHORS")),
     ));

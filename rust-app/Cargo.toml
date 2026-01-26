@@ -6,6 +6,9 @@ edition = "2021"
 autobins = false
 resolver = "2"
 
+[build-dependencies]
+image = "0.25.7"
+
 [dependencies]
 arrayvec = { version = "0.7.2", default-features = false }
 ledger-parser-combinators = { path = "./ledger-parser-combinators" }
@@ -30,14 +33,11 @@ speculos = [ "ledger_device_sdk/unit_test", "ledger_device_sdk/debug", "ledger_d
 pending_review_screen = []
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = { version = "1.31.0", features=["sys"] }
-
-[target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
-ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
+ledger_device_sdk = { version = "1.31.0", features=["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
 version = "1.31.0"
-features = [ "sys", "unit_test" ]
+features = [ "sys", "nano_nbgl", "unit_test" ]
 
 [[bin]]
 name = "sui"
@@ -57,7 +57,7 @@ overflow-checks = false
 lto = "fat"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax", "apex_p"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "nanosplus", "nanox", "flex", "stax", "apex_p"))'] }
 
 [package.metadata.ledger]
 name = "Sui"
