@@ -1,0 +1,18 @@
+[package]
+name = "alamgu-async-block"
+version = "0.1.2"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+arrayvec = { version = "0.7.2", default-features = false }
+pin-project = "1.0.10"
+ledger_device_sdk = { version = "1.31.0" }
+ledger-parser-combinators = { path = "../ledger-parser-combinators" }
+
+[features]
+default = []
+
+[patch.crates-io]
+ledger_device_sdk = {git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "y333/feature_log" }

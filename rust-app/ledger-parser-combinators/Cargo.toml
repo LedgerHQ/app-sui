@@ -1,0 +1,26 @@
+[package]
+name = "ledger-parser-combinators"
+version = "0.1.2"
+authors = ["Jonathan D.K. Gibbons <jonored@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[profile.release]
+opt-level = 0
+[profile.dev]
+opt-level = 0
+
+[dependencies]
+arrayvec = { version = "0.7.1", default-features = false }
+generic-array = { version = "0.14.4", default-features = false }
+paste = "1.0"
+bstringify = "0.1.2"
+enum-init = { path = "./enum-init" }
+num-traits = { version = "0.2.14", default-features = false }
+num-derive = "0.3.3"
+trie-enum = { path = "./trie-enum" }
+pin-project = "1.0.12"
+
+[target.'cfg(target_family = "bolos")'.dev-dependencies]
+testmacro = "0.1.0"

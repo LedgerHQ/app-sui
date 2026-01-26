@@ -17,7 +17,7 @@
 #![cfg_attr(all(not(version("1.65"))), feature(generic_associated_types))]
 #![cfg_attr(version("1.71"), feature(impl_trait_in_assoc_type))]
 
-pub use ledger_log::*;
+pub use ledger_device_sdk::log::*;
 
 #[cfg(feature = "pending_review_screen")]
 mod pending;
@@ -41,31 +41,32 @@ pub mod handle_apdu;
 #[cfg(target_family = "bolos")]
 pub mod implementation;
 
-pub mod parser;
-
 #[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
-pub mod menu;
+pub mod crypto_helpers;
+
+pub mod parser;
 
 #[cfg(target_family = "bolos")]
 pub mod settings;
 
 #[cfg(target_family = "bolos")]
-#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
-pub mod main_nanos;
-
-#[cfg(target_family = "bolos")]
 pub mod ui;
 
 #[cfg(target_family = "bolos")]
-#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 pub mod main_stax;
+
+#[cfg(target_family = "bolos")]
+#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
+pub mod main_stax_sync;
 
 #[cfg(target_family = "bolos")]
 pub mod swap;
 
 #[cfg(target_family = "bolos")]
 pub mod ctx;
+
+#[cfg(target_family = "bolos")]
+pub mod ctx_sync;
 
 #[cfg(all(target_family = "bolos", test))]
 use core::panic::PanicInfo;

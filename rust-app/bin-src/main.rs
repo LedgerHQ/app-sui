@@ -4,11 +4,29 @@
 #[cfg(not(target_family = "bolos"))]
 fn main() {}
 
-#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
-use sui::main_nanos::*;
-
-#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
+#[cfg(all(
+    any(
+        target_os = "stax",
+        target_os = "flex",
+        target_os = "apex_p",
+        target_os = "nanosplus",
+        target_os = "nanox"
+    ),
+    not(feature = "sync")
+))]
 use sui::main_stax::*;
+
+#[cfg(all(
+    any(
+        target_os = "stax",
+        target_os = "flex",
+        target_os = "apex_p",
+        target_os = "nanosplus",
+        target_os = "nanox"
+    ),
+    feature = "sync"
+))]
+use sui::main_stax_sync::*;
 
 use sui::{
     ctx::RunCtx,
@@ -23,7 +41,7 @@ pub fn custom_panic(info: &PanicInfo) -> ! {
         swap_panic_handler(info);
     }
 
-    ledger_log::error!("Panic happened! {:#?}", info);
+    ledger_device_sdk::log::error!("Panic happened! {:#?}", info);
 
     let mut comm = io::Comm::new();
     comm.reply(io::StatusWords::Panic);

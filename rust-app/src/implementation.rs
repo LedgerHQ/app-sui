@@ -1,4 +1,8 @@
+use crate::crypto_helpers::common::{try_option, Address};
+use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
+use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
+use crate::ctx_sync::block_protocol::BlockProtocolHandler;
 use crate::interface::*;
 use crate::parser::common::{
     CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
@@ -13,18 +17,16 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::{ArrayString, ArrayVec};
-use ledger_crypto_helpers::common::{try_option, Address};
-use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
-use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
+use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::{StatusWords, SyscallError};
+use ledger_device_sdk::log::{info, trace};
 use ledger_device_sdk::tlv::tlv_dynamic_token::{parse_dynamic_token_tlv, DynamicTokenOut};
 use ledger_device_sdk::tlv::TlvError;
-use ledger_log::{info, trace};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 
 #[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 use core::convert::TryFrom;
 use core::future::Future;
@@ -36,6 +38,55 @@ pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 // Need a path of length 5, as make_bip32_path panics with smaller paths
 pub const BIP32_PREFIX: [u32; 5] =
     ledger_device_sdk::ecc::make_bip32_path(b"m/44'/784'/123'/0'/0'");
+
+pub fn get_address_apdu_sync(
+    protocol_handler: &mut BlockProtocolHandler,
+    comm: &mut ledger_device_sdk::io::Comm,
+    path: &[u8],
+    prompt: bool,
+) {
+    let mut bip32path = ArrayVec::<u32, 10>::new();
+
+    let _length = path[0] as usize;
+
+    path[1..]
+        .chunks(4)
+        .map(|chunk| {
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(chunk);
+            u32::from_le_bytes(arr)
+        })
+        .for_each(|val| {
+            bip32path.try_push(val).ok();
+        });
+
+    if !bip32path.starts_with(&BIP32_PREFIX[0..2]) {
+        info!("Invalid BIP32 path\n");
+    }
+
+    let mut rv = ArrayVec::<u8, 220>::new();
+    if with_public_keys(&bip32path, true, |key, address: &SuiPubKeyAddress| {
+        try_option(|| -> Option<()> {
+            if prompt {
+                // Synchronous confirmation not implemented
+                info!("Prompting for address confirmation not implemented in sync mode\n");
+            }
+            let key_bytes = ed25519_public_key_bytes(key);
+            rv.try_push(u8::try_from(key_bytes.len()).ok()?).ok()?;
+            rv.try_extend_from_slice(key_bytes).ok()?;
+            // And we'll send the address along;
+            let binary_address = address.get_binary_address();
+            rv.try_push(u8::try_from(binary_address.len()).ok()?).ok()?;
+            rv.try_extend_from_slice(binary_address).ok()?;
+            let _ = protocol_handler.result_final(comm, &rv);
+            Some(())
+        }())
+    })
+    .is_err()
+    {
+        info!("Error when computing public key");
+    }
+}
 
 pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     let input = match io.get_params::<1>() {
@@ -121,6 +172,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
+    info!("apdu sign tx length: {}\n", length);
+
     let known_txn = {
         let mut txn = input[0].clone();
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
@@ -130,6 +183,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         })
         .await
     };
+
+    info!("End of tx_parse");
 
     let is_unknown_txn = known_txn.is_none();
 
@@ -224,21 +279,23 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     }
 
     NoinlineFut(async move {
-        let mut hasher: Blake2b = Hasher::new();
+        let mut hasher = ledger_device_sdk::hash::blake2::Blake2b_256::new();
         {
             let mut txn = input[0].clone();
             const CHUNK_SIZE: usize = 128;
             let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
             for _ in 0..chunks {
                 let b: [u8; CHUNK_SIZE] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
             for _ in 0..rem {
                 let b: [u8; 1] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
         }
-        let hash: HexHash<32> = hasher.finalize();
+        let mut hash: HexHash<32> = Default::default();
+        let _ = hasher.finalize(&mut hash.0);
+
         if is_unknown_txn {
             // Show prompts after all inputs have been parsed
             if ui.confirm_blind_sign_tx(&hash).is_none() {

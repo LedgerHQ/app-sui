@@ -8,11 +8,10 @@ use core::convert::TryFrom;
 use core::future::Future;
 use either::*;
 use ledger_device_sdk::io::SyscallError;
-use ledger_log::info;
+use ledger_device_sdk::log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
-use ledger_parser_combinators::endianness::*;
 use ledger_parser_combinators::interp::*;
 
 // Tx Schema
@@ -1951,7 +1950,7 @@ pub enum KnownTx {
 }
 
 #[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
