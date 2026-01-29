@@ -1,7 +1,7 @@
 use crate::crypto_helpers::common::{try_option, Address};
 use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use crate::crypto_helpers::hasher::HexHash;
-use crate::ctx::{RunCtx, TICKER_LENGTH};
+use crate::sync::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
 use crate::parser::common::{
     CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
@@ -10,9 +10,9 @@ use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx};
 use crate::settings::*;
-use crate::swap;
-use crate::swap::params::TxParams;
-use crate::ui::*;
+//use crate::swap;
+//use crate::swap::params::TxParams;
+use crate::sync::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::{ArrayString, ArrayVec};
@@ -37,6 +37,7 @@ pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 // Need a path of length 5, as make_bip32_path panics with smaller paths
 pub const BIP32_PREFIX: [u32; 5] =
     ledger_device_sdk::ecc::make_bip32_path(b"m/44'/784'/123'/0'/0'");
+
 
 pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     let input = match io.get_params::<1>() {
@@ -104,7 +105,7 @@ async fn check_tx_params(expected: &TxParams, received: &TxParams) {
     }
 }
 
-pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInterface) {
+pub async fn sign_apdu(io: HostIO, ctx: &mut RunCtx, settings: Settings, ui: UserInterface) {
     let _on_failure = defer::defer(|| {
         // In case of a swap, we need to communicate that signing failed
         if ctx.is_swap() && !ctx.is_swap_sign_succeeded() {
@@ -272,7 +273,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     ctx.set_swap_sign_success();
 }
 
-pub async fn validate_tlv(io: HostIO, ctx: &RunCtx) {
+pub async fn validate_tlv(io: HostIO, ctx: &mut RunCtx) {
     const TLV_ERROR_OFFSET: u16 = 0x7000;
 
     let mut input = match io.get_params::<4>() {

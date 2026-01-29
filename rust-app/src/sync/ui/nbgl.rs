@@ -1,7 +1,7 @@
-use crate::ctx::RunCtx;
+use crate::sync::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::{CoinType, SUI_COIN_DECIMALS};
-use crate::ui::common::*;
+use crate::sync::ui::common::*;
 use crate::utils::*;
 
 extern crate alloc;

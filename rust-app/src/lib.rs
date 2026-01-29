@@ -17,11 +17,6 @@
 #![cfg_attr(all(not(version("1.65"))), feature(generic_associated_types))]
 #![cfg_attr(version("1.71"), feature(impl_trait_in_assoc_type))]
 
-pub use ledger_device_sdk::log::*;
-
-#[cfg(feature = "pending_review_screen")]
-mod pending;
-
 #[cfg(all(target_family = "bolos", test))]
 #[no_mangle]
 extern "C" fn sample_main() {
@@ -35,10 +30,10 @@ pub mod interface;
 #[cfg(target_family = "bolos")]
 pub mod utils;
 
-#[cfg(target_family = "bolos")]
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod handle_apdu;
 
-#[cfg(target_family = "bolos")]
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod implementation;
 
 #[cfg(target_family = "bolos")]
@@ -49,24 +44,20 @@ pub mod parser;
 #[cfg(target_family = "bolos")]
 pub mod settings;
 
-#[cfg(target_family = "bolos")]
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod ui;
 
-#[cfg(target_family = "bolos")]
-pub mod main_stax;
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
+pub mod app_main;
 
-#[cfg(target_family = "bolos")]
-#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
-pub mod main_stax_sync;
-
-#[cfg(target_family = "bolos")]
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod swap;
 
-#[cfg(target_family = "bolos")]
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod ctx;
 
-#[cfg(target_family = "bolos")]
-pub mod ctx_sync;
+#[cfg(all(target_family = "bolos", feature = "sync"))]
+pub mod sync;
 
 #[cfg(all(target_family = "bolos", test))]
 use core::panic::PanicInfo;

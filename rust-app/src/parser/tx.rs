@@ -527,6 +527,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 let v1 = estimate_btree_map_usage(inputs);
                 let v2 = estimate_btree_map_usage(command_results);
                 if v1 + v2 > MAX_HEAP_USAGE_ALLOWED {
+                    info!("Heap usage exceeded during tx parse");
                     reject_on::<()>(
                         core::file!(),
                         core::line!(),
@@ -544,6 +545,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
+                    info!("Parsing input {}", i);
                     check_heap_use(&inputs, &command_results).await;
                     let arg =
                         NoinlineFut(<DefaultInterp as AsyncParser<CallArgSchema, BS>>::parse(
@@ -552,20 +554,27 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         ))
                         .await;
                     match arg {
-                        CallArg::Other => {}
+                        CallArg::Other => {
+                            info!("Input {}: Other - not supported", i);
+                        }
                         CallArg::RecipientAddress(v) => {
+                            info!("Input {}: RecipientAddress", i);
                             inputs.insert(i, InputValue::RecipientAddress(v));
                         }
                         CallArg::Amount(v) => {
+                            info!("Input {}: Amount: {}", i, v);
                             inputs.insert(i, InputValue::Amount(v));
                         }
                         CallArg::OptionalAmount(v) => {
+                            info!("Input {}: OptionalAmount", i);
                             inputs.insert(i, InputValue::OptionalAmount(v));
                         }
                         CallArg::ObjectRef(v) => {
+                            info!("Input {}: ObjectRef", i);
                             inputs.insert(i, InputValue::ObjectRef(v));
                         }
                         CallArg::SharedObject(v) => {
+                            info!("Input {}: SharedObject", i);
                             inputs.insert(i, InputValue::SharedObject(v));
                         }
                     }
@@ -1880,6 +1889,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
         BS: 'c,
         OD: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
+        info!("====================> TransactionDataParser::parse");
         async move {
             let enum_variant =
                 <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;

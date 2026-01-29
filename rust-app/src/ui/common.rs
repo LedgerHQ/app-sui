@@ -6,7 +6,7 @@ extern crate alloc;
 use alloc::format;
 
 use crate::crypto_helpers::common::HexSlice;
-use arrayvec::ArrayString;
+use arrayvec::{ArrayString, ArrayVec};
 use either::*;
 use hex_literal::hex;
 
