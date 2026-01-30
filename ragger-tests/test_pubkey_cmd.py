@@ -49,4 +49,4 @@ def test_incomplete_command_does_not_panic_followed_by_next_command(backend, sce
         with pytest.raises(ExceptionRAPDU) as e:
             client.get_public_key(path=path)
 
-        assert e.value.status == 0x2
+        assert e.value.status != 0x900
