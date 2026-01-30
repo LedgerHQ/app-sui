@@ -1,26 +1,30 @@
 use crate::parser::common::{COIN_STRING_LENGTH, SUI_ADDRESS_LENGTH, SUI_COIN_DECIMALS};
 //use crate::swap::params::TxParams;
+use crate::sync::ui::nbgl::UserInterface;
 use arrayvec::ArrayString;
+use ledger_device_sdk::nbgl::NbglHomeAndSettings;
 
 pub mod block_protocol;
 use block_protocol::BlockProtocolHandler;
 
 pub const TICKER_LENGTH: usize = 8;
 
-#[derive(Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 #[repr(u8)]
 pub enum State {
+    #[default]
     App = 0x00,
     LibSwapIdle,
     LibSwapSignSuccess,
     LibSwapSignFailure,
 }
 
+#[derive(Default)]
 pub struct RunCtx {
     pub state: State,
     pub block_protocol_handler: BlockProtocolHandler,
     pub comm: ledger_device_sdk::io::Comm,
-    //pub tx_params: TxParams,
+    pub ui: UserInterface,
     pub token_coin_id: [u8; SUI_ADDRESS_LENGTH],
     pub token_coin_module: ArrayString<COIN_STRING_LENGTH>,
     pub token_coin_function: ArrayString<COIN_STRING_LENGTH>,
@@ -29,19 +33,23 @@ pub struct RunCtx {
 }
 
 impl RunCtx {
-    pub fn app() -> Self {
-        RunCtx {
-            state: State::App,
-            block_protocol_handler: BlockProtocolHandler::default(),
-            comm: ledger_device_sdk::io::Comm::new(),
-            //tx_params: TxParams::default(),
-            token_coin_id: [0; SUI_ADDRESS_LENGTH],
-            token_coin_module: ArrayString::zero_filled(),
-            token_coin_function: ArrayString::zero_filled(),
-            token_divisor: SUI_COIN_DECIMALS,
-            token_ticker: ArrayString::zero_filled(),
-        }
-    }
+    // pub fn app() -> Self {
+    //     RunCtx {
+    //         state: State::App,
+    //         block_protocol_handler: BlockProtocolHandler::default(),
+    //         comm: ledger_device_sdk::io::Comm::new(),
+    //         ui: UserInterface {
+    //             main_menu: NbglHomeAndSettings::new(),
+    //             do_refresh: true,
+    //         },
+    //         //tx_params: TxParams::default(),
+    //         token_coin_id: [0; SUI_ADDRESS_LENGTH],
+    //         token_coin_module: ArrayString::zero_filled(),
+    //         token_coin_function: ArrayString::zero_filled(),
+    //         token_divisor: SUI_COIN_DECIMALS,
+    //         token_ticker: ArrayString::zero_filled(),
+    //     }
+    // }
 
     // pub fn lib_swap(tx_params: TxParams) -> Self {
     //     RunCtx {

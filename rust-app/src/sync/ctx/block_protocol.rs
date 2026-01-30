@@ -43,23 +43,33 @@ pub enum LedgerToHostCmd {
 }
 
 /// State of block protocol
-#[derive(Default)]
-pub enum State<'a> {
-    /// Ready to receive START command
-    #[default]
-    Idle,
+#[derive(Debug)]
+pub enum Output<'a> {
+    NoAction,
     /// Waiting for GET_CHUNK_RESPONSE
-    WaitingChunk { requested_hash: Hash },
+    WaitingChunk {
+        requested_hash: &'a Hash,
+    },
     /// Waiting for PUT_CHUNK_RESPONSE
     WaitingPutResponse,
     /// Waiting for RESULT_ACCUMULATING_RESPONSE
     WaitingResultResponse,
     /// All chunks received, full data available
-    WholeChunkReceived { data: &'a [u8] },
+    WholeChunkReceived {
+        data: &'a [u8],
+    },
+}
+
+#[derive(Default, Debug, PartialEq)]
+pub enum State {
+    #[default]
+    Idle,
+    Processing,
 }
 
 #[derive(Debug, Default)]
 pub struct BlockProtocolHandler {
+    pub state: State,
     /// Input parameter hashes from START command
     /// 3 maximum hashes
     pub input_hashes: ArrayVec<Hash, 3>,
@@ -78,8 +88,16 @@ pub enum BlockProtocolError {
 }
 
 impl BlockProtocolHandler {
+    pub fn reset(&mut self) {
+        self.state = State::Idle;
+        self.input_hashes.clear();
+        self.requested_hash = [0u8; HASH_LEN];
+        self.result.clear();
+        self.response_buffer.clear();
+    }
+
     /// Process incoming data and return next action
-    pub fn process_data(&mut self, data: &[u8]) -> Result<State<'_>, BlockProtocolError> {
+    pub fn process_data(&mut self, data: &[u8]) -> Result<Output<'_>, BlockProtocolError> {
         if data.is_empty() {
             return Err(BlockProtocolError::EmptyData);
         }
@@ -89,6 +107,10 @@ impl BlockProtocolHandler {
 
         match in_cmd {
             HostToLedgerCmd::Start => {
+                if self.state != State::Idle {
+                    return Err(BlockProtocolError::InvalidCommand);
+                }
+                self.state = State::Processing;
                 self.input_hashes.clear();
                 self.result.clear();
                 self.response_buffer.clear();
@@ -104,8 +126,8 @@ impl BlockProtocolHandler {
                         .map_err(|_| BlockProtocolError::InvalidCommand)?;
                 }
                 self.requested_hash = self.input_hashes[0];
-                Ok(State::WaitingChunk {
-                    requested_hash: self.requested_hash,
+                Ok(Output::WaitingChunk {
+                    requested_hash: &self.requested_hash,
                 })
             }
             HostToLedgerCmd::GetChunkResponseSuccess => {
@@ -123,16 +145,16 @@ impl BlockProtocolHandler {
                     .map_err(|_| BlockProtocolError::InvalidCommand)?;
                 self.result.extend_from_slice(&in_payload[HASH_LEN..]);
                 if self.requested_hash == [0u8; HASH_LEN] {
-                    Ok(State::WholeChunkReceived { data: &self.result })
+                    Ok(Output::WholeChunkReceived { data: &self.result })
                 } else {
-                    Ok(State::WaitingChunk {
-                        requested_hash: self.requested_hash,
+                    Ok(Output::WaitingChunk {
+                        requested_hash: &self.requested_hash,
                     })
                 }
             }
-            HostToLedgerCmd::GetChunkResponseFailure => Ok(State::Idle),
-            HostToLedgerCmd::PutChunkResponse => Ok(State::Idle),
-            HostToLedgerCmd::ResultAccumulatingResponse => Ok(State::Idle),
+            HostToLedgerCmd::GetChunkResponseFailure => Ok(Output::NoAction),
+            HostToLedgerCmd::PutChunkResponse => Ok(Output::NoAction),
+            HostToLedgerCmd::ResultAccumulatingResponse => Ok(Output::NoAction),
         }
     }
 }

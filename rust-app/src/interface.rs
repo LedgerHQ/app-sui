@@ -50,7 +50,7 @@ impl core::fmt::Display for SuiPubKeyAddress {
 }
 
 #[repr(u8)]
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive, PartialEq, Eq)]
 pub enum Ins {
     GetVersion = 0,
     VerifyAddress = 1,

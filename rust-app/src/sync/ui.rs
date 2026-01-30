@@ -13,5 +13,5 @@ pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_64x64.
 #[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
 pub const APP_ICON_HOME: NbglGlyph = APP_ICON;
 
-//pub mod nbgl;
+pub mod nbgl;
 //pub mod common;

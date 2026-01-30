@@ -1,24 +1,24 @@
 use crate::interface::*;
-use crate::sync::ctx::block_protocol::{LedgerToHostCmd, State};
+use crate::sync::ctx::block_protocol::{LedgerToHostCmd, Output, State};
 use crate::sync::ctx::RunCtx;
+use crate::sync::implementation::get_address;
 
 use arrayvec::ArrayVec;
-use ledger_device_sdk::log::trace;
+use ledger_device_sdk::{
+    io::StatusWords,
+    log::{error, trace},
+};
 
-pub enum IOError {
-    APDUError,
-}
-
-pub fn handle_apdu(ctx: &mut RunCtx, ins: Ins) -> Result<(), IOError> {
+pub fn handle_apdu(ctx: &mut RunCtx, ins: Ins) -> Result<(), StatusWords> {
     trace!("Dispatching");
     let data = match ctx.comm.get_data() {
         Ok(d) => d,
-        Err(_e) => return Err(IOError::APDUError),
+        Err(_e) => return Err(StatusWords::NothingReceived),
     };
-    let state = ctx
+    let output = ctx
         .block_protocol_handler
         .process_data(&data)
-        .map_err(|_| IOError::APDUError)?;
+        .map_err(|_| StatusWords::Unknown)?;
     match ins {
         Ins::GetVersion => {
             trace!("Handling get version");
@@ -34,13 +34,31 @@ pub fn handle_apdu(ctx: &mut RunCtx, ins: Ins) -> Result<(), IOError> {
         }
         Ins::VerifyAddress | Ins::GetPubkey => {
             trace!("Handling verify address");
-            match state {
-                State::WaitingChunk { requested_hash } => {
+            match output {
+                Output::WaitingChunk { requested_hash } => {
+                    trace!("Requesting chunk");
                     ctx.comm.append(&[LedgerToHostCmd::GetChunk as u8]);
-                    ctx.comm.append(&requested_hash);
+                    ctx.comm.append(requested_hash);
                 }
-                State::WholeChunkReceived { data: _ } => {}
-                _ => {}
+                Output::WholeChunkReceived { data } => {
+                    trace!("Getting address");
+                    match get_address(&mut ctx.ui, &data, ins == Ins::VerifyAddress) {
+                        Ok(address) => {
+                            ctx.block_protocol_handler.reset();
+                            ctx.comm.append(&[LedgerToHostCmd::ResultFinal as u8]);
+                            ctx.comm.append(&address);
+                        }
+                        Err(e) => {
+                            error!("Error getting address");
+                            ctx.block_protocol_handler.reset();
+                            return Err(e);
+                        }
+                    }
+                }
+                _ => {
+                    trace!("Unhandled state");
+                    // Handle other states if necessary
+                }
             }
             Ok(())
         }

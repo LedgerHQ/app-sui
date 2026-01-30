@@ -56,5 +56,5 @@ extern "C" fn sample_main(arg0: u32) {
 #[no_mangle]
 #[cfg(all(target_family = "bolos", feature = "sync"))]
 extern "C" fn sample_main(_arg0: u32) {
-    app_main(&mut RunCtx::app());
+    app_main();
 }
