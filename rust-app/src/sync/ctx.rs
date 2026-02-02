@@ -1,8 +1,7 @@
-use crate::parser::common::{COIN_STRING_LENGTH, SUI_ADDRESS_LENGTH, SUI_COIN_DECIMALS};
+use crate::parser::common::{COIN_STRING_LENGTH, SUI_ADDRESS_LENGTH};
 //use crate::swap::params::TxParams;
 use crate::sync::ui::nbgl::UserInterface;
 use arrayvec::ArrayString;
-use ledger_device_sdk::nbgl::NbglHomeAndSettings;
 
 pub mod block_protocol;
 use block_protocol::BlockProtocolHandler;

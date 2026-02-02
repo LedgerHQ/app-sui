@@ -1,5 +1,5 @@
 use crate::interface::*;
-use crate::sync::ctx::block_protocol::{LedgerToHostCmd, Output, State};
+use crate::sync::ctx::block_protocol::{LedgerToHostCmd, Output};
 use crate::sync::ctx::RunCtx;
 use crate::sync::implementation::get_address;
 
@@ -35,18 +35,23 @@ pub fn handle_apdu(ctx: &mut RunCtx, ins: Ins) -> Result<(), StatusWords> {
         Ins::VerifyAddress | Ins::GetPubkey => {
             trace!("Handling verify address");
             match output {
-                Output::WaitingChunk { requested_hash } => {
+                Output::WaitingChunk => {
                     trace!("Requesting chunk");
                     ctx.comm.append(&[LedgerToHostCmd::GetChunk as u8]);
-                    ctx.comm.append(requested_hash);
+                    ctx.comm
+                        .append(ctx.block_protocol_handler.requested_hash.as_slice());
                 }
-                Output::WholeChunkReceived { data } => {
+                Output::WholeChunkReceived => {
                     trace!("Getting address");
-                    match get_address(&mut ctx.ui, &data, ins == Ins::VerifyAddress) {
+                    match get_address(
+                        &mut ctx.ui,
+                        &ctx.block_protocol_handler.result,
+                        ins == Ins::VerifyAddress,
+                    ) {
                         Ok(address) => {
-                            ctx.block_protocol_handler.reset();
                             ctx.comm.append(&[LedgerToHostCmd::ResultFinal as u8]);
                             ctx.comm.append(&address);
+                            ctx.block_protocol_handler.reset();
                         }
                         Err(e) => {
                             error!("Error getting address");
@@ -64,7 +69,28 @@ pub fn handle_apdu(ctx: &mut RunCtx, ins: Ins) -> Result<(), StatusWords> {
         }
         Ins::Sign => {
             trace!("Handling sign");
-            //sign_apdu(io, ctx, settings, ui);
+            match output {
+                Output::WaitingChunk => {
+                    trace!(
+                        "Requesting chunk, current data length {}",
+                        ctx.block_protocol_handler.result.len()
+                    );
+                    ctx.comm.append(&[LedgerToHostCmd::GetChunk as u8]);
+                    ctx.comm
+                        .append(ctx.block_protocol_handler.requested_hash.as_slice());
+                }
+                Output::WholeChunkReceived => {
+                    trace!(
+                        "Signing Tx length {}",
+                        ctx.block_protocol_handler.result.len()
+                    );
+                    ctx.block_protocol_handler.reset();
+                }
+                _ => {
+                    trace!("Unhandled state");
+                    // Handle other states if necessary
+                }
+            }
             Ok(())
         }
         Ins::ProvideTrustedDynamicDescriptor => {

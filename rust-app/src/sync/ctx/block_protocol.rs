@@ -44,20 +44,16 @@ pub enum LedgerToHostCmd {
 
 /// State of block protocol
 #[derive(Debug)]
-pub enum Output<'a> {
+pub enum Output {
     NoAction,
     /// Waiting for GET_CHUNK_RESPONSE
-    WaitingChunk {
-        requested_hash: &'a Hash,
-    },
+    WaitingChunk,
     /// Waiting for PUT_CHUNK_RESPONSE
     WaitingPutResponse,
     /// Waiting for RESULT_ACCUMULATING_RESPONSE
     WaitingResultResponse,
     /// All chunks received, full data available
-    WholeChunkReceived {
-        data: &'a [u8],
-    },
+    WholeChunkReceived,
 }
 
 #[derive(Default, Debug, PartialEq)]
@@ -97,13 +93,13 @@ impl BlockProtocolHandler {
     }
 
     /// Process incoming data and return next action
-    pub fn process_data(&mut self, data: &[u8]) -> Result<Output<'_>, BlockProtocolError> {
-        if data.is_empty() {
+    pub fn process_data(&mut self, data_in: &[u8]) -> Result<Output, BlockProtocolError> {
+        if data_in.is_empty() {
             return Err(BlockProtocolError::EmptyData);
         }
 
-        let in_cmd = HostToLedgerCmd::try_from(data[0])?;
-        let in_payload = &data[1..];
+        let in_cmd = HostToLedgerCmd::try_from(data_in[0])?;
+        let in_payload = &data_in[1..];
 
         match in_cmd {
             HostToLedgerCmd::Start => {
@@ -126,9 +122,7 @@ impl BlockProtocolHandler {
                         .map_err(|_| BlockProtocolError::InvalidCommand)?;
                 }
                 self.requested_hash = self.input_hashes[0];
-                Ok(Output::WaitingChunk {
-                    requested_hash: &self.requested_hash,
-                })
+                Ok(Output::WaitingChunk)
             }
             HostToLedgerCmd::GetChunkResponseSuccess => {
                 let received_hash = sha256(in_payload);
@@ -145,11 +139,9 @@ impl BlockProtocolHandler {
                     .map_err(|_| BlockProtocolError::InvalidCommand)?;
                 self.result.extend_from_slice(&in_payload[HASH_LEN..]);
                 if self.requested_hash == [0u8; HASH_LEN] {
-                    Ok(Output::WholeChunkReceived { data: &self.result })
+                    Ok(Output::WholeChunkReceived)
                 } else {
-                    Ok(Output::WaitingChunk {
-                        requested_hash: &self.requested_hash,
-                    })
+                    Ok(Output::WaitingChunk)
                 }
             }
             HostToLedgerCmd::GetChunkResponseFailure => Ok(Output::NoAction),

@@ -1,16 +1,8 @@
 use crate::interface::*;
-use crate::parser::common::{CoinType, SUI_COIN_DECIMALS};
-use crate::sync::ctx::RunCtx;
-//use crate::sync::ui::common::*;
-use crate::utils::*;
 
 extern crate alloc;
 use alloc::format;
-use alloc::string::ToString;
 
-use crate::crypto_helpers::common::HexSlice;
-use crate::crypto_helpers::hasher::HexHash;
-//use either::*;
 use ledger_device_sdk::nbgl::*;
 
 use super::*;
