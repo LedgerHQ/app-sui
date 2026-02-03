@@ -71,7 +71,3 @@ pub fn exiting_panic(_info: &PanicInfo) -> ! {
     error!("Panicking: {:?}\n", _info);
     ledger_device_sdk::exit_app(1)
 }
-
-///// Custom type used to implement tests
-//#[cfg(all(target_family = "bolos", test))]
-//use ledger_device_sdk::TestType;

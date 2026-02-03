@@ -1,11 +1,14 @@
 use crate::crypto_helpers::common::{try_option, Address};
 use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, with_public_keys};
 use crate::interface::*;
+use crate::sync::parser::bip32::*;
 use crate::sync::ui::nbgl::UserInterface;
 
 use arrayvec::ArrayVec;
 use ledger_device_sdk::io::StatusWords;
 use ledger_device_sdk::log::{error, info};
+
+use ledger_parser_combinators::interp_parser::{DefaultInterp, InterpParser, ParserCommon};
 
 use core::convert::TryFrom;
 
@@ -17,21 +20,17 @@ impl TryFrom<&[u8]> for Bip32Path {
     type Error = StatusWords;
 
     fn try_from(bs: &[u8]) -> Result<Self, Self::Error> {
-        let mut arr = ArrayVec::<u32, 10>::new();
-        // First byte is length
-        let mut offset = 1;
-        while offset + 4 <= bs.len() {
-            let chunk: [u8; 4] = bs[offset..offset + 4]
-                .try_into()
-                .map_err(|_| StatusWords::BadLen)?;
-            arr.try_push(u32::from_le_bytes(chunk))
-                .map_err(|_| StatusWords::BadLen)?;
-            offset += 4;
+        let parser = DefaultInterp;
+        let mut state = ParserCommon::<Bip32Key>::init(&parser);
+        let mut dest = None;
+
+        match InterpParser::<Bip32Key>::parse(&parser, &mut state, bs, &mut dest) {
+            Ok(remaining) if remaining.is_empty() => {
+                Ok(Bip32Path(dest.ok_or(StatusWords::BadLen)?))
+            }
+            Ok(_) => Err(StatusWords::BadLen), // Extra data
+            Err(_) => Err(StatusWords::BadLen),
         }
-        if offset != bs.len() {
-            return Err(StatusWords::BadLen);
-        }
-        Ok(Bip32Path(arr))
     }
 }
 

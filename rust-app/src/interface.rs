@@ -3,7 +3,6 @@ use core::convert::TryFrom;
 use core::marker::ConstParamTy;
 use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::{ApduHeader, StatusWords};
-use ledger_parser_combinators::core_parsers::*;
 use num_enum::TryFromPrimitive;
 
 #[derive(ConstParamTy, PartialEq, Eq)]
@@ -13,9 +12,6 @@ pub enum ParseChecks {
     PromptUser,
     CheckSwapTx,
 }
-
-// Payload for a public key request
-pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
 pub struct SuiPubKeyAddress(SuiAddressRaw);
 

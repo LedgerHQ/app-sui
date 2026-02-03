@@ -615,7 +615,7 @@ impl<A, R, S: DynParser<A>> DynParser<A>
     }
 }
 
-fn rej(cnk: &[u8]) -> (PResult<OOB>, RemainingSlice<'_>) {
+pub fn rej(cnk: &[u8]) -> (PResult<OOB>, RemainingSlice<'_>) {
     (Some(OOB::Reject), cnk)
 }
 

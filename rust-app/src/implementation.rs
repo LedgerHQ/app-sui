@@ -23,12 +23,16 @@ use ledger_device_sdk::tlv::tlv_dynamic_token::{parse_dynamic_token_tlv, Dynamic
 use ledger_device_sdk::tlv::TlvError;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
+use ledger_parser_combinators::schema::*;
 
 #[cfg(feature = "speculos")]
 use crate::crypto_helpers::common::HexSlice;
 
 use core::convert::TryFrom;
 use core::future::Future;
+
+// Payload for a public key request
+pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
 #[define_opaque(BipParserImplT)]
