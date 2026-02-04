@@ -8,6 +8,7 @@ use ledger_device_sdk::nbgl::{init_comm, NbglHomeAndSettings};
 use ledger_device_sdk::{info, trace};
 
 pub fn app_main() {
+    info!("Starting application in sync mode");
     let mut ctx = RunCtx::default();
 
     let mut settings = Settings;
@@ -30,9 +31,11 @@ pub fn app_main() {
 
     ctx.ui.do_refresh = true;
 
+    info!("Entering main loop");
+
     loop {
         ctx.ui.show_main_menu();
-
+        
         let ins: Ins = ctx.comm.next_command();
 
         match handle_apdu(&mut ctx, ins) {
