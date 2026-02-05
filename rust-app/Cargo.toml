@@ -27,7 +27,6 @@ either = { version = "1.14.0", default-features = false }
 # speculos logging and change log level.
 [features]
 default = []
-sync = []
 # Pass --features speculos to enable logging and change log level.
 speculos = [ "ledger_device_sdk/unit_test", "ledger_device_sdk/debug", "ledger_device_sdk/log_trace" ]
 
