@@ -547,7 +547,8 @@ checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 [[package]]
 name = "include_gif"
 version = "1.2.5"
-source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c5148da8ab53eb3a387c221059d5a1ec3d4788d6088d4a8f127d6768dce74f4"
 dependencies = [
  "flate2",
  "image",
@@ -632,8 +633,9 @@ dependencies = [
 
 [[package]]
 name = "ledger_device_sdk"
-version = "1.31.0"
-source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
+version = "1.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb8c98b0b1aae2bb69c6bb9438d109afd8f85c58005df7c8a02c47be5146eb19"
 dependencies = [
  "const-zero",
  "include_gif",
@@ -647,8 +649,9 @@ dependencies = [
 
 [[package]]
 name = "ledger_secure_sdk_sys"
-version = "1.14.0"
-source = "git+https://github.com/LedgerHQ/ledger-device-rust-sdk.git?branch=y333%2Ffeature_log#ba6b4c879a43bb86344e0afb500d7a70425d5ad8"
+version = "1.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59f06614c0a9f19bdd8eaad05082728f52ba06d0ddd88b6419493609db6064ba"
 dependencies = [
  "bindgen",
  "cc",
@@ -1265,7 +1268,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "sui"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",

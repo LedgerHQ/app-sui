@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "1.4.0"
+version = "1.5.0"
 authors = ["Obsidian Systems"]
 edition = "2021"
 autobins = false
@@ -32,10 +32,10 @@ sync = []
 speculos = [ "ledger_device_sdk/unit_test", "ledger_device_sdk/debug", "ledger_device_sdk/log_trace" ]
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = { version = "1.31.0", features=["sys", "nano_nbgl"] }
+ledger_device_sdk = { version = "1.32.0", features=["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.31.0"
+version = "1.32.0"
 features = [ "sys", "nano_nbgl", "unit_test" ]
 
 [[bin]]
@@ -78,6 +78,3 @@ icon = "sui_40x40.gif"
 
 [package.metadata.ledger.apex_p]
 icon = "sui_32x32.png"
-
-[patch.crates-io]
-ledger_device_sdk = { git = "https://github.com/LedgerHQ/ledger-device-rust-sdk.git", branch = "y333/feature_log" }
