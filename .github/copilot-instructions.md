@@ -7,8 +7,8 @@ This is a Ledger hardware wallet application for the Sui blockchain, built using
 
 ### Core Structure
 - **APDU Handler**: Entry point at [rust-app/src/handle_apdu.rs](rust-app/src/handle_apdu.rs) - implements async APDU command processing
-- **Block Protocol**: Application-level protocol ([docs/block-protocol.md](docs/block-protocol.md)) that allows arbitrary-sized data transfers via chunking with SHA256 hash verification
-- **Parser**: Transaction parsing in [rust-app/src/parser/](rust-app/src/parser/) - handles Sui transaction types (transfers, staking, token operations)
+- **Block Protocol**: Application-level protocol ([docs/block-protocol.md](docs/block-protocol.md)) that allows arbitrary-sized data transfers via chunking with SHA256 hash verification. Includes a `usize` length prefix (4 bytes on ARM32, 8 bytes on x86_64) before transaction data.
+- **Parser**: Transaction parsing in [rust-app/src/parser/](rust-app/src/parser/) - handles Sui transaction types (transfers, staking, token operations) using ledger-parser-combinators
 - **UI Layer**: Device-specific UIs - NBGL for Stax/Flex/Apex P ([rust-app/src/ui/nbgl.rs](rust-app/src/ui/nbgl.rs)), BAGL for Nano S+/X
 - **Swap Integration**: Exchange support in [rust-app/src/swap/](rust-app/src/swap/) using Ledger's libcall API
 
@@ -53,6 +53,12 @@ pytest ragger-tests --device nanosp  # Single device
 
 Tests are in [ragger-tests/](ragger-tests/) using Python's Ragger framework. Test naming convention: `test_<feature>_<scenario>.py`.
 
+**Swap tests**: Exchange integration tests are in [tests/swap/](tests/swap/). These treat the app as a library loaded alongside the Exchange app:
+```bash
+pytest -v --tb=short tests/swap/ --device flex --golden_run
+```
+Note: Swap tests set `MAIN_APP_DIR` in conftest.py, which configures the app to load as a library rather than standalone.
+
 ### Dependency Management
 After updating `Cargo.lock`, run `./update-crate-hashes.sh` to regenerate `crate-hashes.json` - this provides supply-chain integrity for git dependencies in Nix builds.
 
@@ -81,6 +87,19 @@ Address = `0x` + Blake2b(0x00 || Ed25519_pubkey)[0:32] as hex
 
 Implementation: [rust-app/src/interface.rs](rust-app/src/interface.rs) `SuiPubKeyAddress::get_address()`
 
+### Transaction Format (BCS Encoding)
+Sui transactions follow BCS (Binary Canonical Serialization) with this structure:
+1. **Intent** (3 ULEB128 values): version, scope, app_id - typically 0x00, 0x00, 0x00
+2. **TransactionData enum variant**: 0x00 for V1
+3. **TransactionDataV1** tuple:
+   - **TransactionKind enum variant**: 0x00 for ProgrammableTransaction
+   - **ProgrammableTransaction**: inputs count (ULEB128), inputs array, commands count (ULEB128), commands array
+   - **Sender**: 32-byte SUI address
+   - **GasData**: payment objects, owner, price, budget
+   - **Expiration**: enum (0x00=None, 0x01=Epoch)
+
+**Critical**: When parsing via block protocol, skip the length prefix first. This is handled in [rust-app/src/implementation.rs](rust-app/src/implementation.rs#L126).
+
 ### Unstable Rust Features
 Required nightly features ([rust-app/src/lib.rs](rust-app/src/lib.rs)):
 - `stmt_expr_attributes`, `adt_const_params`, `type_alias_impl_trait`
@@ -96,6 +115,7 @@ Uses `alamgu-async-block` for cooperative async without a runtime. All APDU hand
 - Device entry points: `main_nanos.rs` vs `main_stax.rs`
 - UI abstractions: [rust-app/src/ui.rs](rust-app/src/ui.rs) re-exports device-specific implementations
 - Parser modules: `common.rs` (shared types), `tx.rs` (transaction), `object.rs`, `tuid.rs`
+- Dual IO modules: `io_legacy` (default) vs `io_new` (opt-in via feature flag)
 
 ### Memory Constraints
 Embedded environment with limited stack/heap:
