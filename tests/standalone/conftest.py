@@ -1,6 +1,12 @@
 from ragger.conftest import configuration
 from ragger.navigator import NavInsID
 import pytest
+import sys
+from pathlib import Path
+
+# Add parent tests directory to Python path so 'application_client' module can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
+
 ###########################
 ### CONFIGURATION START ###
 ###########################

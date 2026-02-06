@@ -1,14 +1,12 @@
 import pytest
+from ragger.conftest import configuration
 import sys
-
 from pathlib import Path
 
-from ragger.conftest import configuration
+# Add parent tests directory to Python path so 'application_client' module can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
 
 from ledger_app_clients.exchange.navigation_helper import ExchangeNavigationHelper
-
-# Add the swap test directory to Python path so 'apps' module can be imported
-sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 ###########################
 ### CONFIGURATION START ###

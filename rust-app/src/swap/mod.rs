@@ -1,12 +1,10 @@
 use core::{convert::TryFrom, fmt::Write};
 
-use arrayvec::ArrayString;
-// #[allow(unused_imports)]
-// use crate::crypto_helpers::common::HexSlice;
 use crate::crypto_helpers::{
     common::{Address, CryptographyError},
     eddsa::with_public_keys,
 };
+use arrayvec::ArrayString;
 use ledger_device_sdk::libcall::{
     self,
     swap::{
