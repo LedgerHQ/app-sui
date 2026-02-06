@@ -8,7 +8,7 @@ use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::ArrayVec;
 use core::future::Future;
-use ledger_log::trace;
+use ledger_device_sdk::log::trace;
 
 pub type APDUsFuture<'ctx> = impl Future<Output = ()> + 'ctx;
 

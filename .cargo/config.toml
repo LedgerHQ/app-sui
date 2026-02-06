@@ -23,6 +23,9 @@ rustflags = [
   "-C", "embed-bitcode",
 ]
 
+[build]
+target = "flex"
+
 [alias]
 tt = "test --features extra_debug"
 br = "build --release"

@@ -5,12 +5,12 @@ use crate::utils::*;
 extern crate alloc;
 use alloc::format;
 
+use crate::crypto_helpers::common::HexSlice;
 use arrayvec::{ArrayString, ArrayVec};
 use either::*;
 use hex_literal::hex;
-use ledger_crypto_helpers::common::HexSlice;
 
-use ledger_log::trace;
+use ledger_device_sdk::log::trace;
 
 pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
     hex!("3d9fb148e35ef4d74fcfc36995da14fc504b885d5f2bfeca37d6ea2cc044a32d");

@@ -1,12 +1,10 @@
 use core::{convert::TryFrom, fmt::Write};
 
-use arrayvec::ArrayString;
-// #[allow(unused_imports)]
-// use ledger_crypto_helpers::common::HexSlice;
-use ledger_crypto_helpers::{
+use crate::crypto_helpers::{
     common::{Address, CryptographyError},
     eddsa::with_public_keys,
 };
+use arrayvec::ArrayString;
 use ledger_device_sdk::libcall::{
     self,
     swap::{
@@ -15,14 +13,11 @@ use ledger_device_sdk::libcall::{
     },
     LibCallCommand,
 };
-use ledger_log::{error, trace};
+use ledger_device_sdk::log::{error, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
-#[cfg(not(any(target_os = "stax", target_os = "flex", target_os = "apex_p")))]
-use crate::main_nanos::app_main;
-#[cfg(any(target_os = "stax", target_os = "flex", target_os = "apex_p"))]
-use crate::main_stax::app_main;
+use crate::app_main::app_main;
 use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS, utils::get_amount_in_decimals};
 use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 

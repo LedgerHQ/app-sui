@@ -7,3 +7,11 @@ result-*
 
 __pycache__
 snapshots-tmp
+
+# Helper script git clone
+tests/swap/.test_dependencies/app-exchange/
+tests/swap/.test_dependencies/app-ethereum/
+
+# Build artifacts for swap tests
+tests/swap/.test_dependencies/main/app-exchange/build
+tests/swap/.test_dependencies/libraries/app-ethereum/build

@@ -46,6 +46,40 @@ If the Ledger App responds with any other status word, then the host should term
 | GET_CHUNK                | 2     | Hash of data chunk                                   |
 | PUT_CHUNK                | 3     | Data to be stored on the host                        |
 
+## Sequence Diagram
+
+The following diagram illustrates a typical transaction signing flow using the Block Protocol:
+
+```mermaid
+sequenceDiagram
+    participant Host
+    participant Ledger
+    
+    Note over Host: Chunk transaction into blocks<br/>(180 bytes each)
+    Note over Host: Compute SHA256 hashes<br/>for each block
+    
+    Host->>Ledger: APDU: START [hash1]
+    Note over Ledger: Store hash1,<br/>prepare to request data
+    
+    Ledger->>Host: GET_CHUNK [hash1]
+    Note over Host: Retrieve block1<br/>by hash
+    
+    Host->>Ledger: GET_CHUNK_RESPONSE_SUCCESS<br/>[hash2][data_0-179]
+    Note over Ledger: Verify: SHA256(response) == hash1<br/>Extract next hash: hash2
+    
+    Ledger->>Host: GET_CHUNK [hash2]
+    Host->>Ledger: GET_CHUNK_RESPONSE_SUCCESS<br/>[hash3][data_180-359]
+    Note over Ledger: Verify: SHA256(response) == hash2<br/>Extract next hash: hash3
+    
+    Ledger->>Host: GET_CHUNK [hash3]
+    Host->>Ledger: GET_CHUNK_RESPONSE_SUCCESS<br/>[0x00...][data_360-499]
+    Note over Ledger: Verify: SHA256(response) == hash3<br/>Zero hash = last block<br/>Transaction complete!
+    
+    Note over Ledger: Parse transaction<br/>Display to user<br/>User approves
+    
+    Ledger->>Host: RESULT_FINAL [signature]
+    Note over Host: Transaction signed!<br/>Status: 0x9000 (OK)
+```
 
 ## Protocol steps
 
