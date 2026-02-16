@@ -30,8 +30,10 @@ pub mod interface;
 #[cfg(target_family = "bolos")]
 pub mod utils;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod handle_apdu;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod implementation;
 
 #[cfg(target_family = "bolos")]
@@ -42,13 +44,20 @@ pub mod parser;
 #[cfg(target_family = "bolos")]
 pub mod settings;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod ui;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod app_main;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod swap;
 
+#[cfg(all(target_family = "bolos", not(feature = "sync")))]
 pub mod ctx;
+
+#[cfg(all(target_family = "bolos", feature = "sync"))]
+pub mod sync;
 
 #[cfg(all(target_family = "bolos", test))]
 use core::panic::PanicInfo;
