@@ -229,14 +229,16 @@ pub enum CallArgParserState {
     ReadingType { uleb: UlebParser },
     ReadingPureLength { uleb: UlebParser },
     ReadingPureBytes { bytes: Vec<u8>, remaining: usize },
+    /// After reading CallArg variant 1 (Object), read the ObjectArg sub-variant
+    ReadingObjectArgType { uleb: UlebParser },
     ReadingObjectId { parser: ByteArrayParser<32> },
-    ReadingObjectVersion { uleb: UlebParser, object_id: CoinID },
+    ReadingObjectVersion { parser: ByteArrayParser<8>, object_id: CoinID },
     ReadingObjectDigest { parser: ByteArrayParser<33>, object_id: CoinID, version: u64 },
     ReadingSharedObjectId { parser: ByteArrayParser<32> },
-    ReadingSharedVersion { uleb: UlebParser, object_id: CoinID },
+    ReadingSharedVersion { parser: ByteArrayParser<8>, object_id: CoinID },
     ReadingSharedMutable { object_id: CoinID, version: u64 },
     ReadingReceivingId { parser: ByteArrayParser<32> },
-    ReadingReceivingVersion { uleb: UlebParser, object_id: CoinID },
+    ReadingReceivingVersion { parser: ByteArrayParser<8>, object_id: CoinID },
     ReadingReceivingDigest { parser: ByteArrayParser<33>, object_id: CoinID, version: u64 },
 }
 
@@ -378,16 +380,16 @@ pub enum TxParserState {
         count: u32,
         parsed: u32,
         current_object_id: Option<ByteArrayParser<32>>,
-        current_version: Option<(CoinID, UlebParser)>,
+        current_version: Option<(CoinID, ByteArrayParser<8>)>,
         current_digest: Option<(CoinID, u64, ByteArrayParser<33>)>,
     },
     GasOwner { parser: ByteArrayParser<32> },
-    GasPrice { uleb: UlebParser },
-    GasBudget { uleb: UlebParser },
+    GasPrice { parser: ByteArrayParser<8> },
+    GasBudget { parser: ByteArrayParser<8> },
     
     /// Parsing expiration
     ExpirationTag { uleb: UlebParser },
-    ExpirationEpoch { uleb: UlebParser },
+    ExpirationEpoch { parser: ByteArrayParser<8> },
     
     /// Parsing transaction kind tag
     TxKindTag { uleb: UlebParser },
@@ -585,22 +587,22 @@ impl TxParser {
                         
                         if let Some(object_id) = result {
                             *current_object_id = None;
-                            *current_version = Some((object_id, UlebParser::new()));
+                            *current_version = Some((object_id, ByteArrayParser::new()));
                         }
                         continue;
                     }
                     
-                    // Parse version
-                    if let Some((object_id, uleb)) = current_version {
-                        match uleb.feed_byte_u64(chunk[cursor])? {
-                            Some(version) => {
-                                let oid = *object_id;
-                                *current_version = None;
-                                *current_digest = Some((oid, version, ByteArrayParser::new()));
-                            }
-                            None => {}
+                    // Parse version (fixed 8-byte u64 LE)
+                    if let Some((object_id, parser)) = current_version {
+                        let (consumed, result) = parser.feed(&chunk[cursor..]);
+                        cursor += consumed;
+                        
+                        if let Some(bytes) = result {
+                            let version = u64::from_le_bytes(bytes);
+                            let oid = *object_id;
+                            *current_version = None;
+                            *current_digest = Some((oid, version, ByteArrayParser::new()));
                         }
-                        cursor += 1;
                         continue;
                     }
                     
@@ -634,35 +636,33 @@ impl TxParser {
                     if let Some(owner) = result {
                         self.gas_owner = Some(owner);
                         self.state = TxParserState::GasPrice {
-                            uleb: UlebParser::new(),
+                            parser: ByteArrayParser::new(),
                         };
                     }
                 }
                 
-                TxParserState::GasPrice { uleb } => {
-                    match uleb.feed_byte_u64(chunk[cursor])? {
-                        Some(price) => {
-                            self.gas_price = Some(price);
-                            self.state = TxParserState::GasBudget {
-                                uleb: UlebParser::new(),
-                            };
-                        }
-                        None => {}
+                TxParserState::GasPrice { parser } => {
+                    let (consumed, result) = parser.feed(&chunk[cursor..]);
+                    cursor += consumed;
+                    
+                    if let Some(bytes) = result {
+                        self.gas_price = Some(u64::from_le_bytes(bytes));
+                        self.state = TxParserState::GasBudget {
+                            parser: ByteArrayParser::new(),
+                        };
                     }
-                    cursor += 1;
                 }
                 
-                TxParserState::GasBudget { uleb } => {
-                    match uleb.feed_byte_u64(chunk[cursor])? {
-                        Some(budget) => {
-                            self.gas_budget = Some(budget);
-                            self.state = TxParserState::ExpirationTag {
-                                uleb: UlebParser::new(),
-                            };
-                        }
-                        None => {}
+                TxParserState::GasBudget { parser } => {
+                    let (consumed, result) = parser.feed(&chunk[cursor..]);
+                    cursor += consumed;
+                    
+                    if let Some(bytes) = result {
+                        self.gas_budget = Some(u64::from_le_bytes(bytes));
+                        self.state = TxParserState::ExpirationTag {
+                            uleb: UlebParser::new(),
+                        };
                     }
-                    cursor += 1;
                 }
                 
                 // ========== Expiration ==========
@@ -679,7 +679,7 @@ impl TxParser {
                                 1 => {
                                     // Epoch
                                     self.state = TxParserState::ExpirationEpoch {
-                                        uleb: UlebParser::new(),
+                                        parser: ByteArrayParser::new(),
                                     };
                                 }
                                 _ => return Err(ParseError::InvalidType),
@@ -690,33 +690,15 @@ impl TxParser {
                     cursor += 1;
                 }
                 
-                TxParserState::ExpirationEpoch { uleb } => {
-                    match uleb.feed_byte_u64(chunk[cursor])? {
-                        Some(epoch) => {
-                            self.expiration = Some(TransactionExpiration::Epoch(epoch));
-                            // Expiration is the last field in TransactionDataV1
-                            self.state = TxParserState::Done;
-                        }
-                        None => {}
+                TxParserState::ExpirationEpoch { parser } => {
+                    let (consumed, result) = parser.feed(&chunk[cursor..]);
+                    cursor += consumed;
+                    
+                    if let Some(bytes) = result {
+                        self.expiration = Some(TransactionExpiration::Epoch(u64::from_le_bytes(bytes)));
+                        // Expiration is the last field in TransactionDataV1
+                        self.state = TxParserState::Done;
                     }
-                    cursor += 1;
-                }
-                
-                // ========== Transaction Kind ==========
-                TxParserState::TxKindTag { uleb } => {
-                    match uleb.feed_byte(chunk[cursor])? {
-                        Some(tag) => {
-                            // 0 = ProgrammableTransaction
-                            if tag != 0 {
-                                return Err(ParseError::InvalidType);
-                            }
-                            self.state = TxParserState::PtbInputCount {
-                                uleb: UlebParser::new(),
-                            };
-                        }
-                        None => {}
-                    }
-                    cursor += 1;
                 }
                 
                 // ========== PTB Inputs ==========
@@ -852,21 +834,9 @@ fn parse_call_arg(
                     };
                 }
                 Some(1) => {
-                    // ImmOrOwnedObject
-                    *s = CallArgParserState::ReadingObjectId {
-                        parser: ByteArrayParser::new(),
-                    };
-                }
-                Some(2) => {
-                    // SharedObject
-                    *s = CallArgParserState::ReadingSharedObjectId {
-                        parser: ByteArrayParser::new(),
-                    };
-                }
-                Some(3) => {
-                    // Receiving
-                    *s = CallArgParserState::ReadingReceivingId {
-                        parser: ByteArrayParser::new(),
+                    // Object - need to read inner ObjectArg variant
+                    *s = CallArgParserState::ReadingObjectArgType {
+                        uleb: UlebParser::new(),
                     };
                 }
                 Some(_) => return Err(ParseError::InvalidType),
@@ -886,6 +856,33 @@ fn parse_call_arg(
                         remaining: len as usize,
                     };
                 }
+                None => {}
+            }
+            cursor += 1;
+        }
+        
+        // ObjectArg sub-variant dispatch
+        CallArgParserState::ReadingObjectArgType { uleb } => {
+            match uleb.feed_byte(chunk[cursor])? {
+                Some(0) => {
+                    // ImmOrOwnedObject
+                    *s = CallArgParserState::ReadingObjectId {
+                        parser: ByteArrayParser::new(),
+                    };
+                }
+                Some(1) => {
+                    // SharedObject
+                    *s = CallArgParserState::ReadingSharedObjectId {
+                        parser: ByteArrayParser::new(),
+                    };
+                }
+                Some(2) => {
+                    // Receiving
+                    *s = CallArgParserState::ReadingReceivingId {
+                        parser: ByteArrayParser::new(),
+                    };
+                }
+                Some(_) => return Err(ParseError::InvalidType),
                 None => {}
             }
             cursor += 1;
@@ -911,25 +908,25 @@ fn parse_call_arg(
             
             if let Some(object_id) = result {
                 *s = CallArgParserState::ReadingObjectVersion {
-                    uleb: UlebParser::new(),
+                    parser: ByteArrayParser::new(),
                     object_id,
                 };
             }
         }
         
-        CallArgParserState::ReadingObjectVersion { uleb, object_id } => {
-            match uleb.feed_byte_u64(chunk[cursor])? {
-                Some(version) => {
-                    let oid = *object_id;
-                    *s = CallArgParserState::ReadingObjectDigest {
-                        parser: ByteArrayParser::new(),
-                        object_id: oid,
-                        version,
-                    };
-                }
-                None => {}
+        CallArgParserState::ReadingObjectVersion { parser, object_id } => {
+            let (consumed, result) = parser.feed(&chunk[cursor..]);
+            cursor += consumed;
+            
+            if let Some(bytes) = result {
+                let version = u64::from_le_bytes(bytes);
+                let oid = *object_id;
+                *s = CallArgParserState::ReadingObjectDigest {
+                    parser: ByteArrayParser::new(),
+                    object_id: oid,
+                    version,
+                };
             }
-            cursor += 1;
         }
         
         CallArgParserState::ReadingObjectDigest { parser, object_id, version } => {
@@ -954,24 +951,24 @@ fn parse_call_arg(
             
             if let Some(object_id) = result {
                 *s = CallArgParserState::ReadingSharedVersion {
-                    uleb: UlebParser::new(),
+                    parser: ByteArrayParser::new(),
                     object_id,
                 };
             }
         }
         
-        CallArgParserState::ReadingSharedVersion { uleb, object_id } => {
-            match uleb.feed_byte_u64(chunk[cursor])? {
-                Some(version) => {
-                    let oid = *object_id;
-                    *s = CallArgParserState::ReadingSharedMutable {
-                        object_id: oid,
-                        version,
-                    };
-                }
-                None => {}
+        CallArgParserState::ReadingSharedVersion { parser, object_id } => {
+            let (consumed, result) = parser.feed(&chunk[cursor..]);
+            cursor += consumed;
+            
+            if let Some(bytes) = result {
+                let version = u64::from_le_bytes(bytes);
+                let oid = *object_id;
+                *s = CallArgParserState::ReadingSharedMutable {
+                    object_id: oid,
+                    version,
+                };
             }
-            cursor += 1;
         }
         
         CallArgParserState::ReadingSharedMutable { object_id, version } => {
@@ -998,25 +995,25 @@ fn parse_call_arg(
             
             if let Some(object_id) = result {
                 *s = CallArgParserState::ReadingReceivingVersion {
-                    uleb: UlebParser::new(),
+                    parser: ByteArrayParser::new(),
                     object_id,
                 };
             }
         }
         
-        CallArgParserState::ReadingReceivingVersion { uleb, object_id } => {
-            match uleb.feed_byte_u64(chunk[cursor])? {
-                Some(version) => {
-                    let oid = *object_id;
-                    *s = CallArgParserState::ReadingReceivingDigest {
-                        parser: ByteArrayParser::new(),
-                        object_id: oid,
-                        version,
-                    };
-                }
-                None => {}
+        CallArgParserState::ReadingReceivingVersion { parser, object_id } => {
+            let (consumed, result) = parser.feed(&chunk[cursor..]);
+            cursor += consumed;
+            
+            if let Some(bytes) = result {
+                let version = u64::from_le_bytes(bytes);
+                let oid = *object_id;
+                *s = CallArgParserState::ReadingReceivingDigest {
+                    parser: ByteArrayParser::new(),
+                    object_id: oid,
+                    version,
+                };
             }
-            cursor += 1;
         }
         
         CallArgParserState::ReadingReceivingDigest { parser, object_id, version } => {
