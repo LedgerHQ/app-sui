@@ -1959,7 +1959,6 @@ pub enum KnownTx {
     },
 }
 
-#[cfg(feature = "speculos")]
 use crate::crypto_helpers::common::HexSlice;
 
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(

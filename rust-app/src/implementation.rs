@@ -25,7 +25,6 @@ use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
 use ledger_parser_combinators::schema::*;
 
-#[cfg(feature = "speculos")]
 use crate::crypto_helpers::common::HexSlice;
 
 use core::convert::TryFrom;

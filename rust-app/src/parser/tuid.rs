@@ -11,7 +11,6 @@ use ledger_device_sdk::tlv::tlv_generic::{
 };
 use ledger_device_sdk::tlv::TlvError;
 
-#[cfg(feature = "speculos")]
 use crate::crypto_helpers::common::HexSlice;
 
 // Tags

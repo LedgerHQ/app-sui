@@ -1,4 +1,3 @@
-#[cfg(feature = "speculos")]
 use crate::crypto_helpers::common::HexSlice;
 use crate::crypto_helpers::hasher::HexHash;
 use crate::parser::common::*;
