@@ -1,6 +1,6 @@
 [package]
 name = "sui"
-version = "1.5.0"
+version = "1.5.1"
 authors = ["Obsidian Systems"]
 edition = "2021"
 autobins = false
@@ -31,10 +31,10 @@ default = []
 speculos = [ "ledger_device_sdk/unit_test", "ledger_device_sdk/debug", "ledger_device_sdk/log_trace" ]
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = { version = "1.32.0", features=["sys", "nano_nbgl"] }
+ledger_device_sdk = { version = "1.33.1", features=["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.32.0"
+version = "1.33.1"
 features = [ "sys", "nano_nbgl", "unit_test" ]
 
 [[bin]]
