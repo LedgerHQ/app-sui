@@ -1,0 +1,14 @@
+[package]
+name = "tx_generator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sui_sdk = { git = "https://github.com/mystenlabs/sui", package = "sui-sdk"}
+#tokio = { version = "1.2", features = ["full"] }
+anyhow = "1.0"
+base64 = "0.22.1"
+shared_crypto = { git = "https://github.com/mystenlabs/sui", package = "shared-crypto" }
+sui_types = { git = "https://github.com/mystenlabs/sui", package = "sui-types"}
+bcs = "0.1.6"
+bs58 = "0.5.1"

@@ -397,7 +397,7 @@ impl HasObjectData for WithObjectData {
                         if hash.0 == digest[1..33] {
                             info!(
                                 "get_object_data: found object with digest {}",
-                                HexSlice(digest)
+                                HexSlice(&digest[1..33])
                             );
                             // Found object, now try to parse
                             return NoinlineFut(TryFuture(
@@ -408,7 +408,7 @@ impl HasObjectData for WithObjectData {
                     }
                     info!(
                         "get_object_data: did not find object with digest {}",
-                        HexSlice(digest)
+                        HexSlice(&digest[1..33])
                     );
                     None
                 }
