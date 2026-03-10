@@ -6,6 +6,13 @@ import time
 import base64
 
 from application_client.client import Client, Errors
+from application_client.sui import SuiClient
+from application_client.sui_utils import (
+    USDC_AMOUNT,
+    FEES,
+    OWNED_ADDRESS,
+    sui_pack_derivation_path,
+)
 from contextlib import contextmanager
 from ragger.error import ExceptionRAPDU
 from ragger.navigator import NavIns, NavInsID
@@ -80,6 +87,58 @@ from utils import ROOT_SCREENSHOT_PATH, check_signature_validity, run_apdu_and_n
 #   version: 497299318,
 #   bcsBytes: '07qpekaiDWXxvmDLqhYIVuaq5QeOFlRQceL9PjFBBbm3hgEAAAAAAA=='
 # }
+
+def test_sign_tx_usdc_empty_gas_payment_sip58(backend, scenario_navigator, firmware, navigator):
+    """SIP-58: Sign USDC transfer with empty gas_data.payment (gas from address balance)."""
+    client = Client(backend, use_block_protocol=True)
+    sui = SuiClient(backend, verbose=False)
+    path = "m/44'/784'/0'/0'/0'"
+
+    client.provide_dynamic_token(
+        "USDC", 6,
+        "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7",
+        "usdc", "USDC"
+    )
+
+    _, public_key, _, _ = client.get_public_key(path=path)
+    assert len(public_key) == 32
+
+    [transaction, object_list] = sui.build_simple_transaction_empty_gas_payment(
+        OWNED_ADDRESS,
+        "0x6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e21",
+        USDC_AMOUNT,
+        FEES,
+    )
+
+    def apdu_task():
+        return client.sign_tx(path=path, transaction=transaction, object_list=object_list)
+
+    def nav_task():
+        if firmware.device.startswith("nano"):
+            navigator.navigate_and_compare(
+                instructions=[
+                    NavInsID.RIGHT_CLICK,  # Review
+                    NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, # From,
+                    NavInsID.RIGHT_CLICK, NavInsID.RIGHT_CLICK, # To
+                    NavInsID.RIGHT_CLICK,  # Amount
+                    NavInsID.RIGHT_CLICK,  # Max Gas
+                    NavInsID.BOTH_CLICK
+                ],
+                timeout=15,
+                test_case_name=scenario_navigator.test_name,
+                path=scenario_navigator.screenshot_path,
+                screen_change_before_first_instruction=True,
+                screen_change_after_last_instruction=False,
+            )
+        else:
+            scenario_navigator.review_approve()
+
+    def check_result(result):
+        assert len(result) == 64
+        assert check_signature_validity(public_key, result, transaction)
+
+    run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, check_result)
+
 
 def test_sign_tx_usdc_whole_coin(backend, scenario_navigator, firmware, navigator):
     client = Client(backend, use_block_protocol=True)
@@ -205,7 +264,7 @@ def test_sign_tx_wusdc_whole_coin(backend, scenario_navigator, firmware, navigat
                                , NavInsID.RIGHT_CLICK # Max Gas
                                , NavInsID.BOTH_CLICK
                               ]
-                , timeout=10
+                , timeout=15
                 , test_case_name=scenario_navigator.test_name
                 , path=scenario_navigator.screenshot_path
                 , screen_change_before_first_instruction=True
