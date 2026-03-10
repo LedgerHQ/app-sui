@@ -64,12 +64,13 @@ impl UserInterface {
             name: "To",
             value: &format!("0x{}", HexSlice(&recipient)),
         };
-        let (gas_quotient, gas_remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-        let gas_value = format!("SUI {}.{}", gas_quotient, gas_remainder_str.as_str());
         let gas = Field {
             name: "Max Gas",
-            value: gas_value.as_str(),
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
         };
         let ((amt_str, amt_val), coin_fields) =
             get_coin_and_amount_fields(total_amount, coin_type, ctx);
@@ -126,12 +127,13 @@ impl UserInterface {
                 &format!("0x{}", HexSlice(&recipient))
             },
         };
-        let (gas_quotient, gas_remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-        let gas_value = format!("SUI {}.{}", gas_quotient, gas_remainder_str.as_str());
         let gas = Field {
             name: "Max Gas",
-            value: gas_value.as_str(),
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
@@ -170,12 +172,13 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
-        let (gas_quotient, gas_remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-        let gas_value = format!("SUI {}.{}", gas_quotient, gas_remainder_str.as_str());
         let gas = Field {
             name: "Max Gas",
-            value: gas_value.as_str(),
+            value: {
+                let (quotient, remainder_str) =
+                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+                &format!("SUI {}.{}", quotient, remainder_str.as_str())
+            },
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
