@@ -5,8 +5,7 @@ import concurrent.futures
 import time
 import base64
 
-from application_client.client import Client, Errors
-from application_client.sui import SuiClient
+from application_client.client import Client, Errors, build_simple_transaction_empty_gas_payment
 from application_client.sui_utils import (
     USDC_AMOUNT,
     FEES,
@@ -91,7 +90,6 @@ from utils import ROOT_SCREENSHOT_PATH, check_signature_validity, run_apdu_and_n
 def test_sign_tx_usdc_empty_gas_payment_sip58(backend, scenario_navigator, firmware, navigator):
     """SIP-58: Sign USDC transfer with empty gas_data.payment (gas from address balance)."""
     client = Client(backend, use_block_protocol=True)
-    sui = SuiClient(backend, verbose=False)
     path = "m/44'/784'/0'/0'/0'"
 
     client.provide_dynamic_token(
@@ -103,7 +101,7 @@ def test_sign_tx_usdc_empty_gas_payment_sip58(backend, scenario_navigator, firmw
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32
 
-    [transaction, object_list] = sui.build_simple_transaction_empty_gas_payment(
+    transaction, object_list = build_simple_transaction_empty_gas_payment(
         OWNED_ADDRESS,
         "0x6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e21",
         USDC_AMOUNT,

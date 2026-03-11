@@ -1,8 +1,27 @@
+import base64
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 from hashlib import sha256
 from struct import unpack
 
+from pysui_tx.bcs import (
+    Address,
+    Argument,
+    CallArg,
+    Command,
+    Digest,
+    GasData,
+    Intent,
+    ObjectArg,
+    ObjectReference,
+    ProgrammableTransaction,
+    SplitCoin,
+    TransactionData,
+    TransactionDataV1,
+    TransactionExpiration,
+    TransactionKind,
+    TransferObjects,
+)
 from ragger.backend.interface import BackendInterface, RAPDU
 from ragger.error import ExceptionRAPDU
 from bip_utils import Bip32Utils
@@ -13,6 +32,7 @@ from contextlib import contextmanager
 
 from .tlv import format_tlv
 from .sui_keychain import Key, sign_data
+from .sui_utils import USDC_OBJECTS_BY_AMOUNT
 
 # https://ledgerhq.atlassian.net/wiki/spaces/TA/pages/6196265191/Sui+Token+Dynamic+Descriptor#2nd-solution
 class DynamicTokenTag_TUID(IntEnum):
@@ -69,6 +89,79 @@ DYNAMIC_TOKEN = 0x90
 
 def split_message(message: bytes, max_size: int) -> List[bytes]:
     return [message[x:x + max_size] for x in range(0, len(message), max_size)]
+
+
+def build_simple_transaction_empty_gas_payment(
+    sender_addr: str, destination: str, send_amount: int, fees: int
+) -> Tuple[bytes, List[bytes]]:
+    """
+    Build a TransferToken transaction with empty gas_data.payment (SIP-58).
+    Gas is paid from address balance. Uses Input(0) for the coin, not GasCoin.
+    Returns (transaction_bytes, object_list).
+    """
+    gas_budget = fees
+
+    intent_bsc = Intent.encode(Intent.from_list([0, 0, 0]))
+    tx = intent_bsc
+
+    amount_bytes = list(send_amount.to_bytes(8, byteorder="little"))
+    recepient_addr = list(bytes.fromhex(destination[2:]))
+
+    obj_info = USDC_OBJECTS_BY_AMOUNT[send_amount]
+    object_list = [base64.b64decode(obj_info["obj"])]
+
+    tx_data_v1 = TransactionDataV1(
+        TransactionKind=TransactionKind(
+            "ProgrammableTransaction",
+            ProgrammableTransaction(
+                Inputs=[
+                    CallArg(
+                        "Object",
+                        ObjectArg(
+                            "ImmOrOwnedObject",
+                            ObjectReference(
+                                ObjectID=Address.from_str(obj_info["object_id"]),
+                                SequenceNumber=obj_info["version"],
+                                ObjectDigest=Digest.from_str(obj_info["digest"]),
+                            ),
+                        ),
+                    ),
+                    CallArg("Pure", amount_bytes),
+                    CallArg("Pure", recepient_addr),
+                ],
+                Command=[
+                    Command(
+                        "SplitCoin",
+                        SplitCoin(
+                            FromCoin=Argument("Input", 0),
+                            Amount=[Argument("Input", 1)],
+                        ),
+                    ),
+                    Command(
+                        "TransferObjects",
+                        TransferObjects(
+                            Objects=[Argument("Result", 0)],
+                            Address=Argument("Input", 2),
+                        ),
+                    ),
+                ],
+            ),
+        ),
+        Sender=Address.from_str(sender_addr),
+        GasData=GasData(
+            Payment=[],  # SIP-58: empty payment, gas from address balance
+            Owner=Address.from_str(sender_addr),
+            Price=1,
+            Budget=gas_budget,
+        ),
+        TransactionExpiration=TransactionExpiration("None"),
+    )
+
+    tx_data = TransactionData("V1", tx_data_v1)
+    tx += TransactionData.encode(tx_data)
+
+    return (tx, object_list)
+
 
 class PKIClient:
     _CLA: int = 0xB0
