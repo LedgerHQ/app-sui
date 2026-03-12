@@ -137,6 +137,8 @@ For clear signing of certain transactions in which the coin type and amount bein
 It is advisable to provide the object data of all the coin type objects referenced in "gas_payment" and "inputs" of the transaction.
 In the abscence of this info the user may get a blind signing prompt.
 
+**SIP-58**: The app supports transactions with empty `gas_data.payment` (gas paid from address balance). In that case, parameter 3 may be omitted or contain only objects from "inputs".
+
 | Length             | Name               | Description                     |
 |--------------------|--------------------|---------------------------------|
 | `4`                | `n`                | Number of objects (big endian)  |

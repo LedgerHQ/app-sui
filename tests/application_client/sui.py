@@ -210,7 +210,6 @@ class SuiClient:
 
         return [tx, object_list]
 
-
     def sign_transaction(self, path: bytes, txn: Union[str, bytes, bytearray], object_list: Optional[list[bytes]] = None) -> bytes:
         """
         Sign a transaction with the key at a BIP32 path.

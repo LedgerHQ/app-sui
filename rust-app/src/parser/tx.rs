@@ -35,8 +35,9 @@ pub struct ArgumentSchema;
 pub struct CallArgSchema;
 
 pub const MAX_GAS_COIN_COUNT: usize = 32;
+/// GasData schema. SIP-58: payment can be empty when gas is paid from address balance.
 pub type GasDataSchema = (
-    Vec<ObjectRefSchema, MAX_GAS_COIN_COUNT>, // payment
+    Vec<ObjectRefSchema, MAX_GAS_COIN_COUNT>, // payment (may be empty per SIP-58)
     SuiAddress,                               // owner
     Amount,                                   // price
     Amount,                                   // budget
@@ -1907,8 +1908,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 
                     let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
 
-                    // Try to find the total amount of all gas payment objects
-                    // This value may be necessary if the transaction contains transfer of entire GasCoin
+                    // Try to find the total amount of all gas payment objects.
+                    // This value may be necessary if the transaction contains transfer of entire GasCoin.
+                    // SIP-58: gas_coins may be empty (gas paid from address balance); total_gas_amount = Some(0).
                     let mut total_gas_amount: Option<u64> = Some(0);
                     for digest in gas_coins {
                         if let Some(amt0) = total_gas_amount {
