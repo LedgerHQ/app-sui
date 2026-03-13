@@ -1,0 +1,7 @@
+ragger[tests,speculos] >= 1.36.1
+protobuf
+ledger_app_clients.ethereum
+ledger_app_clients.exchange >= 0.0.4
+GitPython
+pysui_tx @ git+https://github.com/Fingolfin69/pysui_tx@main
+deprecated
