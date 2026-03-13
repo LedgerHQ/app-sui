@@ -1,0 +1,19 @@
+[package]
+name = "valid-during-tx"
+version = "0.1.0"
+edition = "2021"
+description = "Build a ValidDuring (address balance gas) transaction using Sui TestTransactionBuilder"
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+bcs = "0.1"
+
+# Sui - path to sibling sui repo
+sui-test-transaction-builder = { path = "../../../sui/crates/sui-test-transaction-builder" }
+shared-crypto = { path = "../../../sui/crates/shared-crypto" }
+sui-types = { path = "../../../sui/crates/sui-types" }
+
+[lib]
+name = "valid_during_tx"
+path = "src/lib.rs"
