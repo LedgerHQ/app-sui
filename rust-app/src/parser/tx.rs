@@ -46,13 +46,14 @@ pub type GasDataSchema = (
 pub struct TransactionExpiration;
 pub type EpochId = U64<{ Endianness::Little }>;
 
+// ValidDuring (SIP-58): min_epoch, max_epoch, min_timestamp, max_timestamp, chain, nonce
 pub type ValidDuringSchema = (
-    Option<U64LE>, // min_epoch
-    Option<U64LE>, // max_epoch
-    Option<U64LE>, // min_timestamp
-    Option<U64LE>, // max_timestamp
-    SuiAddress,    // ChainIdentifier (CheckpointDigest)
-    U32LE,         // nonce
+    Option<Amount>,
+    Option<Amount>,
+    Option<Amount>,
+    Option<Amount>,
+    SuiAddress, // ChainIdentifier (CheckpointDigest)
+    U32LE,      // nonce
 );
 
 pub type SharedObject = (
@@ -1822,8 +1823,22 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                 }
                 2 => {
                     info!("TransactionExpiration: ValidDuring (SIP-58)");
-                    <DefaultInterp as AsyncParser<ValidDuringSchema, BS>>::parse(
-                        &DefaultInterp,
+                    <(
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        DefaultInterp,
+                        DefaultInterp,
+                    ) as AsyncParser<ValidDuringSchema, BS>>::parse(
+                        &(
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            DefaultInterp,
+                            DefaultInterp,
+                        ),
                         input,
                     )
                     .await;
