@@ -46,6 +46,7 @@ impl UserInterface {
         }
     }
 
+    #[allow(clippy::too_many_arguments)] // TODO: Refactor fn to comply with this lint
     pub fn confirm_sign_tx(
         &self,
         address: &SuiPubKeyAddress,
@@ -65,8 +66,7 @@ impl UserInterface {
             name: "To",
             value: &format!("0x{}", HexSlice(&recipient)),
         };
-        let (quotient, remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
         let gas_val = if gas_from_address_balance {
             format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
         } else {
@@ -132,8 +132,7 @@ impl UserInterface {
                 &format!("0x{}", HexSlice(&recipient))
             },
         };
-        let (quotient, remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
         let gas_val = if gas_from_address_balance {
             format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
         } else {
@@ -181,8 +180,7 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
-        let (quotient, remainder_str) =
-            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
         let gas_val = if gas_from_address_balance {
             format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
         } else {
