@@ -86,10 +86,19 @@ async fn prompt_tx_params(
         destination_address,
     }: TxParams,
     coin_type: CoinType,
+    gas_from_address_balance: bool,
     ctx: &RunCtx,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee, ctx))
+        try_option(ui.confirm_sign_tx(
+            address,
+            destination_address,
+            amount,
+            coin_type,
+            fee,
+            gas_from_address_balance,
+            ctx,
+        ))
     })
     .ok()
     .is_none()
@@ -139,6 +148,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             total_amount,
             coin_type,
             gas_budget,
+            gas_from_address_balance,
         }) => {
             let mut bs = input[1].clone();
             let path = BIP_PATH_PARSER.parse(&mut bs).await;
@@ -162,6 +172,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     path.as_slice(),
                     tx_params,
                     coin_type,
+                    gas_from_address_balance,
                     ctx,
                 ))
                 .await;
@@ -171,6 +182,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             recipient,
             total_amount,
             gas_budget,
+            gas_from_address_balance,
         }) => {
             if ctx.is_swap() {
                 reject::<()>(SyscallError::NotSupported as u16).await;
@@ -182,7 +194,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_stake_tx(address, recipient, total_amount, gas_budget))
+                try_option(ui.confirm_stake_tx(
+                    address,
+                    recipient,
+                    total_amount,
+                    gas_budget,
+                    gas_from_address_balance,
+                ))
             })
             .ok()
             .is_none()
@@ -193,6 +211,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         Some(KnownTx::UnstakeTx {
             total_amount,
             gas_budget,
+            gas_from_address_balance,
         }) => {
             if ctx.is_swap() {
                 reject::<()>(SyscallError::NotSupported as u16).await;
@@ -204,7 +223,12 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_unstake_tx(address, total_amount, gas_budget))
+                try_option(ui.confirm_unstake_tx(
+                    address,
+                    total_amount,
+                    gas_budget,
+                    gas_from_address_balance,
+                ))
             })
             .ok()
             .is_none()

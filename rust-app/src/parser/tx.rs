@@ -46,6 +46,15 @@ pub type GasDataSchema = (
 pub struct TransactionExpiration;
 pub type EpochId = U64<{ Endianness::Little }>;
 
+pub type ValidDuringSchema = (
+    Option<U64LE>, // min_epoch
+    Option<U64LE>, // max_epoch
+    Option<U64LE>, // min_timestamp
+    Option<U64LE>, // max_timestamp
+    SuiAddress,    // ChainIdentifier (CheckpointDigest)
+    U32LE,         // nonce
+);
+
 pub type SharedObject = (
     ObjectID,       // id
     SequenceNumber, // initial_shared_version
@@ -61,8 +70,8 @@ pub type AppId = ULEB128;
 
 // Parsed data
 
-// Gas Budget + total gas coin amount (if known)
-pub type GasData = (u64, Option<u64>);
+// Gas Budget + total gas coin amount (if known) + SIP-58: gas from address balance
+pub type GasData = (u64, Option<u64>, bool);
 
 // Tx Parsers
 
@@ -1778,11 +1787,21 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKin
     }
 }
 
-impl HasOutput<TransactionExpiration> for DefaultInterp {
-    type Output = ();
+/// Parsed TransactionExpiration variant. SIP-58: ValidDuring required for stateless tx (empty gas payment).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TransactionExpirationVariant {
+    None,
+    Epoch,
+    ValidDuring,
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInterp {
+pub struct TransactionExpirationParser;
+
+impl HasOutput<TransactionExpiration> for TransactionExpirationParser {
+    type Output = TransactionExpirationVariant;
+}
+
+impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for TransactionExpirationParser {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
@@ -1794,10 +1813,21 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
             match enum_variant {
                 0 => {
                     info!("TransactionExpiration: None");
+                    TransactionExpirationVariant::None
                 }
                 1 => {
                     info!("TransactionExpiration: Epoch");
                     <DefaultInterp as AsyncParser<EpochId, BS>>::parse(&DefaultInterp, input).await;
+                    TransactionExpirationVariant::Epoch
+                }
+                2 => {
+                    info!("TransactionExpiration: ValidDuring (SIP-58)");
+                    <DefaultInterp as AsyncParser<ValidDuringSchema, BS>>::parse(
+                        &DefaultInterp,
+                        input,
+                    )
+                    .await;
+                    TransactionExpirationVariant::ValidDuring
                 }
                 _ => {
                     reject_on(
@@ -1900,10 +1930,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 
                     // Try to find the total amount of all gas payment objects
                     // This value may be necessary if the transaction contains transfer of entire GasCoin
+                    // SIP-58: gas_coins may be empty (gas paid from address balance)
                     let mut total_gas_amount: Option<u64> = Some(0);
-                    for digest in gas_coins {
+                    for digest in gas_coins.iter() {
                         if let Some(amt0) = total_gas_amount {
-                            let coin_data = self.object_data_source.get_object_data(&digest).await;
+                            let coin_data = self.object_data_source.get_object_data(digest).await;
                             match coin_data {
                                 Some((_, amt)) => total_gas_amount = Some(amt0 + amt),
                                 _ => total_gas_amount = None,
@@ -1911,13 +1942,24 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         }
                     }
 
-                    <DefaultInterp as AsyncParser<TransactionExpiration, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
+                    let expiration = TransactionExpirationParser.parse(input).await;
 
-                    (v, (gas_budget, total_gas_amount))
+                    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
+                    if gas_coins.is_empty()
+                        && expiration != TransactionExpirationVariant::ValidDuring
+                    {
+                        info!("Empty gas payment requires ValidDuring expiration (SIP-58)");
+                        reject_on::<u64>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    let gas_from_address_balance = gas_coins.is_empty();
+
+                    (v, (gas_budget, total_gas_amount, gas_from_address_balance))
                 }
                 _ => {
                     reject_on(
@@ -1938,15 +1980,19 @@ pub enum KnownTx {
         coin_type: CoinType,
         total_amount: u64,
         gas_budget: u64,
+        /// SIP-58: true when gas paid from address balance (empty gas_data.payment)
+        gas_from_address_balance: bool,
     },
     StakeTx {
         recipient: SuiAddressRaw,
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     },
     UnstakeTx {
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     },
 }
 
@@ -1971,7 +2017,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
                         // total value of all gas payment objects
@@ -1985,6 +2031,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         coin_type: SUI_COIN_TYPE,
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::TransferTokenTx {
@@ -1992,12 +2039,13 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     coin_type,
                 } => {
-                    let (gas_budget, _) = d.1;
+                    let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::TransferTx {
                         recipient,
                         coin_type,
                         total_amount: amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::StakeTx {
@@ -2005,7 +2053,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
                         // total value of all gas payment objects
@@ -2018,13 +2066,15 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         recipient,
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::UnstakeTx { total_amount } => {
-                    let (gas_budget, _) = d.1;
+                    let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::UnstakeTx {
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
             }

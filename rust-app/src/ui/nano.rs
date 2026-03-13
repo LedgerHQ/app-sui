@@ -48,6 +48,7 @@ impl UserInterface {
         total_amount: u64,
         coin_type: CoinType,
         gas_budget: u64,
+        gas_from_address_balance: bool,
         ctx: &RunCtx,
     ) -> Option<()> {
         let from = Field {
@@ -58,13 +59,16 @@ impl UserInterface {
             name: "To",
             value: &format!("0x{}", HexSlice(&recipient)),
         };
+        let (quotient, remainder_str) =
+            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let gas_val = if gas_from_address_balance {
+            format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
+        } else {
+            format!("SUI {}.{}", quotient, remainder_str.as_str())
+        };
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
         let ((amt_str, amt_val), coin_fields) =
             get_coin_and_amount_fields(total_amount, coin_type, ctx);
@@ -108,6 +112,7 @@ impl UserInterface {
         recipient: [u8; 32],
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     ) -> Option<()> {
         let from = Field {
             name: "From",
@@ -121,13 +126,16 @@ impl UserInterface {
                 &format!("0x{}", HexSlice(&recipient))
             },
         };
+        let (quotient, remainder_str) =
+            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let gas_val = if gas_from_address_balance {
+            format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
+        } else {
+            format!("SUI {}.{}", quotient, remainder_str.as_str())
+        };
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
@@ -161,18 +169,22 @@ impl UserInterface {
         address: &SuiPubKeyAddress,
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     ) -> Option<()> {
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        let (quotient, remainder_str) =
+            get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+        let gas_val = if gas_from_address_balance {
+            format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
+        } else {
+            format!("SUI {}.{}", quotient, remainder_str.as_str())
+        };
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);

@@ -8,6 +8,7 @@ description = "Build a ValidDuring (address balance gas) transaction using Sui T
 anyhow = "1.0"
 base64 = "0.22"
 bcs = "0.1"
+hex = "0.4"
 
 # Sui - path to sibling sui repo
 sui-test-transaction-builder = { path = "../../../sui/crates/sui-test-transaction-builder" }

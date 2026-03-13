@@ -10031,6 +10031,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "bcs",
+ "hex",
  "shared-crypto",
  "sui-test-transaction-builder",
  "sui-types",

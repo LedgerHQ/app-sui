@@ -22,6 +22,7 @@ pub type Amount = U64LE;
 
 pub type U64LE = U64<{ Endianness::Little }>;
 pub type U16LE = U16<{ Endianness::Little }>;
+pub type U32LE = U32<{ Endianness::Little }>;
 
 pub type Sha3_256Hash = Array<Byte, 33>;
 
