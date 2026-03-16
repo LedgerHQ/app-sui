@@ -23,7 +23,7 @@ where
                 reject_on(core::file!(), core::line!(), PARSE_ERROR_CODE).await
             }
             accumulator += core::convert::Into::<T>::into(current & 0x7f)
-                << core::convert::From::from(7 * n as u8);
+                << core::convert::From::from(7 * n);
             n += 1;
             if current & 0x80 == 0 {
                 return accumulator;

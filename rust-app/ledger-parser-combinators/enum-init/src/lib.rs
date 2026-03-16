@@ -1,7 +1,5 @@
-use inflector;
 use proc_macro::TokenStream;
 use quote::{format_ident, quote}; // , quote_spanned};
-use syn;
 
 #[proc_macro_derive(InPlaceInit)]
 pub fn derive_in_place_set(input: TokenStream) -> TokenStream {
@@ -212,12 +210,12 @@ fn filter_generics_for_use(fields: &syn::Fields, generics: &syn::Generics) -> sy
                 .iter()
                 .any(|field| search_type_for_generic(&field.ty, generic))
         })
-        .map(|x| x.clone())
+        .cloned()
         .collect();
     syn::Generics {
-        lt_token: generics.lt_token.clone(),
+        lt_token: generics.lt_token,
         params: filtered_params,
-        gt_token: generics.gt_token.clone(),
+        gt_token: generics.gt_token,
         where_clause: generics.where_clause.clone(),
     }
 }
@@ -269,7 +267,7 @@ fn search_path_arguments_for_generic(
                         .any(|ty| search_type_for_generic(ty, generic_in))
                         || match &path.output {
                             Default => false, // Can't really infer to a generic argument in a type declaration, I think.
-                            Type(_, rv_ty) => search_type_for_generic(&*rv_ty, generic_in),
+                            Type(_, rv_ty) => search_type_for_generic(rv_ty, generic_in),
                         }
                 }
             }
