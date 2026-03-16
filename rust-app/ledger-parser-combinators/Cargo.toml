@@ -12,15 +12,15 @@ opt-level = 0
 opt-level = 0
 
 [dependencies]
-arrayvec = { version = "0.7.1", default-features = false }
+arrayvec = { workspace = true }
 generic-array = { version = "0.14.4", default-features = false }
-paste = "1.0"
+paste = { workspace = true }
 bstringify = "0.1.2"
 enum-init = { path = "./enum-init" }
 num-traits = { version = "0.2.14", default-features = false }
 num-derive = "0.3.3"
 trie-enum = { path = "./trie-enum" }
-pin-project = "1.0.12"
+pin-project = { workspace = true }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies]
 testmacro = "0.1.0"
