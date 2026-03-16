@@ -427,9 +427,7 @@ impl<A, R, S: ParserCommon<A>> ParserCommon<A>
             core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
                 as *mut core::mem::MaybeUninit<<S as ParserCommon<A>>::State>
         });
-        call_fn(|| unsafe {
-            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None)
-        });
+        call_fn(|| unsafe { core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None) });
     }
 }
 
@@ -493,12 +491,8 @@ impl<A, R, S: ParserCommon<A>, C> ParserCommon<A>
             core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
                 as *mut core::mem::MaybeUninit<<S as ParserCommon<A>>::State>
         });
-        call_fn(|| unsafe {
-            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None)
-        });
-        call_fn(|| unsafe {
-            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).2).write(None)
-        });
+        call_fn(|| unsafe { core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None) });
+        call_fn(|| unsafe { core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).2).write(None) });
     }
 }
 
@@ -565,9 +559,7 @@ impl<A, R, S: ParserCommon<A>> ParserCommon<A>
             core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
                 as *mut core::mem::MaybeUninit<<S as ParserCommon<A>>::State>
         });
-        call_fn(|| unsafe {
-            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None)
-        });
+        call_fn(|| unsafe { core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).1).write(None) });
     }
 }
 
@@ -817,10 +809,9 @@ impl<A, B, S: DynParser<A>, T: DynParser<B, Parameter = S::Returning>> DynParser
         _destination: &mut Option<Self::Returning>,
     ) {
         self.init_in_place(unsafe {
-            core::mem::transmute::<
-                *mut Self::State,
-                *mut core::mem::MaybeUninit<Self::State>,
-            >(state as *mut Self::State)
+            core::mem::transmute::<*mut Self::State, *mut core::mem::MaybeUninit<Self::State>>(
+                state as *mut Self::State,
+            )
         });
         match state {
             DynBindState::BindFirst(ref mut s, ref mut sub_destination) => {

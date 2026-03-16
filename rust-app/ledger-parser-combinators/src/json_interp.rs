@@ -351,8 +351,7 @@ impl<T, S: ParserCommon<T>> ParserCommon<Json<T>> for Json<S> {
     }
     fn init_in_place(&self, state: *mut core::mem::MaybeUninit<Self::State>) {
         unsafe {
-            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
-                .write(JsonTokenizerState::Value);
+            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0).write(JsonTokenizerState::Value);
         }
         self.0.init_in_place(unsafe {
             core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
