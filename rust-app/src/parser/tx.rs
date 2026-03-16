@@ -8,7 +8,7 @@ use core::convert::TryFrom;
 use core::future::Future;
 use either::*;
 use ledger_device_sdk::io::SyscallError;
-use ledger_device_sdk::log::info;
+use ledger_device_sdk::log::{error, info};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
@@ -1968,12 +1968,13 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     }
 
                     let expiration = TransactionExpirationParser.parse(input).await;
+                    let gas_from_address_balance = gas_coins.is_empty();
 
                     // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
-                    if gas_coins.is_empty()
+                    if gas_from_address_balance
                         && expiration != TransactionExpirationVariant::ValidDuring
                     {
-                        info!("Empty gas payment requires ValidDuring expiration (SIP-58)");
+                        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
                         reject_on::<u64>(
                             core::file!(),
                             core::line!(),
@@ -1981,8 +1982,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         )
                         .await;
                     }
-
-                    let gas_from_address_balance = gas_coins.is_empty();
 
                     (v, (gas_budget, total_gas_amount, gas_from_address_balance))
                 }

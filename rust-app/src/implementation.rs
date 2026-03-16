@@ -3,9 +3,7 @@ use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_pu
 use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{
-    CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
-};
+use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx};
@@ -81,28 +79,9 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-async fn prompt_tx_params(
-    ui: &UserInterface,
-    path: &[u32],
-    TxParams {
-        amount,
-        fee,
-        destination_address,
-    }: TxParams,
-    coin_type: CoinType,
-    gas_from_address_balance: bool,
-    ctx: &RunCtx,
-) {
+async fn prompt_tx_params(ui: &UserInterface, path: &[u32], params: TxParams, ctx: &RunCtx) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(
-            address,
-            destination_address,
-            amount,
-            coin_type,
-            fee,
-            gas_from_address_balance,
-            ctx,
-        ))
+        try_option(ui.confirm_sign_tx(address, &params, ctx))
     })
     .ok()
     .is_none()
@@ -169,22 +148,15 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 amount: total_amount,
                 fee: gas_budget,
                 destination_address: recipient,
+                coin_type,
+                gas_from_address_balance,
             };
 
             if ctx.is_swap() {
                 let expected = ctx.get_swap_tx_params();
                 check_tx_params(expected, &tx_params).await;
             } else {
-                // Show prompts after all inputs have been parsed
-                NoinlineFut(prompt_tx_params(
-                    &ui,
-                    path.as_slice(),
-                    tx_params,
-                    coin_type,
-                    gas_from_address_balance,
-                    ctx,
-                ))
-                .await;
+                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, ctx)).await;
             }
         }
         Some(KnownTx::StakeTx {

@@ -114,7 +114,8 @@ mod tests {
 
     // From test_sign_sui_stake_1.py::test_sign_stake_gas_coin
     const STAKE_SENDER: &str = "0x1d3f2643305760226e518c9b5a96165383808dd977971f73dea971543b0be488";
-    const STAKE_VALIDATOR: &str = "0x35f5f154f0117464e3379c45c7f3cb6b2d4efedf300acadff8a7e8e9e3a15109";
+    const STAKE_VALIDATOR: &str =
+        "0x35f5f154f0117464e3379c45c7f3cb6b2d4efedf300acadff8a7e8e9e3a15109";
     const STAKE_GAS_OBJECT_ID: &str =
         "0xebff16b4d2081ab06d1d5251c988208641e5c501c7fa8bdce9c8b7b0908ba76b";
     const STAKE_GAS_VERSION: u64 = 289568469;
@@ -168,7 +169,8 @@ mod tests {
         let validator = SuiAddress::from_str(STAKE_VALIDATOR).expect("Invalid validator");
         let chain_id = ChainIdentifier::default();
 
-        let stake_coin_id = ObjectID::from_str(VALID_DURING_STAKE_COIN_ID).expect("Invalid coin id");
+        let stake_coin_id =
+            ObjectID::from_str(VALID_DURING_STAKE_COIN_ID).expect("Invalid coin id");
         let stake_coin_digest =
             ObjectDigest::from_str(VALID_DURING_STAKE_COIN_DIGEST).expect("Invalid digest");
         let stake_coin: ObjectRef = (
@@ -213,7 +215,8 @@ mod tests {
     }
 
     // From test_sign_sui_stake_3.py::test_sign_unstake_whole_coin (simplified: 1 gas coin)
-    const UNSTAKE_SENDER: &str = "0x1d3f2643305760226e518c9b5a96165383808dd977971f73dea971543b0be488";
+    const UNSTAKE_SENDER: &str =
+        "0x1d3f2643305760226e518c9b5a96165383808dd977971f73dea971543b0be488";
     const UNSTAKE_GAS_OBJECT_ID: &str =
         "0xebff16b4d2081ab06d1d5251c988208641e5c501c7fa8bdce9c8b7b0908ba76b";
     const UNSTAKE_GAS_VERSION: u64 = 289568469;
@@ -228,9 +231,14 @@ mod tests {
         let sender = SuiAddress::from_str(UNSTAKE_SENDER).expect("Invalid sender");
         let gas_id = ObjectID::from_str(UNSTAKE_GAS_OBJECT_ID).expect("Invalid gas id");
         let gas_digest = ObjectDigest::from_str(UNSTAKE_GAS_DIGEST).expect("Invalid digest");
-        let gas_object: ObjectRef = (gas_id, SequenceNumber::from(UNSTAKE_GAS_VERSION), gas_digest);
+        let gas_object: ObjectRef = (
+            gas_id,
+            SequenceNumber::from(UNSTAKE_GAS_VERSION),
+            gas_digest,
+        );
 
-        let delegation_id = ObjectID::from_str(UNSTAKE_DELEGATION_ID).expect("Invalid delegation id");
+        let delegation_id =
+            ObjectID::from_str(UNSTAKE_DELEGATION_ID).expect("Invalid delegation id");
         let delegation_digest =
             ObjectDigest::from_str(UNSTAKE_DELEGATION_DIGEST).expect("Invalid digest");
         let delegation: ObjectRef = (
@@ -264,7 +272,8 @@ mod tests {
         let sender = SuiAddress::from_str(UNSTAKE_SENDER).expect("Invalid sender");
         let chain_id = ChainIdentifier::default();
 
-        let delegation_id = ObjectID::from_str(UNSTAKE_DELEGATION_ID).expect("Invalid delegation id");
+        let delegation_id =
+            ObjectID::from_str(UNSTAKE_DELEGATION_ID).expect("Invalid delegation id");
         let delegation_digest =
             ObjectDigest::from_str(UNSTAKE_DELEGATION_DIGEST).expect("Invalid digest");
         let delegation: ObjectRef = (
