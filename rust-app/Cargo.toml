@@ -35,10 +35,10 @@ speculos = [
 ]
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = { version = "1.34.1", features = ["sys", "nano_nbgl"] }
+ledger_device_sdk = { version = "1.34.0", features = ["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.34.1"
+version = "1.34.0"
 features = ["sys", "nano_nbgl", "unit_test"]
 
 [[bin]]
