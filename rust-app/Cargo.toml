@@ -46,9 +46,10 @@ speculos = [
 ledger_device_sdk = { workspace = true, features = ["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies]
-ledger_device_sdk = { workspace = true, features = ["sys", "nano_nbgl", "unit_test"] }
 
-[[bin]]
+
+[[bin]]version = "1.34.0"
+features = ["sys", "nano_nbgl", "unit_test"]
 name = "sui"
 test = false
 path = "bin-src/main.rs"

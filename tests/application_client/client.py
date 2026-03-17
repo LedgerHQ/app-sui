@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 from hashlib import sha256
 from struct import unpack
 
-from pysui_tx.bcs import (
+from pysui.sui.sui_types.bcs import (
     Address,
     Argument,
     CallArg,
