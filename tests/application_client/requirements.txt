@@ -1,0 +1,2 @@
+# Application client: common + app-client-specific
+-r ../requirements.txt

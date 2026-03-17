@@ -4,8 +4,25 @@ import hashlib
 
 from enum import IntEnum
 from typing import Dict, List, Optional, Union
-from pysui_tx.bcs import Intent, TransactionData, Address, TransactionDataV1, GasData, TransactionExpiration, ObjectReference, Digest
-from pysui_tx.bcs import ProgrammableTransaction, CallArg, Command, SplitCoin, TransferObjects, TransactionKind, Argument, _DIGEST_LENGTH, ObjectArg
+from pysui.sui.sui_types.bcs import (
+    Intent,
+    TransactionData,
+    Address,
+    TransactionDataV1,
+    GasData,
+    TransactionExpiration,
+    ObjectReference,
+    Digest,
+    ProgrammableTransaction,
+    CallArg,
+    Command,
+    SplitCoin,
+    TransferObjects,
+    TransactionKind,
+    Argument,
+    ObjectArg,
+    _DIGEST_LENGTH,
+)
 from .sui_utils import USDC_OBJECTS_BY_AMOUNT
 
 from ragger.backend.interface import BackendInterface
