@@ -39,19 +39,16 @@ pub type StorageRebate = U64LE;
 pub const STRING_LENGTH: usize = 64;
 pub type String = Vec<Byte, STRING_LENGTH>;
 
-pub type StructTag = (SuiAddress, String, String, TypeParams);
-pub type TypeParams = Vec<TypeTag2, 5>;
+pub type StructTag = (SuiAddress, String, String, Vec<SkipTypeTag, 5>);
 
 pub struct TypeTag;
 
-// This is to avoid recursion of async parsers
-pub struct TypeTag2;
+/// Schema for skipping a type param. Iterative loop, no recursion, no heap.
+pub struct SkipTypeTag;
 
-// Depth-limited struct parsing for FundsWithdrawal type args (e.g. Balance<SUI>)
-pub type StructTagSkipLevel1 = (SuiAddress, String, String, Vec<TypeTag2SkipLevel2, 5>);
-pub type StructTagSkipLevel0 = (SuiAddress, String, String, Vec<TypeTag2SkipLevel1, 5>);
-pub struct TypeTag2SkipLevel1;
-pub struct TypeTag2SkipLevel2;
+const MAX_TYPE_PARAM_DEPTH: u8 = 2;
+/// Max nesting for type params (e.g. `Vec<Struct<Vec<T>>>`). Exceeding rejects.
+const SKIP_TYPE_TAG_STACK_CAP: usize = 16;
 
 // Parsed data
 pub enum MoveObjectType {
@@ -220,19 +217,6 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
     }
 }
 
-pub const fn struct_tag_skip_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTagSkipLevel0, BS, Output = ()> {
-    Action(
-        (
-            DefaultInterp,
-            SubInterp(DefaultInterp),
-            SubInterp(DefaultInterp),
-            SubInterp(DefaultInterp),
-        ),
-        |_| Some(()),
-    )
-}
-
 pub const fn struct_tag_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<StructTag, BS, Output = (CoinID, CoinModuleName, CoinFunctionName)> {
     Action(
@@ -246,7 +230,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
-            ArrayVec<_, 5>,
+            ArrayVec<(), 5>,
         )| {
             info!("StructTag Address 0x{}", HexSlice(&address));
             info!(
@@ -329,135 +313,101 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
     }
 }
 
-impl HasOutput<TypeTag2> for DefaultInterp {
+impl HasOutput<SkipTypeTag> for DefaultInterp {
     type Output = ();
 }
 
-impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
+impl<BS: Clone + Readable> AsyncParser<SkipTypeTag, BS> for DefaultInterp {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
         BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    info!("TypeTag2: Bool");
+            let mut stack: ArrayVec<(u32, u8), SKIP_TYPE_TAG_STACK_CAP> = ArrayVec::new();
+            stack.push((1, MAX_TYPE_PARAM_DEPTH));
+
+            while let Some((count, depth)) = stack.pop() {
+                if count > 1 {
+                    if stack.try_push((count - 1, depth)).is_err() {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
                 }
-                1 => {
-                    info!("TypeTag2: U8");
-                }
-                2 => {
-                    info!("TypeTag2: U64");
-                }
-                3 => {
-                    info!("TypeTag2: U128");
-                }
-                4 => {
-                    info!("TypeTag2: Address");
-                }
-                5 => {
-                    info!("TypeTag2: Signer");
-                }
-                6 => {
-                    info!("TypeTag2: Vector(Box<TypeTag2>)");
-                }
-                7 => {
-                    info!("TypeTag2: Struct(StructTag)");
-                    // Parse StructTag using depth-limited parser (for FundsWithdrawal Balance<SUI>)
-                    struct_tag_skip_parser().parse(input).await;
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
+
+                let variant: u32 =
+                    <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+                match variant {
+                    0..=5 | 8..=10 => {}
+                    6 => {
+                        if stack.try_push((1, depth)).is_err() {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                    7 => {
+                        if depth == 0 {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                        let _addr: [u8; 32] = input.read().await;
+                        let module_len: u32 = <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        )
+                        .await;
+                        for _ in 0..module_len {
+                            let _: [u8; 1] = input.read().await;
+                        }
+                        let name_len: u32 = <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        )
+                        .await;
+                        for _ in 0..name_len {
+                            let _: [u8; 1] = input.read().await;
+                        }
+                        let type_param_count: u32 =
+                            <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
+                                &DefaultInterp,
+                                input,
+                            )
+                            .await;
+                        if type_param_count > 0 {
+                            if stack.try_push((type_param_count, depth - 1)).is_err() {
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                        }
+                    }
+                    _ => {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
                 }
             }
         }
     }
-}
-
-impl HasOutput<TypeTag2SkipLevel1> for DefaultInterp {
-    type Output = ();
-}
-impl<BS: Clone + Readable> AsyncParser<TypeTag2SkipLevel1, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0..=6 | 8..=10 => {}
-                7 => {
-                    struct_tag_skip_level1_parser().parse(input).await;
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-impl HasOutput<TypeTag2SkipLevel2> for DefaultInterp {
-    type Output = ();
-}
-impl<BS: Clone + Readable> AsyncParser<TypeTag2SkipLevel2, BS> for DefaultInterp {
-    type State<'c>
-        = impl Future<Output = Self::Output> + 'c
-    where
-        BS: 'c;
-    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
-        async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0..=6 | 8..=10 => {}
-                7 => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
-                }
-            }
-        }
-    }
-}
-
-pub const fn struct_tag_skip_level1_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTagSkipLevel1, BS, Output = ()> {
-    Action(
-        (
-            DefaultInterp,
-            SubInterp(DefaultInterp),
-            SubInterp(DefaultInterp),
-            SubInterp(DefaultInterp),
-        ),
-        |_| Some(()),
-    )
 }
 
 impl HasOutput<OwnerSchema> for DefaultInterp {
