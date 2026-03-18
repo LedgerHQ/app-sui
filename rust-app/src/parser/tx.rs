@@ -1,4 +1,5 @@
 use crate::parser::common::*;
+use crate::parser::object::{struct_tag_parser, TypeTag};
 use crate::utils::{estimate_btree_map_usage, NoinlineFut};
 
 extern crate alloc;
@@ -82,6 +83,8 @@ pub enum CallArg {
     OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
+    /// SIP-58: withdraw from address balance (FundsWithdrawalArg)
+    FundsWithdrawal(u64),
     Other,
 }
 
@@ -93,7 +96,8 @@ pub enum InputValue {
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
     Object(CoinData),
-    // ^ mutable via MergeCoins
+    /// SIP-58: FundsWithdrawal input (reservation amount)
+    FundsWithdrawal(u64),
 }
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
@@ -176,6 +180,42 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         }
                     }
                 }
+                2 => {
+                    info!("CallArgSchema: FundsWithdrawal");
+                    // FundsWithdrawalArg: reservation, type_arg, withdraw_from
+                    let reservation_variant =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    let amount = if reservation_variant == 0 {
+                        <DefaultInterp as AsyncParser<Amount, BS>>::parse(&DefaultInterp, input)
+                            .await
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    };
+                    let type_arg_variant =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    if type_arg_variant == 0 {
+                        <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                    let _withdraw_from =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    CallArg::FundsWithdrawal(amount)
+                }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
                     reject_on(
@@ -235,12 +275,8 @@ impl<BS: Clone + Readable> AsyncParser<TypeInput, BS> for DefaultInterp {
                 }
                 7 => {
                     info!("TypeInput: Struct(Box<StructInput>)");
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
+                    // TypeInput::Struct contains StructTag directly (no TypeTag variant prefix)
+                    let _ = struct_tag_parser().parse(input).await;
                 }
                 8 => {
                     info!("TypeInput: U16");
@@ -272,7 +308,7 @@ pub const MAKE_MOVE_VEC_ARRAY_LENGTH: usize = 8;
 
 pub const STRING_LENGTH: usize = 32;
 pub type String = Vec<Byte, STRING_LENGTH>;
-
+ 
 pub enum Command {
     MoveCall(
         CoinID,
@@ -291,6 +327,10 @@ pub enum CommandResult {
     MergedCoin(CoinData),
     MoveVecMergedCoin(TotalCoinAmount),
     StakingPoolSplitCoin(u64),
+    /// SIP-58: result of funds_accumulator::withdrawal_split
+    FundsWithdrawalSplit(TotalCoinAmount),
+    /// SIP-58: result of balance::redeem_funds
+    BalanceRedeemFunds(TotalCoinAmount),
 }
 
 impl HasOutput<CommandSchema> for DefaultInterp {
@@ -322,8 +362,11 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                         input,
                     )
                     .await;
-                    // TypeInput is not supported, hence vec of length 0
-                    <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
+                    // Type args (allow MoveCalls with type args e.g. FundsWithdrawal)
+                    <SubInterp<DefaultInterp> as AsyncParser<
+                        Vec<TypeInput, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+                        BS,
+                    >>::parse(
                         &SubInterp(DefaultInterp),
                         input,
                     )
@@ -568,6 +611,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Other => {
                             info!("Input {}: Other - not supported", i);
                         }
+                        CallArg::FundsWithdrawal(amt) => {
+                            info!("Input {}: FundsWithdrawal: {}", i, amt);
+                            inputs.insert(i, InputValue::FundsWithdrawal(amt));
+                        }
                         CallArg::RecipientAddress(v) => {
                             info!("Input {}: RecipientAddress", i);
                             inputs.insert(i, InputValue::RecipientAddress(v));
@@ -656,10 +703,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             ))
                             .await;
                             match res {
-                                Left((tx_type_, total_amt, maybe_validator_addr)) => {
+                                Left((tx_type_, total_amt, maybe_recipient)) => {
                                     tx_type = tx_type_;
                                     if tx_type == ProgrammableTransactionTypeState::StakeTx {
-                                        match (recipient_addr, maybe_validator_addr) {
+                                        match (recipient_addr, maybe_recipient) {
                                             (None, Some(addr)) => recipient_addr = Some(addr),
                                             _ => {
                                                 reject_on(
@@ -669,6 +716,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                                 )
                                                 .await
                                             }
+                                        }
+                                    } else if tx_type == ProgrammableTransactionTypeState::TransferTx {
+                                        if let Some(addr) = maybe_recipient {
+                                            recipient_addr = Some(addr);
                                         }
                                     }
                                     // As we only support one MoveCall,
@@ -876,6 +927,112 @@ async fn handle_move_call<OD: HasObjectData>(
     ),
     CommandResult,
 > {
+    let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
+        args.get(arg_ix).and_then(|arg| match arg {
+            Argument::Input(ix) => inputs.get(ix),
+            _ => None,
+        })
+    };
+
+    // SIP-58 FundsWithdrawal: 0x2::funds_accumulator, 0x2::balance
+    if package == SUI_COIN_ID {
+        if core::str::from_utf8(module.as_slice()) == Ok("funds_accumulator")
+            && core::str::from_utf8(function.as_slice()) == Ok("withdrawal_split")
+        {
+            info!("MoveCall 0x2::funds_accumulator::withdrawal_split");
+            match (get_arg_input(0), get_arg_input(1)) {
+                (Some(InputValue::FundsWithdrawal(amt)), Some(_)) => {
+                    let total = TotalCoinAmount {
+                        total_amount: *amt,
+                        coin_type: SUI_COIN_TYPE,
+                        includes_gas_coin: false,
+                    };
+                    return Right(CommandResult::FundsWithdrawalSplit(total));
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("balance")
+            && core::str::from_utf8(function.as_slice()) == Ok("redeem_funds")
+        {
+            info!("MoveCall 0x2::balance::redeem_funds");
+            match args.get(0) {
+                Some(Argument::Result(ix)) => match command_results.get(ix) {
+                    Some(CommandResult::FundsWithdrawalSplit(t)) => {
+                        return Right(CommandResult::BalanceRedeemFunds(t.clone()));
+                    }
+                    _ => {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                },
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("balance")
+            && core::str::from_utf8(function.as_slice()) == Ok("send_funds")
+        {
+            info!("MoveCall 0x2::balance::send_funds");
+            match (args.get(0), args.get(1)) {
+                (Some(Argument::Result(ix)), Some(Argument::Input(recipient_ix))) => {
+                    match command_results.get(ix) {
+                        Some(CommandResult::BalanceRedeemFunds(t)) => {
+                            match inputs.get(recipient_ix) {
+                                Some(InputValue::RecipientAddress(addr)) => {
+                                    return Left((
+                                        ProgrammableTransactionTypeState::TransferTx,
+                                        t.clone(),
+                                        Some(*addr),
+                                    ));
+                                }
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        _ => {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+
     if package != SUI_SYSTEM_ID {
         reject_on(
             core::file!(),
@@ -896,13 +1053,6 @@ async fn handle_move_call<OD: HasObjectData>(
             _ => None,
         }
     }
-
-    let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
-        args.get(arg_ix).and_then(|arg| match arg {
-            Argument::Input(ix) => inputs.get(ix),
-            _ => None,
-        })
-    };
 
     if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake")

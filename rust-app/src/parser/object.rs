@@ -47,6 +47,12 @@ pub struct TypeTag;
 // This is to avoid recursion of async parsers
 pub struct TypeTag2;
 
+// Depth-limited struct parsing for FundsWithdrawal type args (e.g. Balance<SUI>)
+pub type StructTagSkipLevel1 = (SuiAddress, String, String, Vec<TypeTag2SkipLevel2, 5>);
+pub type StructTagSkipLevel0 = (SuiAddress, String, String, Vec<TypeTag2SkipLevel1, 5>);
+pub struct TypeTag2SkipLevel1;
+pub struct TypeTag2SkipLevel2;
+
 // Parsed data
 pub enum MoveObjectType {
     /// A type that is not `0x2::coin::Coin<T>`
@@ -214,6 +220,19 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
     }
 }
 
+pub const fn struct_tag_skip_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<StructTagSkipLevel0, BS, Output = ()> {
+    Action(
+        (
+            DefaultInterp,
+            SubInterp(DefaultInterp),
+            SubInterp(DefaultInterp),
+            SubInterp(DefaultInterp),
+        ),
+        |_| Some(()),
+    )
+}
+
 pub const fn struct_tag_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<StructTag, BS, Output = (CoinID, CoinModuleName, CoinFunctionName)> {
     Action(
@@ -347,7 +366,67 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
                 }
                 7 => {
                     info!("TypeTag2: Struct(StructTag)");
-                    // Don't do recursion; ignore this object
+                    // Parse StructTag using depth-limited parser (for FundsWithdrawal Balance<SUI>)
+                    struct_tag_skip_parser().parse(input).await;
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+}
+
+impl HasOutput<TypeTag2SkipLevel1> for DefaultInterp {
+    type Output = ();
+}
+impl<BS: Clone + Readable> AsyncParser<TypeTag2SkipLevel1, BS> for DefaultInterp {
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
+    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
+        async move {
+            let enum_variant =
+                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+            match enum_variant {
+                0..=6 | 8..=10 => {}
+                7 => {
+                    struct_tag_skip_level1_parser().parse(input).await;
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+}
+
+impl HasOutput<TypeTag2SkipLevel2> for DefaultInterp {
+    type Output = ();
+}
+impl<BS: Clone + Readable> AsyncParser<TypeTag2SkipLevel2, BS> for DefaultInterp {
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
+    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
+        async move {
+            let enum_variant =
+                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+            match enum_variant {
+                0..=6 | 8..=10 => {}
+                7 => {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -366,6 +445,19 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
             }
         }
     }
+}
+
+pub const fn struct_tag_skip_level1_parser<BS: Clone + Readable>(
+) -> impl AsyncParser<StructTagSkipLevel1, BS, Output = ()> {
+    Action(
+        (
+            DefaultInterp,
+            SubInterp(DefaultInterp),
+            SubInterp(DefaultInterp),
+            SubInterp(DefaultInterp),
+        ),
+        |_| Some(()),
+    )
 }
 
 impl HasOutput<OwnerSchema> for DefaultInterp {
