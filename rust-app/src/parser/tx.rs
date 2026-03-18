@@ -308,7 +308,7 @@ pub const MAKE_MOVE_VEC_ARRAY_LENGTH: usize = 8;
 
 pub const STRING_LENGTH: usize = 32;
 pub type String = Vec<Byte, STRING_LENGTH>;
- 
+
 pub enum Command {
     MoveCall(
         CoinID,
@@ -366,10 +366,7 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                     <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<TypeInput, MOVE_CALL_ARGS_ARRAY_LENGTH>,
                         BS,
-                    >>::parse(
-                        &SubInterp(DefaultInterp),
-                        input,
-                    )
+                    >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
                     let args = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, MOVE_CALL_ARGS_ARRAY_LENGTH>,
@@ -717,7 +714,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                                 .await
                                             }
                                         }
-                                    } else if tx_type == ProgrammableTransactionTypeState::TransferTx {
+                                    } else if tx_type
+                                        == ProgrammableTransactionTypeState::TransferTx
+                                    {
                                         if let Some(addr) = maybe_recipient {
                                             recipient_addr = Some(addr);
                                         }
@@ -962,7 +961,7 @@ async fn handle_move_call<OD: HasObjectData>(
             && core::str::from_utf8(function.as_slice()) == Ok("redeem_funds")
         {
             info!("MoveCall 0x2::balance::redeem_funds");
-            match args.get(0) {
+            match args.first() {
                 Some(Argument::Result(ix)) => match command_results.get(ix) {
                     Some(CommandResult::FundsWithdrawalSplit(t)) => {
                         return Right(CommandResult::BalanceRedeemFunds(t.clone()));
@@ -989,7 +988,7 @@ async fn handle_move_call<OD: HasObjectData>(
             && core::str::from_utf8(function.as_slice()) == Ok("send_funds")
         {
             info!("MoveCall 0x2::balance::send_funds");
-            match (args.get(0), args.get(1)) {
+            match (args.first(), args.get(1)) {
                 (Some(Argument::Result(ix)), Some(Argument::Input(recipient_ix))) => {
                     match command_results.get(ix) {
                         Some(CommandResult::BalanceRedeemFunds(t)) => {

@@ -328,15 +328,13 @@ impl<BS: Clone + Readable> AsyncParser<SkipTypeTag, BS> for DefaultInterp {
             stack.push((1, MAX_TYPE_PARAM_DEPTH));
 
             while let Some((count, depth)) = stack.pop() {
-                if count > 1 {
-                    if stack.try_push((count - 1, depth)).is_err() {
-                        reject_on(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await
-                    }
+                if count > 1 && stack.try_push((count - 1, depth)).is_err() {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
                 }
 
                 let variant: u32 =
@@ -385,15 +383,15 @@ impl<BS: Clone + Readable> AsyncParser<SkipTypeTag, BS> for DefaultInterp {
                                 input,
                             )
                             .await;
-                        if type_param_count > 0 {
-                            if stack.try_push((type_param_count, depth - 1)).is_err() {
-                                reject_on(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await
-                            }
+                        if type_param_count > 0
+                            && stack.try_push((type_param_count, depth - 1)).is_err()
+                        {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
                         }
                     }
                     _ => {
