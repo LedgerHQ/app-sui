@@ -3,7 +3,9 @@ use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_pu
 use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
+use crate::parser::common::{
+    CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
+};
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx};
@@ -79,9 +81,19 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-async fn prompt_tx_params(ui: &UserInterface, path: &[u32], params: TxParams, ctx: &RunCtx) {
+async fn prompt_tx_params(
+    ui: &UserInterface,
+    path: &[u32],
+    TxParams {
+        amount,
+        fee,
+        destination_address,
+    }: TxParams,
+    coin_type: CoinType,
+    ctx: &RunCtx,
+) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, &params, ctx))
+        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee, ctx))
     })
     .ok()
     .is_none()
@@ -135,7 +147,6 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             total_amount,
             coin_type,
             gas_budget,
-            gas_from_address_balance,
         }) => {
             info!("Known transfer tx\n");
             let mut bs = input[1].clone();
@@ -148,22 +159,27 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 amount: total_amount,
                 fee: gas_budget,
                 destination_address: recipient,
-                coin_type,
-                gas_from_address_balance,
             };
 
             if ctx.is_swap() {
                 let expected = ctx.get_swap_tx_params();
                 check_tx_params(expected, &tx_params).await;
             } else {
-                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, ctx)).await;
+                // Show prompts after all inputs have been parsed
+                NoinlineFut(prompt_tx_params(
+                    &ui,
+                    path.as_slice(),
+                    tx_params,
+                    coin_type,
+                    ctx,
+                ))
+                .await;
             }
         }
         Some(KnownTx::StakeTx {
             recipient,
             total_amount,
             gas_budget,
-            gas_from_address_balance,
         }) => {
             info!("Known stake tx\n");
             if ctx.is_swap() {
@@ -176,13 +192,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_stake_tx(
-                    address,
-                    recipient,
-                    total_amount,
-                    gas_budget,
-                    gas_from_address_balance,
-                ))
+                try_option(ui.confirm_stake_tx(address, recipient, total_amount, gas_budget))
             })
             .ok()
             .is_none()
@@ -193,7 +203,6 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         Some(KnownTx::UnstakeTx {
             total_amount,
             gas_budget,
-            gas_from_address_balance,
         }) => {
             info!("Known unstake tx\n");
             if ctx.is_swap() {
@@ -206,12 +215,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_unstake_tx(
-                    address,
-                    total_amount,
-                    gas_budget,
-                    gas_from_address_balance,
-                ))
+                try_option(ui.confirm_unstake_tx(address, total_amount, gas_budget))
             })
             .ok()
             .is_none()
@@ -246,22 +250,29 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 let _ = hasher.update(&b);
             }
         }
+        info!("sign_apdu: hash computed");
         let mut hash: HexHash<32> = Default::default();
         let _ = hasher.finalize(&mut hash.0);
 
         if is_unknown_txn {
             // Show prompts after all inputs have been parsed
+            info!("sign_apdu: about to confirm_blind_sign_tx");
             if ui.confirm_blind_sign_tx(&hash).is_none() {
+                info!("sign_apdu: confirm_blind_sign_tx rejected");
                 reject::<()>(StatusWords::UserCancelled as u16).await;
             };
+            info!("sign_apdu: confirm_blind_sign_tx approved");
         }
         let path = BIP_PATH_PARSER.parse(&mut input[1].clone()).await;
         if !path.starts_with(&BIP32_PREFIX[0..2]) {
             reject::<()>(SyscallError::InvalidParameter as u16).await;
         }
+        info!("sign_apdu: about to eddsa_sign and result_final");
         if let Some(sig) = { eddsa_sign(&path, true, &hash.0).ok() } {
             io.result_final(&sig.0[0..]).await;
+            info!("sign_apdu: result_final sent");
         } else {
+            info!("sign_apdu: eddsa_sign failed");
             reject::<()>(SyscallError::Unspecified as u16).await;
         }
     })
