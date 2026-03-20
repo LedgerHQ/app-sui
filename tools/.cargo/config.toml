@@ -1,4 +1,0 @@
-# Tools workspace: use host target and prebuilt std.
-# Isolated from rust-app (Ledger) config in rust-app/.cargo/
-[build]
-target = "x86_64-unknown-linux-gnu"
