@@ -46,7 +46,11 @@ speculos = [
 ledger_device_sdk = { workspace = true, features = ["sys", "nano_nbgl"] }
 
 [target.'cfg(target_family = "bolos")'.dev-dependencies]
-ledger_device_sdk = { workspace = true, features = ["sys", "nano_nbgl", "unit_test"] }
+ledger_device_sdk = { workspace = true, features = [
+    "sys",
+    "nano_nbgl",
+    "unit_test",
+] }
 
 [[bin]]
 name = "sui"
@@ -70,7 +74,6 @@ lto = "fat"
 opt-level = 0
 
 [lints.rust]
-
 unexpected_cfgs = { level = "warn", check-cfg = [
     'cfg(target_os, values("nanos", "nanosplus", "nanox", "flex", "stax", "apex_p"))',
 ] }
