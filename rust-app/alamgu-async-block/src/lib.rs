@@ -511,6 +511,7 @@ pub fn poll_apdu_handlers<'a: 'b, 'b, F: Future<Output = ()>, Ins, A: Fn(HostIO,
         Ok(HostToLedgerCmd::GetChunkResponseSuccess)
             if io.0.borrow().sent_command == Some(LedgerToHostCmd::GetChunk) =>
         {
+            info!("poll_apdu: processing GET_CHUNK_RESPONSE_SUCCESS");
             if io.0.borrow().comm.borrow().get_data()?.len() < HASH_LEN + 1 {
                 return Err(SyscallError::InvalidParameter.into());
             }
