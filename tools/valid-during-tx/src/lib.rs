@@ -7,7 +7,7 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
     use shared_crypto::intent::{Intent, IntentMessage};
     use std::str::FromStr;
-    use sui_test_transaction_builder::TestTransactionBuilder;
+    use sui_test_transaction_builder::{FundSource, TestTransactionBuilder};
     use sui_types::base_types::{ObjectID, ObjectRef, SequenceNumber, SuiAddress};
     use sui_types::digests::{ChainIdentifier, ObjectDigest};
     use sui_types::transaction::{TransactionDataAPI, TransactionExpiration};
@@ -22,6 +22,10 @@ mod tests {
     const GAS_PRICE: u64 = 1000;
     const GAS_BUDGET: u64 = 2_988_000;
     const OBJECT_LIST_B64: &str = "AAEB03ZCEQAAAAAoQA29z+2o4eZOu/VxDM9aZ7+m5/lFySvIYR4MtEtyGd4QDpQ5AAAAAABvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeISB0/j3Uc6ljNbb1tbWgvj5PAz7MCgIO6e91iU9asLM9x2ATDwAAAAAA";
+
+    // From test_sign_sui_funds_withdrawal.py (SIP-58 FundsWithdrawal)
+    const FUNDS_WITHDRAWAL_AMOUNT: u64 = 612_000;
+    const FUNDS_WITHDRAWAL_GAS_BUDGET: u64 = 500_000;
 
     // Golden: whole gas coin transfer. Hex of IntentMessage(TransactionData).
     const EXPECTED_WHOLE_GAS_COIN_HEX: &str = "00000000000100201d3f2643305760226e518c9b5a96165383808dd977971f73dea971543b0be488010101000100006fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e2101400dbdcfeda8e1e64ebbf5710ccf5a67bfa6e7f945c92bc8611e0cb44b7219ded3764211000000002066c5ab65498a9d3716001a034815ff4abca765f7f6f2375cc91d2addb79c208a6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e21e803000000000000e0972d000000000000";
@@ -61,6 +65,45 @@ mod tests {
         assert_eq!(
             transaction_b64, expected_b64,
             "transaction must match ragger-tests/test_sign_sui_transfer_1.py"
+        );
+        assert_eq!(
+            object_list_b64,
+            vec![OBJECT_LIST_B64],
+            "object_list must match ragger-tests"
+        );
+    }
+
+    #[test]
+    fn build_tx_sui_funds_withdrawal() {
+        let sender = SuiAddress::from_str(SENDER).expect("Invalid sender");
+        let recipient = SuiAddress::from_str(RECIPIENT).expect("Invalid recipient");
+        let gas_id = ObjectID::from_str(GAS_OBJECT_ID).expect("Invalid gas id");
+        let digest = ObjectDigest::from_str(GAS_DIGEST).expect("Invalid gas digest");
+        let gas_object: ObjectRef = (gas_id, SequenceNumber::from(GAS_VERSION), digest);
+
+        let tx_data = TestTransactionBuilder::new(sender, gas_object, GAS_PRICE)
+            .with_gas_budget(FUNDS_WITHDRAWAL_GAS_BUDGET)
+            .transfer_sui_to_address_balance(
+                FundSource::address_fund(),
+                vec![(FUNDS_WITHDRAWAL_AMOUNT, recipient)],
+            )
+            .build();
+
+        assert!(
+            tx_data.has_funds_withdrawals(),
+            "FundsWithdrawal transfer must have funds_withdrawals"
+        );
+
+        let intent_msg = IntentMessage::new(Intent::sui_transaction(), tx_data);
+        let tx_bytes = bcs::to_bytes(&intent_msg).expect("Failed to serialize transaction");
+        let transaction_b64 = BASE64.encode(&tx_bytes);
+        let object_list_b64 = vec![OBJECT_LIST_B64.to_string()];
+
+        const EXPECTED_FUNDS_WITHDRAWAL_B64: &str = "AAAAAAADAgCgVgkAAAAAAAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAAACCgVgkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgHT8mQzBXYCJuUYybWpYWU4OAjdl3lx9z3qlxVDsL5IgDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEWZ1bmRzX2FjY3VtdWxhdG9yEHdpdGhkcmF3YWxfc3BsaXQBBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UHQmFsYW5jZQEHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQACAQAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UMcmVkZWVtX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAECAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIHYmFsYW5jZQpzZW5kX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAICAQABAgBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQFADb3P7ajh5k679XEMz1pnv6bn+UXJK8hhHgy0S3IZ3tN2QhEAAAAAIGbFq2VJip03FgAaA0gV/0q8p2X39vI3XMkdKt23nCCKb7If7q0CfaSHMpWv/WxPNhj+F2+i+/Pnte8dlGOzHiHoAwAAAAAAACChBwAAAAAAAA==";
+
+        assert_eq!(
+            transaction_b64, EXPECTED_FUNDS_WITHDRAWAL_B64,
+            "transaction must match ragger-tests/test_sign_sui_funds_withdrawal.py"
         );
         assert_eq!(
             object_list_b64,
