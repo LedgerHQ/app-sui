@@ -124,6 +124,16 @@ pub fn app_main(ctx: &RunCtx) {
             }
             Err(sw) => {
                 PinMut::as_mut(&mut states.0.borrow_mut()).set(None);
+                // Reset block protocol state so the next START begins
+                // cleanly.  Without this, stale values from the failed
+                // command (e.g. a user rejection) cause the next command
+                // to hit InvalidState (0xe000).
+                unsafe { REJECTED_CODE = 0; }
+                {
+                    let mut state = hostio_state.borrow_mut();
+                    state.sent_command = None;
+                    state.requested_block = None;
+                }
                 if ctx.is_swap() {
                     comm.borrow_mut().swap_reply(sw);
                 } else {
