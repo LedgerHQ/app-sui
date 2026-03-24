@@ -245,9 +245,8 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             let mod_short: ArrayVec<u8, COIN_STRING_LENGTH> = module
                 .drain(..module.len().min(COIN_STRING_LENGTH))
                 .collect();
-            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> = name
-                .drain(..name.len().min(COIN_STRING_LENGTH))
-                .collect();
+            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> =
+                name.drain(..name.len().min(COIN_STRING_LENGTH)).collect();
             // Action requires `Fn(...) -> Option<R>` (see async_parser `Action` impl).
             let out: CoinType = (
                 address,

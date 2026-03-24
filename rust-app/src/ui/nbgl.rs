@@ -68,7 +68,7 @@ impl UserInterface {
             value: &gas_val,
         };
         let ((amt_str, amt_val), coin_fields) =
-            get_coin_and_amount_fields(params.amount, params.coin_type.clone(), ctx);
+            get_coin_and_amount_fields(params.amount, params.coin_type, ctx);
         let amt = Field {
             name: amt_str.as_str(),
             value: amt_val.as_str(),

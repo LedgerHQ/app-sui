@@ -201,8 +201,11 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
                     let coin_type = if type_arg_variant == 0 {
-                        match <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
-                            .await
+                        match <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        )
+                        .await
                         {
                             Some(ct) => ct,
                             None => {
@@ -975,7 +978,7 @@ async fn handle_move_call<OD: HasObjectData>(
             match args.first() {
                 Some(Argument::Result(ix)) => match command_results.get(ix) {
                     Some(CommandResult::FundsWithdrawalSplit(t)) => {
-                        return Right(CommandResult::BalanceRedeemFunds(t.clone()));
+                        return Right(CommandResult::BalanceRedeemFunds(*t));
                     }
                     _ => {
                         reject_on(
@@ -1014,7 +1017,7 @@ async fn handle_move_call<OD: HasObjectData>(
                                 Some(InputValue::RecipientAddress(addr)) => {
                                     return Left((
                                         ProgrammableTransactionTypeState::TransferTx,
-                                        t.clone(),
+                                        *t,
                                         Some(*addr),
                                     ));
                                 }
@@ -1166,7 +1169,7 @@ async fn handle_move_call<OD: HasObjectData>(
                 Argument::Result(ix) => command_results.get(ix),
                 _ => None,
             }) {
-            t.clone()
+            *t
         } else {
             reject_on(
                 core::file!(),
@@ -1353,7 +1356,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
     *total_coin_amount = Some(
         get_total_amount_for_coins(
             coins.as_slice(),
-            total_coin_amount.clone(),
+            *total_coin_amount,
             inputs,
             &object_data_source,
             command_results,
@@ -1446,7 +1449,7 @@ async fn get_total_amount_for_coins<OD: HasObjectData>(
 
         for coin in remaining {
             let amt = get_coin_arg_amount(coin, inputs, object_data_source, command_results).await;
-            match add_to_total_coin_amount(total_amount.clone(), amt) {
+            match add_to_total_coin_amount(total_amount, amt) {
                 Some(v) => total_amount = v,
                 None => {
                     reject_on(
@@ -1500,7 +1503,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
                 }
             }
             Some(InputValue::Object((coin_type, amount))) => CommandArgumentAmount::Coin {
-                coin_type: coin_type.clone(),
+                coin_type: *coin_type,
                 amount: *amount,
             },
             Some(_) => {
@@ -1526,7 +1529,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
             Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
                 if let Some(amount) = coin_amounts.get(*coin_ix as usize) {
                     CommandArgumentAmount::Coin {
-                        coin_type: coin_type.clone(),
+                        coin_type: *coin_type,
                         amount: *amount,
                     }
                 } else {
@@ -1551,7 +1554,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
             Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
                 if coin_amounts.len() == 1 {
                     CommandArgumentAmount::Coin {
-                        coin_type: coin_type.clone(),
+                        coin_type: *coin_type,
                         amount: coin_amounts[0],
                     }
                 } else {
@@ -1564,7 +1567,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
                 }
             }
             Some(CommandResult::MergedCoin((coin_type, amount))) => CommandArgumentAmount::Coin {
-                coin_type: coin_type.clone(),
+                coin_type: *coin_type,
                 amount: *amount,
             },
             _ => {
@@ -1608,7 +1611,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((v, _))) => v.clone(),
+            Some(InputValue::Object((v, _))) => *v,
             _ => {
                 info!("SplitCoins input refers to non ObjectRef");
                 reject_on(
@@ -1627,7 +1630,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     _ => None,
                 })
             {
-                v.clone()
+                *v
             } else {
                 reject_on(
                     core::file!(),
@@ -1639,7 +1642,7 @@ async fn handle_split_coins<OD: HasObjectData>(
         }
 
         Argument::Result(command_ix) => match command_results.get(&command_ix) {
-            Some(CommandResult::MergedCoin((v, _))) => v.clone(),
+            Some(CommandResult::MergedCoin((v, _))) => *v,
             _ => {
                 reject_on(
                     core::file!(),
@@ -1716,7 +1719,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
             }
             Some(InputValue::Object((coin_type, amt))) => {
                 total_amount_2 += amt;
-                coin_type.clone()
+                *coin_type
             }
             _ => {
                 info!("MergeCoins input refers to non ObjectRef");
@@ -1739,7 +1742,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 })
             {
                 total_amount_2 += amt;
-                v.clone()
+                *v
             } else {
                 reject_on(
                     core::file!(),

@@ -78,7 +78,11 @@ pub const SUI_SYSTEM_STATE_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
 ];
 
-pub const SUI_COIN_TYPE: CoinType = (SUI_COIN_ID, [0u8; COIN_STRING_LENGTH], [0u8; COIN_STRING_LENGTH]);
+pub const SUI_COIN_TYPE: CoinType = (
+    SUI_COIN_ID,
+    [0u8; COIN_STRING_LENGTH],
+    [0u8; COIN_STRING_LENGTH],
+);
 
 pub const SUI_COIN_DECIMALS: u8 = 9;
 
