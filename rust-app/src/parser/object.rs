@@ -59,7 +59,7 @@ pub enum MoveObjectType {
     /// A record of a staked SUI coin (i.e., `0x3::staking_pool::StakedSui`)
     StakedSui,
     /// A non-SUI coin type (i.e., `0x2::coin::Coin<T> where T != 0x2::sui::SUI`)
-    Coin((CoinID, CoinModuleName, CoinFunctionName)),
+    Coin(CoinType),
 }
 
 // Parsers
@@ -190,11 +190,11 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
                 }
                 3 => {
                     info!("MoveObjectType: Coin(TypeTag)");
-                    if let Some((coin_id, module, name)) =
+                    if let Some(ct) =
                         <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
                             .await
                     {
-                        MoveObjectType::Coin((coin_id, module, name))
+                        MoveObjectType::Coin(ct)
                     } else {
                         reject_on(
                             core::file!(),
@@ -218,7 +218,7 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
 }
 
 pub const fn struct_tag_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTag, BS, Output = (CoinID, CoinModuleName, CoinFunctionName)> {
+) -> impl AsyncParser<StructTag, BS, Output = CoinType> {
     Action(
         (
             DefaultInterp,
@@ -242,20 +242,25 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", _type_tags.len());
-            Some((
+            let mod_short: ArrayVec<u8, COIN_STRING_LENGTH> = module
+                .drain(..module.len().min(COIN_STRING_LENGTH))
+                .collect();
+            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> = name
+                .drain(..name.len().min(COIN_STRING_LENGTH))
+                .collect();
+            // Action requires `Fn(...) -> Option<R>` (see async_parser `Action` impl).
+            let out: CoinType = (
                 address,
-                module
-                    .drain(..module.len().min(COIN_STRING_LENGTH))
-                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
-                name.drain(..name.len().min(COIN_STRING_LENGTH))
-                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
-            ))
+                pad_coin_name_bytes(mod_short.as_slice()),
+                pad_coin_name_bytes(name_short.as_slice()),
+            );
+            Some(out)
         },
     )
 }
 
 impl HasOutput<TypeTag> for DefaultInterp {
-    type Output = Option<(CoinID, CoinModuleName, CoinFunctionName)>;
+    type Output = Option<CoinType>;
 }
 
 impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
@@ -361,22 +366,17 @@ impl<BS: Clone + Readable> AsyncParser<SkipTypeTag, BS> for DefaultInterp {
                             .await
                         }
                         let _addr: [u8; 32] = input.read().await;
-                        let module_len: u32 = <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
-                            &DefaultInterp,
+                        // BCS length-prefixed strings (same as `Vec<Byte, STRING_LENGTH>` in StructTag).
+                        <DropInterp as AsyncParser<Vec<Byte, STRING_LENGTH>, BS>>::parse(
+                            &DropInterp,
                             input,
                         )
                         .await;
-                        for _ in 0..module_len {
-                            let _: [u8; 1] = input.read().await;
-                        }
-                        let name_len: u32 = <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
-                            &DefaultInterp,
+                        <DropInterp as AsyncParser<Vec<Byte, STRING_LENGTH>, BS>>::parse(
+                            &DropInterp,
                             input,
                         )
                         .await;
-                        for _ in 0..name_len {
-                            let _: [u8; 1] = input.read().await;
-                        }
                         let type_param_count: u32 =
                             <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
                                 &DefaultInterp,

@@ -83,8 +83,8 @@ pub enum CallArg {
     OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
-    /// SIP-58: withdraw from address balance (FundsWithdrawalArg)
-    FundsWithdrawal(u64),
+    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag + amount)
+    FundsWithdrawal(CoinType, u64),
     Other,
 }
 
@@ -96,8 +96,8 @@ pub enum InputValue {
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
     Object(CoinData),
-    /// SIP-58: FundsWithdrawal input (reservation amount)
-    FundsWithdrawal(u64),
+    /// SIP-58: FundsWithdrawal input (coin type from type tag + reservation amount)
+    FundsWithdrawal(CoinType, u64),
 }
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
@@ -200,9 +200,20 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                     let type_arg_variant =
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
-                    if type_arg_variant == 0 {
-                        <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
-                            .await;
+                    let coin_type = if type_arg_variant == 0 {
+                        match <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
+                            .await
+                        {
+                            Some(ct) => ct,
+                            None => {
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                        }
                     } else {
                         reject_on(
                             core::file!(),
@@ -210,11 +221,11 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             SyscallError::NotSupported as u16,
                         )
                         .await
-                    }
+                    };
                     let _withdraw_from =
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
-                    CallArg::FundsWithdrawal(amount)
+                    CallArg::FundsWithdrawal(coin_type, amount)
                 }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
@@ -608,9 +619,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Other => {
                             info!("Input {}: Other - not supported", i);
                         }
-                        CallArg::FundsWithdrawal(amt) => {
-                            info!("Input {}: FundsWithdrawal: {}", i, amt);
-                            inputs.insert(i, InputValue::FundsWithdrawal(amt));
+                        CallArg::FundsWithdrawal(coin_type, amt) => {
+                            info!("Input {}: FundsWithdrawal: amount {}", i, amt);
+                            inputs.insert(i, InputValue::FundsWithdrawal(coin_type, amt));
                         }
                         CallArg::RecipientAddress(v) => {
                             info!("Input {}: RecipientAddress", i);
@@ -940,10 +951,10 @@ async fn handle_move_call<OD: HasObjectData>(
         {
             info!("MoveCall 0x2::funds_accumulator::withdrawal_split");
             match (get_arg_input(0), get_arg_input(1)) {
-                (Some(InputValue::FundsWithdrawal(amt)), Some(_)) => {
+                (Some(InputValue::FundsWithdrawal(coin_type, amt)), Some(_)) => {
                     let total = TotalCoinAmount {
                         total_amount: *amt,
-                        coin_type: SUI_COIN_TYPE,
+                        coin_type: *coin_type,
                         includes_gas_coin: false,
                     };
                     return Right(CommandResult::FundsWithdrawalSplit(total));
@@ -988,6 +999,13 @@ async fn handle_move_call<OD: HasObjectData>(
             && core::str::from_utf8(function.as_slice()) == Ok("send_funds")
         {
             info!("MoveCall 0x2::balance::send_funds");
+            // SIP-58: `0x2::balance::send_funds<T>(balance: Balance<T>, recipient: address)` (see
+            // https://github.com/sui-foundation/sips/blob/main/sips/sip-58.md). Typical PTB wiring
+            // matches that API: balance from the prior `redeem_funds` step (`Argument::Result`), and
+            // the recipient address as a transaction input (`Argument::Input` → `RecipientAddress`).
+            // SIP-58 specifies the Move signature, not every legal PTB encoding; we only support this
+            // standard shape. Other `Argument` variants for the recipient (e.g. GasCoin, Result,
+            // NestedResult) or non-address inputs are rejected rather than resolved indirectly.
             match (args.first(), args.get(1)) {
                 (Some(Argument::Result(ix)), Some(Argument::Input(recipient_ix))) => {
                     match command_results.get(ix) {
@@ -1019,6 +1037,14 @@ async fn handle_move_call<OD: HasObjectData>(
                             .await
                         }
                     }
+                }
+                (Some(Argument::Result(_)), Some(_)) => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
                 }
                 _ => {
                     reject_on(
@@ -1336,7 +1362,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
     );
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct TotalCoinAmount {
     total_amount: u64,
     coin_type: CoinType,
