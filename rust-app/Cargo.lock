@@ -546,9 +546,9 @@ checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 
 [[package]]
 name = "include_gif"
-version = "1.2.5"
+version = "1.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c5148da8ab53eb3a387c221059d5a1ec3d4788d6088d4a8f127d6768dce74f4"
+checksum = "4046578028f0249b76fb88acb6a0eac1f635bf9e2630ba5d0562831597ffc323"
 dependencies = [
  "flate2",
  "image",
@@ -628,14 +628,15 @@ dependencies = [
  "num-traits",
  "paste",
  "pin-project",
+ "testmacro",
  "trie-enum",
 ]
 
 [[package]]
 name = "ledger_device_sdk"
-version = "1.33.1"
+version = "1.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b964167c2a8b745321b03a8bd869c8b76b71a1ef9d9b7f8d7fa0625b7dedca7"
+checksum = "8adde0c75d115974c33db5e8e50dbf809d874d64ea970570cd6cc523ce009d6b"
 dependencies = [
  "const-zero",
  "include_gif",
@@ -1268,7 +1269,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "sui"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "alamgu-async-block",
  "arrayvec",
@@ -1306,6 +1307,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "testmacro"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e81321e8c082256753e5af547c7352ff5a9f1958c4c7e7de1eb8289ce65884f2"
+dependencies = [
+ "quote",
+ "syn 1.0.107",
 ]
 
 [[package]]

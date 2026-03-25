@@ -4,7 +4,7 @@ from typing import Dict, List, Optional, Tuple
 from hashlib import sha256
 from struct import unpack
 
-from pysui_tx.bcs import (
+from pysui.sui.sui_types.bcs import (
     Address,
     Argument,
     CallArg,
@@ -159,6 +159,17 @@ def build_simple_transaction_empty_gas_payment(
 
     tx_data = TransactionData("V1", tx_data_v1)
     tx += TransactionData.encode(tx_data)
+
+    # SIP-58: pysui lacks ValidDuring; replace None (0x00) with ValidDuring for replay protection.
+    # ValidDuring: variant 2 + 4×Option(None) + chain(32) + nonce(4) = 02 00 00 00 00 [32 zeros] 00 00 00 00
+    valid_during = bytes(
+        [0x02]  # ValidDuring variant
+        + [0x00] * 4  # min_epoch, max_epoch, min_ts, max_ts = None
+        + 32 * [0x00]  # chain (zeros)
+        + [0x00, 0x00, 0x00, 0x00]  # nonce (u32 LE)
+    )
+    # Replace last byte (None=0x00) with ValidDuring encoding
+    tx = tx[:-1] + valid_during
 
     return (tx, object_list)
 

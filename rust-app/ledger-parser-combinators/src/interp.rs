@@ -6,7 +6,6 @@
 /// `DefaultIntepr` on a `U32<{Endianness::Big}>` schema will produce a `u32` in the ledger's native
 /// little-endian byte order, and an `Array<U16<{Endianness::Little}>,5>` would produce a `[u16;5]`
 /// result; `DArray` becomes `ArrayVec`, etc.
-
 pub struct DefaultInterp;
 
 /// For array-like schemas; given a subparser for the item, produce a parser for the whole array.

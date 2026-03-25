@@ -1,4 +1,5 @@
 use crate::parser::common::*;
+use crate::parser::object::{struct_tag_parser, TypeTag};
 use crate::utils::{estimate_btree_map_usage, NoinlineFut};
 
 extern crate alloc;
@@ -8,7 +9,7 @@ use core::convert::TryFrom;
 use core::future::Future;
 use either::*;
 use ledger_device_sdk::io::SyscallError;
-use ledger_device_sdk::log::info;
+use ledger_device_sdk::log::{error, info};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
@@ -46,6 +47,16 @@ pub type GasDataSchema = (
 pub struct TransactionExpiration;
 pub type EpochId = U64<{ Endianness::Little }>;
 
+// ValidDuring (SIP-58): min_epoch, max_epoch, min_timestamp, max_timestamp, chain, nonce
+pub type ValidDuringSchema = (
+    Option<Amount>,
+    Option<Amount>,
+    Option<Amount>,
+    Option<Amount>,
+    SuiAddress, // ChainIdentifier (CheckpointDigest)
+    U32LE,      // nonce
+);
+
 pub type SharedObject = (
     ObjectID,       // id
     SequenceNumber, // initial_shared_version
@@ -61,8 +72,8 @@ pub type AppId = ULEB128;
 
 // Parsed data
 
-// Gas Budget + total gas coin amount (if known)
-pub type GasData = (u64, Option<u64>);
+// Gas Budget + total gas coin amount (if known) + SIP-58: gas from address balance
+pub type GasData = (u64, Option<u64>, bool);
 
 // Tx Parsers
 
@@ -72,6 +83,8 @@ pub enum CallArg {
     OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
+    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag + amount)
+    FundsWithdrawal(CoinType, u64),
     Other,
 }
 
@@ -83,7 +96,8 @@ pub enum InputValue {
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
     Object(CoinData),
-    // ^ mutable via MergeCoins
+    /// SIP-58: FundsWithdrawal input (coin type from type tag + reservation amount)
+    FundsWithdrawal(CoinType, u64),
 }
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
@@ -166,6 +180,56 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         }
                     }
                 }
+                2 => {
+                    info!("CallArgSchema: FundsWithdrawal");
+                    // FundsWithdrawalArg: reservation, type_arg, withdraw_from
+                    let reservation_variant =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    let amount = if reservation_variant == 0 {
+                        <DefaultInterp as AsyncParser<Amount, BS>>::parse(&DefaultInterp, input)
+                            .await
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    };
+                    let type_arg_variant =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    let coin_type = if type_arg_variant == 0 {
+                        match <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(
+                            &DefaultInterp,
+                            input,
+                        )
+                        .await
+                        {
+                            Some(ct) => ct,
+                            None => {
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                        }
+                    } else {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    };
+                    let _withdraw_from =
+                        <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
+                            .await;
+                    CallArg::FundsWithdrawal(coin_type, amount)
+                }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
                     reject_on(
@@ -225,12 +289,8 @@ impl<BS: Clone + Readable> AsyncParser<TypeInput, BS> for DefaultInterp {
                 }
                 7 => {
                     info!("TypeInput: Struct(Box<StructInput>)");
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
+                    // TypeInput::Struct contains StructTag directly (no TypeTag variant prefix)
+                    let _ = struct_tag_parser().parse(input).await;
                 }
                 8 => {
                     info!("TypeInput: U16");
@@ -281,6 +341,10 @@ pub enum CommandResult {
     MergedCoin(CoinData),
     MoveVecMergedCoin(TotalCoinAmount),
     StakingPoolSplitCoin(u64),
+    /// SIP-58: result of funds_accumulator::withdrawal_split
+    FundsWithdrawalSplit(TotalCoinAmount),
+    /// SIP-58: result of balance::redeem_funds
+    BalanceRedeemFunds(TotalCoinAmount),
 }
 
 impl HasOutput<CommandSchema> for DefaultInterp {
@@ -312,11 +376,11 @@ impl<BS: Clone + Readable> AsyncParser<CommandSchema, BS> for DefaultInterp {
                         input,
                     )
                     .await;
-                    // TypeInput is not supported, hence vec of length 0
-                    <SubInterp<DefaultInterp> as AsyncParser<Vec<TypeInput, 0>, BS>>::parse(
-                        &SubInterp(DefaultInterp),
-                        input,
-                    )
+                    // Type args (allow MoveCalls with type args e.g. FundsWithdrawal)
+                    <SubInterp<DefaultInterp> as AsyncParser<
+                        Vec<TypeInput, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+                        BS,
+                    >>::parse(&SubInterp(DefaultInterp), input)
                     .await;
                     let args = <SubInterp<DefaultInterp> as AsyncParser<
                         Vec<ArgumentSchema, MOVE_CALL_ARGS_ARRAY_LENGTH>,
@@ -558,6 +622,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Other => {
                             info!("Input {}: Other - not supported", i);
                         }
+                        CallArg::FundsWithdrawal(coin_type, amt) => {
+                            info!("Input {}: FundsWithdrawal: amount {}", i, amt);
+                            inputs.insert(i, InputValue::FundsWithdrawal(coin_type, amt));
+                        }
                         CallArg::RecipientAddress(v) => {
                             info!("Input {}: RecipientAddress", i);
                             inputs.insert(i, InputValue::RecipientAddress(v));
@@ -646,10 +714,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             ))
                             .await;
                             match res {
-                                Left((tx_type_, total_amt, maybe_validator_addr)) => {
+                                Left((tx_type_, total_amt, maybe_recipient)) => {
                                     tx_type = tx_type_;
                                     if tx_type == ProgrammableTransactionTypeState::StakeTx {
-                                        match (recipient_addr, maybe_validator_addr) {
+                                        match (recipient_addr, maybe_recipient) {
                                             (None, Some(addr)) => recipient_addr = Some(addr),
                                             _ => {
                                                 reject_on(
@@ -659,6 +727,12 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                                 )
                                                 .await
                                             }
+                                        }
+                                    } else if tx_type
+                                        == ProgrammableTransactionTypeState::TransferTx
+                                    {
+                                        if let Some(addr) = maybe_recipient {
+                                            recipient_addr = Some(addr);
                                         }
                                     }
                                     // As we only support one MoveCall,
@@ -866,6 +940,127 @@ async fn handle_move_call<OD: HasObjectData>(
     ),
     CommandResult,
 > {
+    let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
+        args.get(arg_ix).and_then(|arg| match arg {
+            Argument::Input(ix) => inputs.get(ix),
+            _ => None,
+        })
+    };
+
+    // SIP-58 FundsWithdrawal: 0x2::funds_accumulator, 0x2::balance
+    if package == SUI_COIN_ID {
+        if core::str::from_utf8(module.as_slice()) == Ok("funds_accumulator")
+            && core::str::from_utf8(function.as_slice()) == Ok("withdrawal_split")
+        {
+            info!("MoveCall 0x2::funds_accumulator::withdrawal_split");
+            match (get_arg_input(0), get_arg_input(1)) {
+                (Some(InputValue::FundsWithdrawal(coin_type, amt)), Some(_)) => {
+                    let total = TotalCoinAmount {
+                        total_amount: *amt,
+                        coin_type: *coin_type,
+                        includes_gas_coin: false,
+                    };
+                    return Right(CommandResult::FundsWithdrawalSplit(total));
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("balance")
+            && core::str::from_utf8(function.as_slice()) == Ok("redeem_funds")
+        {
+            info!("MoveCall 0x2::balance::redeem_funds");
+            match args.first() {
+                Some(Argument::Result(ix)) => match command_results.get(ix) {
+                    Some(CommandResult::FundsWithdrawalSplit(t)) => {
+                        return Right(CommandResult::BalanceRedeemFunds(*t));
+                    }
+                    _ => {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                },
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("balance")
+            && core::str::from_utf8(function.as_slice()) == Ok("send_funds")
+        {
+            info!("MoveCall 0x2::balance::send_funds");
+            // SIP-58: `0x2::balance::send_funds<T>(balance: Balance<T>, recipient: address)` (see
+            // https://github.com/sui-foundation/sips/blob/main/sips/sip-58.md). Typical PTB wiring
+            // matches that API: balance from the prior `redeem_funds` step (`Argument::Result`), and
+            // the recipient address as a transaction input (`Argument::Input` → `RecipientAddress`).
+            // SIP-58 specifies the Move signature, not every legal PTB encoding; we only support this
+            // standard shape. Other `Argument` variants for the recipient (e.g. GasCoin, Result,
+            // NestedResult) or non-address inputs are rejected rather than resolved indirectly.
+            match (args.first(), args.get(1)) {
+                (Some(Argument::Result(ix)), Some(Argument::Input(recipient_ix))) => {
+                    match command_results.get(ix) {
+                        Some(CommandResult::BalanceRedeemFunds(t)) => {
+                            match inputs.get(recipient_ix) {
+                                Some(InputValue::RecipientAddress(addr)) => {
+                                    return Left((
+                                        ProgrammableTransactionTypeState::TransferTx,
+                                        *t,
+                                        Some(*addr),
+                                    ));
+                                }
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        _ => {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                }
+                (Some(Argument::Result(_)), Some(_)) => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
+        }
+    }
+
     if package != SUI_SYSTEM_ID {
         reject_on(
             core::file!(),
@@ -886,13 +1081,6 @@ async fn handle_move_call<OD: HasObjectData>(
             _ => None,
         }
     }
-
-    let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
-        args.get(arg_ix).and_then(|arg| match arg {
-            Argument::Input(ix) => inputs.get(ix),
-            _ => None,
-        })
-    };
 
     if core::str::from_utf8(module.as_slice()) == Ok("sui_system")
         && core::str::from_utf8(function.as_slice()) == Ok("request_add_stake")
@@ -981,7 +1169,7 @@ async fn handle_move_call<OD: HasObjectData>(
                 Argument::Result(ix) => command_results.get(ix),
                 _ => None,
             }) {
-            t.clone()
+            *t
         } else {
             reject_on(
                 core::file!(),
@@ -1168,7 +1356,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
     *total_coin_amount = Some(
         get_total_amount_for_coins(
             coins.as_slice(),
-            total_coin_amount.clone(),
+            *total_coin_amount,
             inputs,
             &object_data_source,
             command_results,
@@ -1177,7 +1365,7 @@ async fn handle_transfer_object<OD: HasObjectData>(
     );
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct TotalCoinAmount {
     total_amount: u64,
     coin_type: CoinType,
@@ -1261,7 +1449,7 @@ async fn get_total_amount_for_coins<OD: HasObjectData>(
 
         for coin in remaining {
             let amt = get_coin_arg_amount(coin, inputs, object_data_source, command_results).await;
-            match add_to_total_coin_amount(total_amount.clone(), amt) {
+            match add_to_total_coin_amount(total_amount, amt) {
                 Some(v) => total_amount = v,
                 None => {
                     reject_on(
@@ -1315,7 +1503,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
                 }
             }
             Some(InputValue::Object((coin_type, amount))) => CommandArgumentAmount::Coin {
-                coin_type: coin_type.clone(),
+                coin_type: *coin_type,
                 amount: *amount,
             },
             Some(_) => {
@@ -1341,7 +1529,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
             Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
                 if let Some(amount) = coin_amounts.get(*coin_ix as usize) {
                     CommandArgumentAmount::Coin {
-                        coin_type: coin_type.clone(),
+                        coin_type: *coin_type,
                         amount: *amount,
                     }
                 } else {
@@ -1366,7 +1554,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
             Some(CommandResult::SplitCoinAmounts(coin_type, coin_amounts)) => {
                 if coin_amounts.len() == 1 {
                     CommandArgumentAmount::Coin {
-                        coin_type: coin_type.clone(),
+                        coin_type: *coin_type,
                         amount: coin_amounts[0],
                     }
                 } else {
@@ -1379,7 +1567,7 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
                 }
             }
             Some(CommandResult::MergedCoin((coin_type, amount))) => CommandArgumentAmount::Coin {
-                coin_type: coin_type.clone(),
+                coin_type: *coin_type,
                 amount: *amount,
             },
             _ => {
@@ -1423,7 +1611,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((v, _))) => v.clone(),
+            Some(InputValue::Object((v, _))) => *v,
             _ => {
                 info!("SplitCoins input refers to non ObjectRef");
                 reject_on(
@@ -1442,7 +1630,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     _ => None,
                 })
             {
-                v.clone()
+                *v
             } else {
                 reject_on(
                     core::file!(),
@@ -1454,7 +1642,7 @@ async fn handle_split_coins<OD: HasObjectData>(
         }
 
         Argument::Result(command_ix) => match command_results.get(&command_ix) {
-            Some(CommandResult::MergedCoin((v, _))) => v.clone(),
+            Some(CommandResult::MergedCoin((v, _))) => *v,
             _ => {
                 reject_on(
                     core::file!(),
@@ -1531,7 +1719,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
             }
             Some(InputValue::Object((coin_type, amt))) => {
                 total_amount_2 += amt;
-                coin_type.clone()
+                *coin_type
             }
             _ => {
                 info!("MergeCoins input refers to non ObjectRef");
@@ -1554,7 +1742,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 })
             {
                 total_amount_2 += amt;
-                v.clone()
+                *v
             } else {
                 reject_on(
                     core::file!(),
@@ -1787,11 +1975,21 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKin
     }
 }
 
-impl HasOutput<TransactionExpiration> for DefaultInterp {
-    type Output = ();
+/// Parsed TransactionExpiration variant. SIP-58: ValidDuring required for stateless tx (empty gas payment).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum TransactionExpirationVariant {
+    None,
+    Epoch,
+    ValidDuring,
 }
 
-impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInterp {
+pub struct TransactionExpirationParser;
+
+impl HasOutput<TransactionExpiration> for TransactionExpirationParser {
+    type Output = TransactionExpirationVariant;
+}
+
+impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for TransactionExpirationParser {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
@@ -1803,10 +2001,35 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for DefaultInt
             match enum_variant {
                 0 => {
                     info!("TransactionExpiration: None");
+                    TransactionExpirationVariant::None
                 }
                 1 => {
                     info!("TransactionExpiration: Epoch");
                     <DefaultInterp as AsyncParser<EpochId, BS>>::parse(&DefaultInterp, input).await;
+                    TransactionExpirationVariant::Epoch
+                }
+                2 => {
+                    info!("TransactionExpiration: ValidDuring (SIP-58)");
+                    <(
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        SubInterp<DefaultInterp>,
+                        DefaultInterp,
+                        DefaultInterp,
+                    ) as AsyncParser<ValidDuringSchema, BS>>::parse(
+                        &(
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            SubInterp(DefaultInterp),
+                            DefaultInterp,
+                            DefaultInterp,
+                        ),
+                        input,
+                    )
+                    .await;
+                    TransactionExpirationVariant::ValidDuring
                 }
                 _ => {
                     reject_on(
@@ -1908,13 +2131,13 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 
                     let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
 
-                    // Try to find the total amount of all gas payment objects.
-                    // This value may be necessary if the transaction contains transfer of entire GasCoin.
-                    // SIP-58: gas_coins may be empty (gas paid from address balance); total_gas_amount = Some(0).
+                    // Try to find the total amount of all gas payment objects
+                    // This value may be necessary if the transaction contains transfer of entire GasCoin
+                    // SIP-58: gas_coins may be empty (gas paid from address balance)
                     let mut total_gas_amount: Option<u64> = Some(0);
-                    for digest in gas_coins {
+                    for digest in gas_coins.iter() {
                         if let Some(amt0) = total_gas_amount {
-                            let coin_data = self.object_data_source.get_object_data(&digest).await;
+                            let coin_data = self.object_data_source.get_object_data(digest).await;
                             match coin_data {
                                 Some((_, amt)) => total_gas_amount = Some(amt0 + amt),
                                 _ => total_gas_amount = None,
@@ -1922,13 +2145,23 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         }
                     }
 
-                    <DefaultInterp as AsyncParser<TransactionExpiration, BS>>::parse(
-                        &DefaultInterp,
-                        input,
-                    )
-                    .await;
+                    let expiration = TransactionExpirationParser.parse(input).await;
+                    let gas_from_address_balance = gas_coins.is_empty();
 
-                    (v, (gas_budget, total_gas_amount))
+                    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
+                    if gas_from_address_balance
+                        && expiration != TransactionExpirationVariant::ValidDuring
+                    {
+                        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
+                        reject_on::<u64>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    (v, (gas_budget, total_gas_amount, gas_from_address_balance))
                 }
                 _ => {
                     reject_on(
@@ -1949,15 +2182,19 @@ pub enum KnownTx {
         coin_type: CoinType,
         total_amount: u64,
         gas_budget: u64,
+        /// SIP-58: true when gas paid from address balance (empty gas_data.payment)
+        gas_from_address_balance: bool,
     },
     StakeTx {
         recipient: SuiAddressRaw,
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     },
     UnstakeTx {
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     },
 }
 
@@ -1981,7 +2218,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
                         // total value of all gas payment objects
@@ -1995,6 +2232,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         coin_type: SUI_COIN_TYPE,
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::TransferTokenTx {
@@ -2002,12 +2240,13 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     coin_type,
                 } => {
-                    let (gas_budget, _) = d.1;
+                    let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::TransferTx {
                         recipient,
                         coin_type,
                         total_amount: amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::StakeTx {
@@ -2015,7 +2254,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     amount,
                     includes_gas_coin,
                 } => {
-                    let (gas_budget, maybe_gas_coin_amount) = d.1;
+                    let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
                         // total value of all gas payment objects
@@ -2028,13 +2267,15 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         recipient,
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
                 ProgrammableTransaction::UnstakeTx { total_amount } => {
-                    let (gas_budget, _) = d.1;
+                    let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::UnstakeTx {
                         total_amount,
                         gas_budget,
+                        gas_from_address_balance,
                     })
                 }
             }

@@ -84,7 +84,11 @@ impl<T: Copy + core::fmt::Debug, const N: usize> Trie<T, N> {
         N
     }
 
-    pub const fn add_to_trie<'a>(
+    pub const fn is_empty(&self) -> bool {
+        N == 0
+    }
+
+    pub const fn add_to_trie(
         self,
         mut alloc_idx: usize,
         k: usize,
