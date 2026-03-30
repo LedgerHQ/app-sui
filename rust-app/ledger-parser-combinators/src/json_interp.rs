@@ -127,7 +127,7 @@ fn get_json_token<'a>(
                             cursor = tail;
                             continue;
                         }
-                        if c.is_digit(10) || c == '-' {
+                        if c.is_ascii_digit() || c == '-' {
                             *state = JsonTokenizerState::InNumber;
                             break Ok((JsonToken::BeginNumber, cursor));
                         }
@@ -351,8 +351,7 @@ impl<T, S: ParserCommon<T>> ParserCommon<Json<T>> for Json<S> {
     }
     fn init_in_place(&self, state: *mut core::mem::MaybeUninit<Self::State>) {
         unsafe {
-            (core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0) as *mut JsonTokenizerState)
-                .write(JsonTokenizerState::Value);
+            core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0).write(JsonTokenizerState::Value);
         }
         self.0.init_in_place(unsafe {
             core::ptr::addr_of_mut!((*(*state).as_mut_ptr()).0)
@@ -363,9 +362,9 @@ impl<T, S: ParserCommon<T>> ParserCommon<Json<T>> for Json<S> {
 
 impl<T, S: JsonInterp<T>> InterpParser<Json<T>> for Json<S> {
     #[inline(never)]
-    fn parse<'a, 'b>(
+    fn parse<'a>(
         &self,
-        state: &'b mut Self::State,
+        state: &mut Self::State,
         chunk: &'a [u8],
         destination: &mut Option<Self::Returning>,
     ) -> ParseResult<'a> {
@@ -564,9 +563,8 @@ impl<const N: usize> JsonInterp<JsonAny> for JsonStringAccumulate<N> {
         token: JsonToken<'a>,
         destination: &mut Option<Self::Returning>,
     ) -> Result<(), Option<OOB>> {
-        match destination {
-            None => set_from_thunk(destination, || Some(ArrayVec::new())),
-            Some(_) => {}
+        if destination.is_none() {
+            set_from_thunk(destination, || Some(ArrayVec::new()));
         }
         let mut extend_dest = |c: &[u8]| -> Result<(), Option<OOB>> {
             destination
@@ -1469,10 +1467,9 @@ impl<const N: usize> JsonInterp<JsonString> for JsonStringAccumulate<N> {
     ) -> Result<(), Option<OOB>> {
         match (state, token) {
             (state @ JsonStringAccumulateState::Start, JsonToken::BeginString) => {
-                match destination {
-                    // This is intentional, it allows caller to append to an ArrayVec if necessary
-                    None => set_from_thunk(destination, || Some(ArrayVec::new())),
-                    Some(_) => {}
+                // This is intentional, it allows caller to append to an ArrayVec if necessary
+                if destination.is_none() {
+                    set_from_thunk(destination, || Some(ArrayVec::new()));
                 }
                 *state = JsonStringAccumulateState::Accumulating;
                 Err(None)
@@ -1570,9 +1567,8 @@ impl<A, I: JsonInterp<A>> JsonInterp<Alt<A, JsonAny>> for OrDropAny<I> {
         destination: &mut Option<Self::Returning>,
     ) -> Result<(), Option<OOB>> {
         let mut rv2 = None;
-        match destination {
-            None => set_from_thunk(destination, || Some(None)),
-            Some(_) => (),
+        if destination.is_none() {
+            set_from_thunk(destination, || Some(None));
         }
         match (
             state1
@@ -1644,9 +1640,8 @@ where
         destination: &mut Option<Self::Returning>,
     ) -> Result<(), Option<OOB>> {
         let mut rv2 = None;
-        match destination {
-            None => set_from_thunk(destination, || Some(None)),
-            Some(_) => (),
+        if destination.is_none() {
+            set_from_thunk(destination, || Some(None));
         }
         match (
             state1

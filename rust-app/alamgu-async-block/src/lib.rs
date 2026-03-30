@@ -144,7 +144,7 @@ pub struct HostIOState {
 impl HostIOState {
     pub const fn new(comm: &'static RefCell<io::Comm>) -> HostIOState {
         HostIOState {
-            comm: comm,
+            comm,
             requested_block: None,
             sent_command: None,
         }
@@ -286,9 +286,9 @@ impl HostIO {
         WriterFuture {
             io: self,
             sent: false,
-            cmd: cmd,
-            data: data,
-            wait: wait,
+            cmd,
+            data,
+            wait,
         }
     }
 
@@ -325,7 +325,7 @@ impl HostIO {
     /// Get the parameters for the current APDU. Must be called first, while the
     /// HostToLedgerCmd::START message is still in the buffer.
     pub fn get_params<const N: usize>(self) -> Option<ArrayVec<ByteStream, N>> {
-        if (*self.get_comm().ok()?.get_data().ok()?.get(0)?)
+        if (*self.get_comm().ok()?.get_data().ok()?.first()?)
             .try_into()
             .ok()
             == Some(HostToLedgerCmd::START)
@@ -392,26 +392,24 @@ pub struct ByteStream {
 
 impl ByteStream {
     /// Get the current block.
-    fn get_current_block<'a>(&'a mut self) -> impl 'a + Future<Output = Ref<'static, Block>> {
-        async move {
-            if self.current_chunk == [0; 32] {
-                let _: () = reject(SyscallError::InvalidParameter as u16).await;
-            }
-            let chunk_res = self.host_io.get_chunk(self.current_chunk).await;
-            match chunk_res {
-                Ok(a) => match Ref::filter_map(a, Block::from_raw_slice_opt) {
-                    Ok(r) => r,
-                    Err(_) => reject(SyscallError::InvalidParameter as u16).await,
-                },
+    async fn get_current_block(&mut self) -> Ref<'static, Block> {
+        if self.current_chunk == [0; 32] {
+            let _: () = reject(SyscallError::InvalidParameter as u16).await;
+        }
+        let chunk_res = self.host_io.get_chunk(self.current_chunk).await;
+        match chunk_res {
+            Ok(a) => match Ref::filter_map(a, Block::from_raw_slice_opt) {
+                Ok(r) => r,
                 Err(_) => reject(SyscallError::InvalidParameter as u16).await,
-            }
+            },
+            Err(_) => reject(SyscallError::InvalidParameter as u16).await,
         }
     }
 
     /// Get the rest of the current block that we have not already processed.
     ///
     /// [block] must be the current block.
-    fn slice_from_block<'a, 'b>(&'a mut self, block: &'b Block) -> &'b [u8] {
+    fn slice_from_block<'a>(&mut self, block: &'a Block) -> &'a [u8] {
         &block.data()[self.current_offset..]
     }
 
@@ -439,7 +437,7 @@ impl Readable for ByteStream {
                 let avail = self.slice_from_block(&block);
                 let consuming = core::cmp::min(avail.len(), buffer.remaining_capacity());
                 buffer.try_extend_from_slice(&avail[0..consuming]).ok();
-                self.consume(&*block, consuming);
+                self.consume(&block, consuming);
             }
             buffer.into_inner().unwrap()
         }
@@ -466,7 +464,6 @@ pub fn poll_with_trivial_context<Fut: Future + ?Sized>(
     let waker = unsafe { Waker::from_raw(RawWaker::new(&(), RAW_WAKER_VTABLE.get_ref())) };
     let mut ctxd = Context::from_waker(&waker);
     let r = f.poll(&mut ctxd);
-    core::mem::forget(ctxd);
     core::mem::forget(waker);
     r
 }
@@ -495,7 +492,7 @@ pub fn poll_apdu_handlers<'a: 'b, 'b, F: Future<Output = ()>, Ins, A: Fn(HostIO,
     io: HostIO,
     apdus: A,
 ) -> Result<(), Reply> {
-    let command = if io.get_comm()?.get_data()?.len() > 0 {
+    let command = if !io.get_comm()?.get_data()?.is_empty() {
         io.get_comm()?.get_data()?[0].try_into()
     } else {
         Ok(HostToLedgerCmd::START)

@@ -628,6 +628,7 @@ dependencies = [
  "num-traits",
  "paste",
  "pin-project",
+ "testmacro",
  "trie-enum",
 ]
 
@@ -1306,6 +1307,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "testmacro"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e81321e8c082256753e5af547c7352ff5a9f1958c4c7e7de1eb8289ce65884f2"
+dependencies = [
+ "quote",
+ "syn 1.0.107",
 ]
 
 [[package]]

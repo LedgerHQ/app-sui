@@ -6,9 +6,9 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrayvec = { version = "0.7.2", default-features = false }
-pin-project = "1.0.10"
-ledger_device_sdk = { version = "1.32.0" }
+arrayvec = { workspace = true }
+pin-project = { workspace = true }
+ledger_device_sdk = { workspace = true }
 ledger-parser-combinators = { path = "../ledger-parser-combinators" }
 
 [features]

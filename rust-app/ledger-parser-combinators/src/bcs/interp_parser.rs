@@ -4,15 +4,13 @@ use crate::interp_parser::*;
 impl ParserCommon<bool> for DefaultInterp {
     type State = ();
     type Returning = bool;
-    fn init(&self) -> Self::State {
-        ()
-    }
+    fn init(&self) -> Self::State {}
 }
 
 impl InterpParser<bool> for DefaultInterp {
-    fn parse<'a, 'b>(
+    fn parse<'a>(
         &self,
-        _state: &'b mut Self::State,
+        _state: &mut Self::State,
         chunk: &'a [u8],
         destination: &mut Option<Self::Returning>,
     ) -> ParseResult<'a> {
@@ -47,9 +45,9 @@ impl<T, S: ParserCommon<T>> ParserCommon<Option<T>> for SubInterp<S> {
 }
 
 impl<T, S: InterpParser<T>> InterpParser<Option<T>> for SubInterp<S> {
-    fn parse<'a, 'b>(
+    fn parse<'a>(
         &self,
-        state: &'b mut Self::State,
+        state: &mut Self::State,
         chunk: &'a [u8],
         destination: &mut Option<Self::Returning>,
     ) -> ParseResult<'a> {
@@ -105,9 +103,9 @@ impl ParserCommon<ULEB128> for DefaultInterp {
 }
 
 impl InterpParser<ULEB128> for DefaultInterp {
-    fn parse<'a, 'b>(
+    fn parse<'a>(
         &self,
-        state: &'b mut Self::State,
+        state: &mut Self::State,
         chunk: &'a [u8],
         destination: &mut Option<Self::Returning>,
     ) -> ParseResult<'a> {
