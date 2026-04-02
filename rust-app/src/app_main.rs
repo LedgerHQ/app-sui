@@ -124,6 +124,11 @@ pub fn app_main(ctx: &RunCtx) {
             }
             Err(sw) => {
                 PinMut::as_mut(&mut states.0.borrow_mut()).set(None);
+                // Clear block-protocol bookkeeping so the next APDU cannot inherit a dangling
+                // GetChunk / requested_block from a rejected or failed exchange.
+                let mut h = hostio_state.0.borrow_mut();
+                h.requested_block = None;
+                h.sent_command = None;
                 if ctx.is_swap() {
                     comm.borrow_mut().swap_reply(sw);
                 } else {
