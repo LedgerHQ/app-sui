@@ -1,8 +1,5 @@
 name: Build and run functional tests
 
-permissions:
-  contents: read
-
 on:
   workflow_dispatch:
   push:
