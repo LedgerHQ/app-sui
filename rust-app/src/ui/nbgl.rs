@@ -1,6 +1,7 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::common::{CoinType, SUI_COIN_DECIMALS};
+use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::swap::params::TxParams;
 use crate::ui::common::*;
 use crate::utils::*;
 
@@ -8,17 +9,13 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::ToString;
 
+use crate::crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::hasher::HexHash;
 use core::cell::RefCell;
 use either::*;
-use ledger_crypto_helpers::common::HexSlice;
-use ledger_crypto_helpers::hasher::HexHash;
-use ledger_device_sdk::include_gif;
 use ledger_device_sdk::nbgl::*;
 
-#[cfg(target_os = "apex_p")]
-pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_48x48.png", NBGL));
-#[cfg(any(target_os = "stax", target_os = "flex"))]
-pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_64x64.gif", NBGL));
+use super::*;
 
 #[derive(Copy, Clone)]
 pub struct UserInterface {
@@ -53,10 +50,7 @@ impl UserInterface {
     pub fn confirm_sign_tx(
         &self,
         address: &SuiPubKeyAddress,
-        recipient: [u8; 32],
-        total_amount: u64,
-        coin_type: CoinType,
-        gas_budget: u64,
+        params: &TxParams,
         ctx: &RunCtx,
     ) -> Option<()> {
         self.do_refresh.replace(true);
@@ -66,18 +60,15 @@ impl UserInterface {
         };
         let to = Field {
             name: "To",
-            value: &format!("0x{}", HexSlice(&recipient)),
+            value: &format!("0x{}", HexSlice(&params.destination_address)),
         };
+        let gas_val = format_gas_amount(params.fee, params.gas_from_address_balance);
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
         let ((amt_str, amt_val), coin_fields) =
-            get_coin_and_amount_fields(total_amount, coin_type, ctx);
+            get_coin_and_amount_fields(params.amount, params.coin_type, ctx);
         let amt = Field {
             name: amt_str.as_str(),
             value: amt_val.as_str(),
@@ -117,6 +108,7 @@ impl UserInterface {
         recipient: [u8; 32],
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
@@ -131,13 +123,10 @@ impl UserInterface {
                 &format!("0x{}", HexSlice(&recipient))
             },
         };
+        let gas_val = format_gas_amount(gas_budget, gas_from_address_balance);
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
@@ -170,19 +159,17 @@ impl UserInterface {
         address: &SuiPubKeyAddress,
         total_amount: u64,
         gas_budget: u64,
+        gas_from_address_balance: bool,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        let gas_val = format_gas_amount(gas_budget, gas_from_address_balance);
         let gas = Field {
             name: "Max Gas",
-            value: {
-                let (quotient, remainder_str) =
-                    get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-                &format!("SUI {}.{}", quotient, remainder_str.as_str())
-            },
+            value: &gas_val,
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
@@ -247,5 +234,14 @@ impl UserInterface {
         } else {
             self.do_refresh.replace(true);
         }
+    }
+}
+
+pub fn format_gas_amount(gas_budget: u64, gas_from_address_balance: bool) -> alloc::string::String {
+    let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
+    if gas_from_address_balance {
+        format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
+    } else {
+        format!("SUI {}.{}", quotient, remainder_str.as_str())
     }
 }

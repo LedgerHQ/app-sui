@@ -1,21 +1,31 @@
 [package]
 name = "sui"
-version = "1.4.0"
+version = "1.5.4"
 authors = ["Obsidian Systems"]
-edition = "2018"
+edition = "2021"
 autobins = false
 resolver = "2"
 
-[dependencies]
+[workspace]
+members = ["alamgu-async-block"]
+
+[workspace.dependencies]
+ledger_device_sdk = { version = "1.34.0" }
 arrayvec = { version = "0.7.2", default-features = false }
-ledger-crypto-helpers = { git = "https://github.com/alamgu/ledger-crypto-helpers" }
-ledger-log = { git = "https://github.com/alamgu/ledger-log" }
-ledger-parser-combinators = { git = "https://github.com/alamgu/ledger-parser-combinators", branch="async-split-take-2" }
-alamgu-async-block = { git = "https://github.com/alamgu/alamgu-async-block" }
+pin-project = "1.0.12"
+
+[build-dependencies]
+image = { version = "0.25.7", default-features = false, features = ["gif", "png"] }
+
+[dependencies]
+arrayvec = { workspace = true }
+ledger-parser-combinators = { path = "./ledger-parser-combinators" }
+alamgu-async-block = { path = "./alamgu-async-block" }
 zeroize = { version = "1.5.2", default-features = false }
+base64 = { version = "0.13.0", default-features = false }
 num_enum = { version = "0.5", default-features = false }
 pin-cell = "0.2.0"
-pin-project = "1.0.10"
+pin-project = { workspace = true }
 hex = { version = "0.4.3", default-features = false }
 hex-literal = { version = "0.4.1" }
 defer = "0.2.1"
@@ -24,21 +34,23 @@ either = { version = "1.14.0", default-features = false }
 # Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable
 # speculos logging and change log level.
 [features]
-default = [ ]
-# Pass --features speculos,ledger-log/log_info (or log_trace, etc) to enable speculos logging and change log level.
-speculos = [ "ledger_device_sdk/speculos", "ledger_device_sdk/debug", "ledger-log/speculos", "ledger-log/log_error", "ledger-parser-combinators/logging" ]
-extra_debug = ["ledger-log/log_trace"]
-pending_review_screen = []
+default = []
+# Pass --features speculos to enable logging and change log level.
+speculos = [
+    "ledger_device_sdk/unit_test",
+    "ledger_device_sdk/debug",
+    "ledger_device_sdk/log_trace",
+]
 
 [target.'cfg(target_family = "bolos")'.dependencies]
-ledger_device_sdk = { version = "1.31.0", features=["sys"] }
+ledger_device_sdk = { workspace = true, features = ["sys", "nano_nbgl"] }
 
-[target.'cfg(any(target_os = "nanosplus", target_os = "nanox"))'.dependencies]
-ledger-prompts-ui = { git = "https://github.com/alamgu/ledger-prompts-ui" }
-
-[target.'cfg(target_family = "bolos")'.dev-dependencies.ledger_device_sdk]
-version = "1.31.0"
-features = [ "sys", "speculos" ]
+[target.'cfg(target_family = "bolos")'.dev-dependencies]
+ledger_device_sdk = { workspace = true, features = [
+    "sys",
+    "nano_nbgl",
+    "unit_test",
+] }
 
 [[bin]]
 name = "sui"
@@ -52,14 +64,19 @@ opt-level = 3
 #    error: undefined symbol: core::panicking::panic::
 overflow-checks = false
 lto = "fat"
+[profile.dev.package.ledger-parser-combinators]
+opt-level = 0
 [profile.release]
 opt-level = 3
 overflow-checks = false
 lto = "fat"
+[profile.release.package.ledger-parser-combinators]
+opt-level = 0
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("nanos", "flex", "stax", "apex_p"))'] }
-
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(target_os, values("nanos", "nanosplus", "nanox", "flex", "stax", "apex_p"))',
+] }
 [package.metadata.ledger]
 name = "Sui"
 path = ["44'/784'"]

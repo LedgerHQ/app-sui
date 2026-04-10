@@ -1,8 +1,9 @@
+use crate::crypto_helpers::common::{try_option, Address};
+use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
+use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{
-    CoinType, HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH,
-};
+use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx};
@@ -13,21 +14,22 @@ use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::{ArrayString, ArrayVec};
-use ledger_crypto_helpers::common::{try_option, Address};
-use ledger_crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
-use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
+use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::{StatusWords, SyscallError};
+use ledger_device_sdk::log::{info, trace};
 use ledger_device_sdk::tlv::tlv_dynamic_token::{parse_dynamic_token_tlv, DynamicTokenOut};
 use ledger_device_sdk::tlv::TlvError;
-use ledger_log::{info, trace};
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::interp::*;
+use ledger_parser_combinators::schema::*;
 
-#[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::HexSlice;
 
 use core::convert::TryFrom;
 use core::future::Future;
+
+// Payload for a public key request
+pub type Bip32Key = DArray<Byte, U32<{ Endianness::Little }>, 10>;
 
 pub type BipParserImplT = impl AsyncParser<Bip32Key, ByteStream, Output = ArrayVec<u32, 10>>;
 #[define_opaque(BipParserImplT)]
@@ -77,19 +79,9 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-async fn prompt_tx_params(
-    ui: &UserInterface,
-    path: &[u32],
-    TxParams {
-        amount,
-        fee,
-        destination_address,
-    }: TxParams,
-    coin_type: CoinType,
-    ctx: &RunCtx,
-) {
+async fn prompt_tx_params(ui: &UserInterface, path: &[u32], tx_params: TxParams, ctx: &RunCtx) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, destination_address, amount, coin_type, fee, ctx))
+        try_option(ui.confirm_sign_tx(address, &tx_params, ctx))
     })
     .ok()
     .is_none()
@@ -121,6 +113,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     // Read length, and move input[0] by one byte
     let length = usize::from_le_bytes(input[0].read().await);
 
+    info!("apdu sign tx length: {}\n", length);
+
     let known_txn = {
         let mut txn = input[0].clone();
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
@@ -131,6 +125,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         .await
     };
 
+    info!("End of tx_parse");
+
     let is_unknown_txn = known_txn.is_none();
 
     match known_txn {
@@ -139,7 +135,9 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             total_amount,
             coin_type,
             gas_budget,
+            gas_from_address_balance,
         }) => {
+            info!("Known transfer tx\n");
             let mut bs = input[1].clone();
             let path = BIP_PATH_PARSER.parse(&mut bs).await;
             if !path.starts_with(&BIP32_PREFIX[0..2]) {
@@ -150,6 +148,8 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 amount: total_amount,
                 fee: gas_budget,
                 destination_address: recipient,
+                coin_type,
+                gas_from_address_balance,
             };
 
             if ctx.is_swap() {
@@ -157,21 +157,16 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 check_tx_params(expected, &tx_params).await;
             } else {
                 // Show prompts after all inputs have been parsed
-                NoinlineFut(prompt_tx_params(
-                    &ui,
-                    path.as_slice(),
-                    tx_params,
-                    coin_type,
-                    ctx,
-                ))
-                .await;
+                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, ctx)).await;
             }
         }
         Some(KnownTx::StakeTx {
             recipient,
             total_amount,
             gas_budget,
+            gas_from_address_balance,
         }) => {
+            info!("Known stake tx\n");
             if ctx.is_swap() {
                 reject::<()>(SyscallError::NotSupported as u16).await;
             }
@@ -182,7 +177,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_stake_tx(address, recipient, total_amount, gas_budget))
+                try_option(ui.confirm_stake_tx(
+                    address,
+                    recipient,
+                    total_amount,
+                    gas_budget,
+                    gas_from_address_balance,
+                ))
             })
             .ok()
             .is_none()
@@ -193,7 +194,9 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
         Some(KnownTx::UnstakeTx {
             total_amount,
             gas_budget,
+            gas_from_address_balance,
         }) => {
+            info!("Known unstake tx\n");
             if ctx.is_swap() {
                 reject::<()>(SyscallError::NotSupported as u16).await;
             }
@@ -204,7 +207,12 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_unstake_tx(address, total_amount, gas_budget))
+                try_option(ui.confirm_unstake_tx(
+                    address,
+                    total_amount,
+                    gas_budget,
+                    gas_from_address_balance,
+                ))
             })
             .ok()
             .is_none()
@@ -213,6 +221,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             };
         }
         None => {
+            info!("Unknown tx\n");
             if ctx.is_swap() {
                 // Reject unknown transactions in swap mode
                 reject::<()>(SyscallError::NotSupported as u16).await;
@@ -224,34 +233,43 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     }
 
     NoinlineFut(async move {
-        let mut hasher: Blake2b = Hasher::new();
+        let mut hasher = ledger_device_sdk::hash::blake2::Blake2b_256::new();
         {
             let mut txn = input[0].clone();
             const CHUNK_SIZE: usize = 128;
             let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
             for _ in 0..chunks {
                 let b: [u8; CHUNK_SIZE] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
             for _ in 0..rem {
                 let b: [u8; 1] = txn.read().await;
-                hasher.update(&b);
+                let _ = hasher.update(&b);
             }
         }
-        let hash: HexHash<32> = hasher.finalize();
+        info!("sign_apdu: hash computed");
+        let mut hash: HexHash<32> = Default::default();
+        let _ = hasher.finalize(&mut hash.0);
+
         if is_unknown_txn {
             // Show prompts after all inputs have been parsed
+            info!("sign_apdu: about to confirm_blind_sign_tx");
             if ui.confirm_blind_sign_tx(&hash).is_none() {
+                info!("sign_apdu: confirm_blind_sign_tx rejected");
                 reject::<()>(StatusWords::UserCancelled as u16).await;
             };
+            info!("sign_apdu: confirm_blind_sign_tx approved");
         }
         let path = BIP_PATH_PARSER.parse(&mut input[1].clone()).await;
         if !path.starts_with(&BIP32_PREFIX[0..2]) {
             reject::<()>(SyscallError::InvalidParameter as u16).await;
         }
+        info!("sign_apdu: about to eddsa_sign and result_final");
         if let Some(sig) = { eddsa_sign(&path, true, &hash.0).ok() } {
             io.result_final(&sig.0[0..]).await;
+            info!("sign_apdu: result_final sent");
         } else {
+            info!("sign_apdu: eddsa_sign failed");
             reject::<()>(SyscallError::Unspecified as u16).await;
         }
     })

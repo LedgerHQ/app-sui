@@ -1,8 +1,6 @@
-use arrayvec::ArrayVec;
 use core::future::Future;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
-use ledger_parser_combinators::endianness::*;
 use ledger_parser_combinators::interp::*;
 
 // Schema
@@ -22,6 +20,7 @@ pub type Amount = U64LE;
 
 pub type U64LE = U64<{ Endianness::Little }>;
 pub type U16LE = U16<{ Endianness::Little }>;
+pub type U32LE = U32<{ Endianness::Little }>;
 
 pub type Sha3_256Hash = Array<Byte, 33>;
 
@@ -35,10 +34,35 @@ pub type CoinID = [u8; 32];
 // For parsing longer length is also handled, but it will be truncated to this
 pub const COIN_STRING_LENGTH: usize = 16;
 
-pub type CoinModuleName = ArrayVec<u8, COIN_STRING_LENGTH>;
-pub type CoinFunctionName = ArrayVec<u8, COIN_STRING_LENGTH>;
+/// Fixed-size, zero-padded module / function name bytes so `CoinType` is `Copy`.
+pub type CoinNameBytes = [u8; COIN_STRING_LENGTH];
 
-pub type CoinType = (CoinID, CoinModuleName, CoinFunctionName);
+/// `(package_id, module, type_name)` — names are zero-padded to `COIN_STRING_LENGTH`.
+pub type CoinType = (CoinID, CoinNameBytes, CoinNameBytes);
+
+#[inline]
+pub fn pad_coin_name_bytes(src: &[u8]) -> CoinNameBytes {
+    let mut out = [0u8; COIN_STRING_LENGTH];
+    let n = src.len().min(COIN_STRING_LENGTH);
+    out[..n].copy_from_slice(&src[..n]);
+    out
+}
+
+/// Slice for UTF-8 / equality: trim trailing padding zeros.
+#[inline]
+pub fn coin_name_trimmed(s: &[u8]) -> &[u8] {
+    let end = s.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+    &s[..end]
+}
+
+#[inline]
+pub fn coin_type_from_short_str(id: CoinID, module: &str, function: &str) -> CoinType {
+    (
+        id,
+        pad_coin_name_bytes(module.as_bytes()),
+        pad_coin_name_bytes(function.as_bytes()),
+    )
+}
 
 pub type CoinData = (CoinType, u64);
 
@@ -54,8 +78,11 @@ pub const SUI_SYSTEM_STATE_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
 ];
 
-// This does not contain the correct module and function names, as we don't have a way to create const ArrayVec with them
-pub const SUI_COIN_TYPE: CoinType = (SUI_COIN_ID, ArrayVec::new_const(), ArrayVec::new_const());
+pub const SUI_COIN_TYPE: CoinType = (
+    SUI_COIN_ID,
+    [0u8; COIN_STRING_LENGTH],
+    [0u8; COIN_STRING_LENGTH],
+);
 
 pub const SUI_COIN_DECIMALS: u8 = 9;
 

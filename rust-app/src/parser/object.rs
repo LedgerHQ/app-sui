@@ -1,12 +1,12 @@
+use crate::crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::hasher::HexHash;
 use crate::parser::common::*;
 use arrayvec::ArrayVec;
 use core::convert::TryInto;
 use core::future::Future;
-#[cfg(feature = "speculos")]
-use ledger_crypto_helpers::common::HexSlice;
-use ledger_crypto_helpers::hasher::{Blake2b, Hasher, HexHash};
+use ledger_device_sdk::hash::HashInit;
 use ledger_device_sdk::io::SyscallError;
-use ledger_log::info;
+use ledger_device_sdk::log::info;
 use ledger_parser_combinators::async_parser::*;
 use ledger_parser_combinators::bcs::async_parser::*;
 use ledger_parser_combinators::core_parsers::*;
@@ -39,13 +39,16 @@ pub type StorageRebate = U64LE;
 pub const STRING_LENGTH: usize = 64;
 pub type String = Vec<Byte, STRING_LENGTH>;
 
-pub type StructTag = (SuiAddress, String, String, TypeParams);
-pub type TypeParams = Vec<TypeTag2, 5>;
+pub type StructTag = (SuiAddress, String, String, Vec<SkipTypeTag, 5>);
 
 pub struct TypeTag;
 
-// This is to avoid recursion of async parsers
-pub struct TypeTag2;
+/// Schema for skipping a type param. Iterative loop, no recursion, no heap.
+pub struct SkipTypeTag;
+
+const MAX_TYPE_PARAM_DEPTH: u8 = 2;
+/// Max nesting for type params (e.g. `Vec<Struct<Vec<T>>>`). Exceeding rejects.
+const SKIP_TYPE_TAG_STACK_CAP: usize = 16;
 
 // Parsed data
 pub enum MoveObjectType {
@@ -56,7 +59,7 @@ pub enum MoveObjectType {
     /// A record of a staked SUI coin (i.e., `0x3::staking_pool::StakedSui`)
     StakedSui,
     /// A non-SUI coin type (i.e., `0x2::coin::Coin<T> where T != 0x2::sui::SUI`)
-    Coin((CoinID, CoinModuleName, CoinFunctionName)),
+    Coin(CoinType),
 }
 
 // Parsers
@@ -187,11 +190,11 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
                 }
                 3 => {
                     info!("MoveObjectType: Coin(TypeTag)");
-                    if let Some((coin_id, module, name)) =
+                    if let Some(ct) =
                         <DefaultInterp as AsyncParser<TypeTag, BS>>::parse(&DefaultInterp, input)
                             .await
                     {
-                        MoveObjectType::Coin((coin_id, module, name))
+                        MoveObjectType::Coin(ct)
                     } else {
                         reject_on(
                             core::file!(),
@@ -215,7 +218,7 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
 }
 
 pub const fn struct_tag_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTag, BS, Output = (CoinID, CoinModuleName, CoinFunctionName)> {
+) -> impl AsyncParser<StructTag, BS, Output = CoinType> {
     Action(
         (
             DefaultInterp,
@@ -227,7 +230,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
-            ArrayVec<_, 5>,
+            ArrayVec<(), 5>,
         )| {
             info!("StructTag Address 0x{}", HexSlice(&address));
             info!(
@@ -239,20 +242,24 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", _type_tags.len());
-            Some((
+            let mod_short: ArrayVec<u8, COIN_STRING_LENGTH> = module
+                .drain(..module.len().min(COIN_STRING_LENGTH))
+                .collect();
+            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> =
+                name.drain(..name.len().min(COIN_STRING_LENGTH)).collect();
+            // Action requires `Fn(...) -> Option<R>` (see async_parser `Action` impl).
+            let out: CoinType = (
                 address,
-                module
-                    .drain(..module.len().min(COIN_STRING_LENGTH))
-                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
-                name.drain(..name.len().min(COIN_STRING_LENGTH))
-                    .collect::<ArrayVec<_, COIN_STRING_LENGTH>>(),
-            ))
+                pad_coin_name_bytes(mod_short.as_slice()),
+                pad_coin_name_bytes(name_short.as_slice()),
+            );
+            Some(out)
         },
     )
 }
 
 impl HasOutput<TypeTag> for DefaultInterp {
-    type Output = Option<(CoinID, CoinModuleName, CoinFunctionName)>;
+    type Output = Option<CoinType>;
 }
 
 impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
@@ -310,44 +317,22 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
     }
 }
 
-impl HasOutput<TypeTag2> for DefaultInterp {
+impl HasOutput<SkipTypeTag> for DefaultInterp {
     type Output = ();
 }
 
-impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
+impl<BS: Clone + Readable> AsyncParser<SkipTypeTag, BS> for DefaultInterp {
     type State<'c>
         = impl Future<Output = Self::Output> + 'c
     where
         BS: 'c;
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
-            let enum_variant =
-                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-            match enum_variant {
-                0 => {
-                    info!("TypeTag2: Bool");
-                }
-                1 => {
-                    info!("TypeTag2: U8");
-                }
-                2 => {
-                    info!("TypeTag2: U64");
-                }
-                3 => {
-                    info!("TypeTag2: U128");
-                }
-                4 => {
-                    info!("TypeTag2: Address");
-                }
-                5 => {
-                    info!("TypeTag2: Signer");
-                }
-                6 => {
-                    info!("TypeTag2: Vector(Box<TypeTag2>)");
-                }
-                7 => {
-                    info!("TypeTag2: Struct(StructTag)");
-                    // Don't do recursion; ignore this object
+            let mut stack: ArrayVec<(u32, u8), SKIP_TYPE_TAG_STACK_CAP> = ArrayVec::new();
+            stack.push((1, MAX_TYPE_PARAM_DEPTH));
+
+            while let Some((count, depth)) = stack.pop() {
+                if count > 1 && stack.try_push((count - 1, depth)).is_err() {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -355,13 +340,67 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag2, BS> for DefaultInterp {
                     )
                     .await
                 }
-                _ => {
-                    reject_on(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await
+
+                let variant: u32 =
+                    <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+                match variant {
+                    0..=5 | 8..=10 => {}
+                    6 => {
+                        if stack.try_push((1, depth)).is_err() {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                    7 => {
+                        if depth == 0 {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                        let _addr: [u8; 32] = input.read().await;
+                        // BCS length-prefixed strings (same as `Vec<Byte, STRING_LENGTH>` in StructTag).
+                        <DropInterp as AsyncParser<Vec<Byte, STRING_LENGTH>, BS>>::parse(
+                            &DropInterp,
+                            input,
+                        )
+                        .await;
+                        <DropInterp as AsyncParser<Vec<Byte, STRING_LENGTH>, BS>>::parse(
+                            &DropInterp,
+                            input,
+                        )
+                        .await;
+                        let type_param_count: u32 =
+                            <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(
+                                &DefaultInterp,
+                                input,
+                            )
+                            .await;
+                        if type_param_count > 0
+                            && stack.try_push((type_param_count, depth - 1)).is_err()
+                        {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    }
+                    _ => {
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
                 }
             }
         }
@@ -421,20 +460,22 @@ impl<BS: Clone + Readable> AsyncParser<OwnerSchema, BS> for DefaultInterp {
 }
 
 pub async fn compute_object_hash<BS: Clone + Readable>(bs: &mut BS, length: usize) -> HexHash<32> {
-    let mut hasher: Blake2b = Hasher::new();
+    let mut hasher = ledger_device_sdk::hash::blake2::Blake2b_256::new();
     let salt = b"Object::";
-    hasher.update(salt);
+    let _ = hasher.update(salt);
 
     const CHUNK_SIZE: usize = 128;
     let (chunks, rem) = (length / CHUNK_SIZE, length % CHUNK_SIZE);
     for _ in 0..chunks {
         let b: [u8; CHUNK_SIZE] = bs.read().await;
-        hasher.update(&b);
+        let _ = hasher.update(&b);
     }
     for _ in 0..rem {
         let b: [u8; 1] = bs.read().await;
-        hasher.update(&b);
+        let _ = hasher.update(&b);
     }
 
-    hasher.finalize::<HexHash<32>>()
+    let mut hash: HexHash<32> = Default::default();
+    let _ = hasher.finalize(&mut hash.0);
+    hash
 }

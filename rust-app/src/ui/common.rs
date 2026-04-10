@@ -1,16 +1,18 @@
 use crate::ctx::{RunCtx, TICKER_LENGTH};
-use crate::parser::common::{CoinType, SUI_COIN_DECIMALS, SUI_COIN_TYPE};
+use crate::parser::common::{
+    coin_name_trimmed, coin_type_from_short_str, CoinType, SUI_COIN_DECIMALS, SUI_COIN_TYPE,
+};
 use crate::utils::*;
 
 extern crate alloc;
 use alloc::format;
 
-use arrayvec::{ArrayString, ArrayVec};
+use crate::crypto_helpers::common::HexSlice;
+use arrayvec::ArrayString;
 use either::*;
 use hex_literal::hex;
-use ledger_crypto_helpers::common::HexSlice;
 
-use ledger_log::trace;
+use ledger_device_sdk::log::trace;
 
 pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
     hex!("3d9fb148e35ef4d74fcfc36995da14fc504b885d5f2bfeca37d6ea2cc044a32d");
@@ -48,8 +50,8 @@ pub fn get_coin_and_amount_fields(
         let v2 = format!(
             "{}::{}::{}",
             HexSlice(&coin_id),
-            core::str::from_utf8(module.as_slice()).unwrap_or("invalid utf-8"),
-            core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
+            core::str::from_utf8(coin_name_trimmed(&module)).unwrap_or("invalid utf-8"),
+            core::str::from_utf8(coin_name_trimmed(&name)).unwrap_or("invalid utf-8")
         );
         let coin = Right((
             ArrayString::from("Coin").unwrap(),
@@ -73,8 +75,8 @@ fn get_known_coin_ticker(
     let ctx_coin_id = ctx.get_token_coin_id();
 
     if *coin_id == ctx_coin_id
-        && module.as_slice() == ctx.get_token_coin_module().as_bytes()
-        && function.as_slice() == ctx.get_token_coin_function().as_bytes()
+        && coin_name_trimmed(module) == ctx.get_token_coin_module().as_bytes()
+        && coin_name_trimmed(function) == ctx.get_token_coin_function().as_bytes()
     {
         return Some((ctx.get_token_ticker(), ctx.get_token_divisor()));
     }
@@ -86,15 +88,7 @@ fn get_known_coin_ticker(
     );
 
     for k in KNOWN_COINS {
-        let mut module = ArrayVec::new();
-        module.try_extend_from_slice(k.module.as_bytes()).unwrap();
-
-        let mut function = ArrayVec::new();
-        function
-            .try_extend_from_slice(k.function.as_bytes())
-            .unwrap();
-
-        if *coin_type == (k.coin_id, module, function) {
+        if *coin_type == coin_type_from_short_str(k.coin_id, k.module, k.function) {
             return Some((ArrayString::from(k.ticker).unwrap(), k.divisor));
         }
     }

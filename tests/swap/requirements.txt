@@ -1,0 +1,4 @@
+# Swap tests: common + swap-specific
+-r ../requirements.txt
+ledger_app_clients.ethereum==0.6.0
+ledger_app_clients.exchange==0.1.0

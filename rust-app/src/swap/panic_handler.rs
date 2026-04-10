@@ -17,7 +17,7 @@ pub(crate) unsafe fn set_swap_panic_handler(handler: fn(&PanicInfo) -> !) {
 }
 
 pub(crate) fn swap_panic_handler(_info: &PanicInfo) -> ! {
-    ledger_log::error!("Swap panic happened! {:#?}", _info);
+    ledger_device_sdk::log::error!("Swap panic happened! {:#?}", _info);
 
     let mut comm = io::Comm::new();
     comm.swap_reply(io::StatusWords::Panic);

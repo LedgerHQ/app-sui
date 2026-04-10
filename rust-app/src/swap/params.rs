@@ -3,7 +3,7 @@ use core::convert::{TryFrom, TryInto};
 use core::mem;
 use core::str;
 
-use crate::parser::common::SuiAddressRaw;
+use crate::parser::common::{CoinType, SuiAddressRaw, SUI_COIN_TYPE};
 use crate::swap::Error;
 
 // Max SUI address str length is 32*2
@@ -121,11 +121,25 @@ impl TryFrom<&custom::PrintableAmountParams> for PrintableAmountParams {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct TxParams {
     pub amount: u64,
     pub fee: u64,
     pub destination_address: SuiAddressRaw,
+    pub coin_type: CoinType,
+    pub gas_from_address_balance: bool,
+}
+
+impl Default for TxParams {
+    fn default() -> Self {
+        Self {
+            amount: 0,
+            fee: 0,
+            destination_address: SuiAddressRaw::default(),
+            coin_type: SUI_COIN_TYPE,
+            gas_from_address_balance: false,
+        }
+    }
 }
 
 impl TryFrom<&custom::CreateTxParams> for TxParams {
@@ -150,6 +164,8 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
             amount,
             fee,
             destination_address,
+            coin_type: SUI_COIN_TYPE,
+            gas_from_address_balance: false,
         })
     }
 }
