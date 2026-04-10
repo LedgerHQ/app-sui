@@ -164,7 +164,7 @@ fn generate_in_place_set(input: syn::DeriveInput) -> quote::__private::TokenStre
 
 fn snake_ident(ident: &proc_macro2::Ident) -> proc_macro2::Ident {
     proc_macro2::Ident::new(
-        &inflector::cases::snakecase::to_snake_case(ident.to_string()),
+        &inflector::cases::snakecase::to_snake_case(&ident.to_string()),
         ident.span(),
     )
 }
