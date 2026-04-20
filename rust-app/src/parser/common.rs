@@ -32,7 +32,7 @@ pub type CoinID = [u8; 32];
 
 // Max string length which will be shown to the user
 // For parsing longer length is also handled, but it will be truncated to this
-pub const COIN_STRING_LENGTH: usize = 16;
+pub const COIN_STRING_LENGTH: usize = 32;
 
 /// Fixed-size, zero-padded module / function name bytes so `CoinType` is `Copy`.
 pub type CoinNameBytes = [u8; COIN_STRING_LENGTH];
@@ -43,6 +43,13 @@ pub type CoinType = (CoinID, CoinNameBytes, CoinNameBytes);
 #[inline]
 pub fn pad_coin_name_bytes(src: &[u8]) -> CoinNameBytes {
     let mut out = [0u8; COIN_STRING_LENGTH];
+    if src.len() > COIN_STRING_LENGTH {
+        panic!(
+            "Overlong coin name {} ({} bytes) not supported",
+            core::str::from_utf8(src).unwrap_or("<invalid utf-8>"),
+            src.len()
+        );
+    }
     let n = src.len().min(COIN_STRING_LENGTH);
     out[..n].copy_from_slice(&src[..n]);
     out
