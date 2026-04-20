@@ -190,14 +190,18 @@ fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
 fn address_from_hex_cstr(c_str: *const u8) -> Result<SuiAddressRaw, Error> {
     // Calculate C-string length in the buffer
     let mut str_len = 0;
-    while unsafe { *c_str.add(str_len) } != b'\0' && str_len <= SUI_PREFIXED_ADDRESS_STR_LENGTH {
+    while str_len < SUI_PREFIXED_ADDRESS_STR_LENGTH {
+        let b = unsafe { *c_str.add(str_len) };
+        if b == b'\0' {
+            break;
+        }
         str_len += 1;
     }
-    let str = unsafe { core::slice::from_raw_parts(c_str, str_len) };
-
-    if str.len() < SUI_PREFIXED_ADDRESS_STR_LENGTH {
+    if str_len != SUI_PREFIXED_ADDRESS_STR_LENGTH {
         return Err(Error::BadAddressLength);
     }
+
+    let str = unsafe { core::slice::from_raw_parts(c_str, str_len) };
 
     // Trim zero terminator and '0x' prefix
     let str = &str[SUI_ADDRESS_PREFIX_STR_LENGTH..SUI_PREFIXED_ADDRESS_STR_LENGTH];
