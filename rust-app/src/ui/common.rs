@@ -96,6 +96,15 @@ fn get_known_coin_ticker(
     None
 }
 
+pub fn coin_type_from_ticker(ticker: &str) -> CoinType {
+    for k in KNOWN_COINS {
+        if k.ticker == ticker {
+            return coin_type_from_short_str(k.coin_id, k.module, k.function);
+        }
+    }
+    SUI_COIN_TYPE
+}
+
 struct KnownCoin<'a> {
     coin_id: [u8; 32],
     module: &'a str,

@@ -5,6 +5,7 @@ use core::str;
 
 use crate::parser::common::{CoinType, SuiAddressRaw, SUI_COIN_TYPE};
 use crate::swap::Error;
+use crate::ui::common::coin_type_from_ticker;
 
 // Max SUI address str length is 32*2
 const SUI_ADDRESS_STR_LENGTH: usize = 64;
@@ -160,12 +161,22 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
 
         let destination_address = address_from_hex_cstr(params.dest_address.as_ptr())?;
 
+        let coin_config =
+            CoinConfig::try_from_bytes(&params.coin_config[..params.coin_config_len])?;
+        let coin_type = match coin_config.as_ref() {
+            None => SUI_COIN_TYPE,
+            Some(cc) => coin_type_from_ticker(&cc.ticker),
+        };
+
+        let gas_from_address_balance =
+            params.dest_address_extra_id_len > 0 && params.dest_address_extra_id[0] != 0;
+
         Ok(TxParams {
             amount,
             fee,
             destination_address,
-            coin_type: SUI_COIN_TYPE,
-            gas_from_address_balance: false,
+            coin_type,
+            gas_from_address_balance,
         })
     }
 }

@@ -98,6 +98,8 @@ pub fn check_tx_params(expected: &TxParams, received: &TxParams) -> bool {
     expected.amount == received.amount
         && expected.fee == received.fee
         && expected.destination_address == received.destination_address
+        && expected.coin_type == received.coin_type
+        && expected.gas_from_address_balance == received.gas_from_address_balance
 }
 
 // For some reason heavy inlining + lto cause UB here, so we disable it
