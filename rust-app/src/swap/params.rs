@@ -129,6 +129,7 @@ pub struct TxParams {
     pub destination_address: SuiAddressRaw,
     pub coin_type: CoinType,
     pub gas_from_address_balance: bool,
+    pub expected_ticker: ArrayString<MAX_SWAP_TICKER_LENGTH>,
 }
 
 impl Default for TxParams {
@@ -139,6 +140,7 @@ impl Default for TxParams {
             destination_address: SuiAddressRaw::default(),
             coin_type: SUI_COIN_TYPE,
             gas_from_address_balance: false,
+            expected_ticker: ArrayString::new(),
         }
     }
 }
@@ -163,9 +165,10 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
 
         let coin_config =
             CoinConfig::try_from_bytes(&params.coin_config[..params.coin_config_len])?;
-        let coin_type = match coin_config.as_ref() {
-            None => SUI_COIN_TYPE,
-            Some(cc) => coin_type_from_ticker(&cc.ticker),
+
+        let (coin_type, expected_ticker) = match coin_config.as_ref() {
+            None => (SUI_COIN_TYPE, ArrayString::new()),
+            Some(cc) => (coin_type_from_ticker(&cc.ticker), cc.ticker),
         };
 
         let gas_from_address_balance =
@@ -177,6 +180,7 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
             destination_address,
             coin_type,
             gas_from_address_balance,
+            expected_ticker,
         })
     }
 }

@@ -18,6 +18,7 @@ use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
 use crate::app_main::app_main;
+use crate::parser::common::coin_type_from_short_str;
 use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS, utils::get_amount_in_decimals};
 use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 
@@ -94,12 +95,28 @@ pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayStrin
     Ok(printable_amount)
 }
 
-pub fn check_tx_params(expected: &TxParams, received: &TxParams) -> bool {
+pub fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
     expected.amount == received.amount
         && expected.fee == received.fee
         && expected.destination_address == received.destination_address
-        && expected.coin_type == received.coin_type
         && expected.gas_from_address_balance == received.gas_from_address_balance
+        && coin_type_ok(expected, received, ctx)
+}
+
+fn coin_type_ok(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
+    if expected.coin_type == received.coin_type {
+        return true;
+    }
+    let dynamic_ticker = ctx.get_token_ticker();
+    if dynamic_ticker.is_empty() || expected.expected_ticker.as_str() != dynamic_ticker.as_str() {
+        return false;
+    }
+    let dynamic_coin_type = coin_type_from_short_str(
+        ctx.get_token_coin_id(),
+        ctx.get_token_coin_module().as_str(),
+        ctx.get_token_coin_function().as_str(),
+    );
+    received.coin_type == dynamic_coin_type
 }
 
 // For some reason heavy inlining + lto cause UB here, so we disable it
