@@ -50,7 +50,7 @@ pub fn pad_coin_name_bytes(src: &[u8]) -> CoinNameBytes {
             src.len()
         );
     }
-    let n = src.len().min(COIN_STRING_LENGTH);
+    let n = src.len();
     out[..n].copy_from_slice(&src[..n]);
     out
 }
