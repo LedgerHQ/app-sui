@@ -16,7 +16,11 @@ const MAX_BIP32_PATH_LENGTH: usize = 5;
 const BIP32_PATH_SEGMENT_LEN: usize = mem::size_of::<u32>();
 
 // Should be enough for any coin ticker
+#[cfg(not(target_os = "nanox"))]
 pub const MAX_SWAP_TICKER_LENGTH: usize = 15;
+// Limit stack usage on Nano X
+#[cfg(target_os = "nanox")]
+pub const MAX_SWAP_TICKER_LENGTH: usize = 8;
 // ticker length + ticker + decimals
 const COIN_CONFIG_BUF_SIZE: usize = 1 + MAX_SWAP_TICKER_LENGTH + 1;
 
