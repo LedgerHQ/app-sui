@@ -13,7 +13,7 @@ use ledger_device_sdk::libcall::{
     },
     LibCallCommand,
 };
-use ledger_device_sdk::log::{error, trace};
+use ledger_device_sdk::log::{error, info, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
@@ -104,13 +104,29 @@ pub fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -
 }
 
 fn coin_type_ok(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
+    info!(
+        "check_tx_params: expected coin type: {:X?}",
+        expected.coin_type
+    );
+    info!(
+        "check_tx_params: received coin type: {:X?}",
+        received.coin_type
+    );
     if expected.coin_type == received.coin_type {
         return true;
     }
+    info!(
+        "check_tx_params: expected ticker: {}",
+        expected.expected_ticker.as_str()
+    );
     let dynamic_ticker = ctx.get_token_ticker();
     if dynamic_ticker.is_empty() || expected.expected_ticker.as_str() != dynamic_ticker.as_str() {
         return false;
     }
+    info!(
+        "check_tx_params: dynamic ticker from ctx: {}",
+        dynamic_ticker
+    );
     let dynamic_coin_type = coin_type_from_short_str(
         ctx.get_token_coin_id(),
         ctx.get_token_coin_module().as_str(),
