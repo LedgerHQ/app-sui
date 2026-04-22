@@ -193,15 +193,15 @@ fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
     if !buf.len().is_multiple_of(BIP32_PATH_SEGMENT_LEN) {
         return Err(Error::DecodeDPathError);
     }
-
-    for i in (0..buf.len()).step_by(BIP32_PATH_SEGMENT_LEN) {
-        // For swap params, path segments are stored in big endian
-        let path_seg = u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
-
-        out_path[i / BIP32_PATH_SEGMENT_LEN] = path_seg;
+    let segments = buf.len() / BIP32_PATH_SEGMENT_LEN;
+    if segments > out_path.len() {
+        return Err(Error::DecodeDPathError);
     }
-
-    Ok(buf.len() / BIP32_PATH_SEGMENT_LEN)
+    for (i, v) in out_path.iter_mut().enumerate().take(segments) {
+        let idx = i * BIP32_PATH_SEGMENT_LEN;
+        *v = u32::from_be_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]);
+    }
+    Ok(segments)
 }
 
 // For some reason heavy inlining + lto cause UB here, so we disable it
