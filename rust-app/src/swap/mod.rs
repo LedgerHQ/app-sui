@@ -96,10 +96,11 @@ pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayStrin
 }
 
 pub fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
+    info!("check_tx_params: expected: {:X?}", expected);
+    info!("check_tx_params: received: {:X?}", received);
     expected.amount == received.amount
         && expected.fee == received.fee
         && expected.destination_address == received.destination_address
-        && expected.gas_from_address_balance == received.gas_from_address_balance
         && coin_type_ok(expected, received, ctx)
 }
 
@@ -131,6 +132,10 @@ fn coin_type_ok(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool 
         ctx.get_token_coin_id(),
         ctx.get_token_coin_module().as_str(),
         ctx.get_token_coin_function().as_str(),
+    );
+    info!(
+        "check_tx_params: dynamic coin type from ctx: {:X?}",
+        dynamic_coin_type
     );
     received.coin_type == dynamic_coin_type
 }
