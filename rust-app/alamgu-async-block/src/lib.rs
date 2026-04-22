@@ -344,6 +344,9 @@ impl HostIO {
                     })
                     .ok()?;
             }
+            if params.len() != N {
+                return None;
+            }
             Some(params)
         } else {
             None
