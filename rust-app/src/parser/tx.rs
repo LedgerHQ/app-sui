@@ -606,7 +606,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                let length = u16::try_from(length_u32).expect("u16 expected");
+                let length = match u16::try_from(length_u32) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        reject_on::<u16>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                };
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
@@ -678,7 +688,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                let length = u16::try_from(length_u32).expect("u16 expected");
+                let length = match u16::try_from(length_u32) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        reject_on::<u16>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                };
                 info!("ProgrammableTransaction: Commands: {}", length);
                 for command_ix in 0..length {
                     check_heap_use(&inputs, &command_results).await;
