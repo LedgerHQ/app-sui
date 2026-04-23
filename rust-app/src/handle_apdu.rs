@@ -8,7 +8,9 @@ use crate::utils::*;
 use alamgu_async_block::*;
 use arrayvec::ArrayVec;
 use core::future::Future;
+use ledger_device_sdk::io::StatusWords;
 use ledger_device_sdk::log::trace;
+use ledger_parser_combinators::async_parser::reject;
 
 pub type APDUsFuture<'ctx> = impl Future<Output = ()> + 'ctx;
 
@@ -34,9 +36,11 @@ pub fn handle_apdu_async(
                 let _ = rv.try_extend_from_slice(APP_NAME.as_bytes());
                 io.result_final(&rv).await;
             }
+            Ins::VerifyAddress if ctx.is_swap() => reject::<()>(StatusWords::BadIns as u16).await,
             Ins::VerifyAddress => {
                 NoinlineFut(get_address_apdu(io, ui, true)).await;
             }
+            Ins::GetPubkey if ctx.is_swap() => reject::<()>(StatusWords::BadIns as u16).await,
             Ins::GetPubkey => {
                 NoinlineFut(get_address_apdu(io, ui, false)).await;
             }

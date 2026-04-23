@@ -5,6 +5,7 @@ use core::str;
 
 use crate::parser::common::{CoinType, SuiAddressRaw, SUI_COIN_TYPE};
 use crate::swap::Error;
+use crate::ui::common::coin_type_from_ticker;
 
 // Max SUI address str length is 32*2
 const SUI_ADDRESS_STR_LENGTH: usize = 64;
@@ -15,7 +16,11 @@ const MAX_BIP32_PATH_LENGTH: usize = 5;
 const BIP32_PATH_SEGMENT_LEN: usize = mem::size_of::<u32>();
 
 // Should be enough for any coin ticker
+#[cfg(not(target_os = "nanox"))]
 pub const MAX_SWAP_TICKER_LENGTH: usize = 15;
+// Limit stack usage on Nano X
+#[cfg(target_os = "nanox")]
+pub const MAX_SWAP_TICKER_LENGTH: usize = 8;
 // ticker length + ticker + decimals
 const COIN_CONFIG_BUF_SIZE: usize = 1 + MAX_SWAP_TICKER_LENGTH + 1;
 
@@ -128,6 +133,7 @@ pub struct TxParams {
     pub destination_address: SuiAddressRaw,
     pub coin_type: CoinType,
     pub gas_from_address_balance: bool,
+    pub expected_ticker: ArrayString<MAX_SWAP_TICKER_LENGTH>,
 }
 
 impl Default for TxParams {
@@ -138,6 +144,7 @@ impl Default for TxParams {
             destination_address: SuiAddressRaw::default(),
             coin_type: SUI_COIN_TYPE,
             gas_from_address_balance: false,
+            expected_ticker: ArrayString::new(),
         }
     }
 }
@@ -160,12 +167,24 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
 
         let destination_address = address_from_hex_cstr(params.dest_address.as_ptr())?;
 
+        let coin_config =
+            CoinConfig::try_from_bytes(&params.coin_config[..params.coin_config_len])?;
+
+        let (coin_type, expected_ticker) = match coin_config.as_ref() {
+            None => (SUI_COIN_TYPE, ArrayString::new()),
+            Some(cc) => (coin_type_from_ticker(&cc.ticker), cc.ticker),
+        };
+
+        let gas_from_address_balance =
+            params.dest_address_extra_id_len > 0 && params.dest_address_extra_id[0] != 0;
+
         Ok(TxParams {
             amount,
             fee,
             destination_address,
-            coin_type: SUI_COIN_TYPE,
-            gas_from_address_balance: false,
+            coin_type,
+            gas_from_address_balance,
+            expected_ticker,
         })
     }
 }
@@ -174,15 +193,15 @@ fn unpack_path(buf: &[u8], out_path: &mut [u32]) -> Result<usize, Error> {
     if !buf.len().is_multiple_of(BIP32_PATH_SEGMENT_LEN) {
         return Err(Error::DecodeDPathError);
     }
-
-    for i in (0..buf.len()).step_by(BIP32_PATH_SEGMENT_LEN) {
-        // For swap params, path segments are stored in big endian
-        let path_seg = u32::from_be_bytes([buf[i], buf[i + 1], buf[i + 2], buf[i + 3]]);
-
-        out_path[i / BIP32_PATH_SEGMENT_LEN] = path_seg;
+    let segments = buf.len() / BIP32_PATH_SEGMENT_LEN;
+    if segments > out_path.len() {
+        return Err(Error::DecodeDPathError);
     }
-
-    Ok(buf.len() / BIP32_PATH_SEGMENT_LEN)
+    for (i, v) in out_path.iter_mut().enumerate().take(segments) {
+        let idx = i * BIP32_PATH_SEGMENT_LEN;
+        *v = u32::from_be_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]);
+    }
+    Ok(segments)
 }
 
 // For some reason heavy inlining + lto cause UB here, so we disable it
