@@ -89,8 +89,8 @@ async fn prompt_tx_params(ui: &UserInterface, path: &[u32], tx_params: TxParams,
         reject::<()>(StatusWords::UserCancelled as u16).await;
     };
 }
-async fn check_tx_params(expected: &TxParams, received: &TxParams) {
-    if !swap::check_tx_params(expected, received) {
+async fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) {
+    if !swap::check_tx_params(expected, received, ctx) {
         reject::<()>(SW_SWAP_TX_PARAM_MISMATCH).await;
     }
 }
@@ -150,11 +150,12 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 destination_address: recipient,
                 coin_type,
                 gas_from_address_balance,
+                ..Default::default()
             };
 
             if ctx.is_swap() {
                 let expected = ctx.get_swap_tx_params();
-                check_tx_params(expected, &tx_params).await;
+                check_tx_params(expected, &tx_params, ctx).await;
             } else {
                 // Show prompts after all inputs have been parsed
                 NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, ctx)).await;

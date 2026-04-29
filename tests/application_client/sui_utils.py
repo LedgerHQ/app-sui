@@ -25,6 +25,8 @@ AMOUNT_2_BYTES  = mist_to_bytes(AMOUNT_2)
 
 USDC_AMOUNT       = 100023 #0.100023 USDC
 USDC_AMOUNT_2     = 123393 #0.123393 USDC
+USDC_AMOUNT_3     = 123456 #0.123456 USDC
+USDC_AMOUNT_4     = 1234567 #1.234567 USDC
 
 # Balances of objects used in these tests
 USDC_OBJECTS_BY_AMOUNT = {
@@ -41,6 +43,18 @@ USDC_OBJECTS_BY_AMOUNT = {
         'object_id': '0x8ba6495be346c1be89e5c35cdabab145ea18990f48f2b0629ff016024c9ded45',
         'version': 497431093,
         'digest': '5DEmU82eeP1wJ6L7q8V7bLbAr4Vbjat2XkT3nbf5NmSN'
+    },
+    123456: {
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAHY11cyAAAAACgNUoPwzbihPgXLTLslYX+ffuP7V3HcROVn4uoGpl1dCwAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIDrjlmbO1hdZjMDrFaYKnvImvsNX7xaQ0ok9F6aKVSOjoC0UAAAAAAA=',
+        'object_id': '0x0d5283f0cdb8a13e05cb4cbb25617f9f7ee3fb5771dc44e567e2ea06a65d5d0b',
+        'version': 844617688,
+        'digest': '4wYF9dEX4ajr7d1Cc6f1DPArmgjyJKNKuSHDAZHHTTUr'
+    },
+    1234567: {
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAE400UyAAAAACi030ZTM4bNlRGM5DXjFcuwXeAuvRiPdVfswomzbOVg2QAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIKiui86Uf8v26hfPu4WBIXcAuDC18HpXtPMV5gYdno3boC0UAAAAAAA=',
+        'object_id': '0xb4df46533386cd95118ce435e315cbb05de02ebd188f7557ecc289b36ce560d9',
+        'version': 843436856,
+        'digest': 'DnfEiFtm6QeTQnrAzo1DLED9YDhd2aE3LKfBXNTBD8od'
     }
 }
 
