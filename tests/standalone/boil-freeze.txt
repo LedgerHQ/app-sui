@@ -11,7 +11,7 @@ coincurve==17.0.0
 construct==2.10.68
 crcmod==1.7
 cryptography==39.0.1
-ecdsa==0.16.1
+ecdsa==0.19.2
 ed25519-blake2b==1.4
 exceptiongroup==1.1.0
 Flask==2.1.2
