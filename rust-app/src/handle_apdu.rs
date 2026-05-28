@@ -40,7 +40,6 @@ pub fn handle_apdu_async(
             Ins::VerifyAddress => {
                 NoinlineFut(get_address_apdu(io, ui, true)).await;
             }
-            Ins::GetPubkey if ctx.is_swap() => reject::<()>(StatusWords::BadIns as u16).await,
             Ins::GetPubkey => {
                 NoinlineFut(get_address_apdu(io, ui, false)).await;
             }
