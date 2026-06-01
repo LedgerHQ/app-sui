@@ -65,7 +65,7 @@ pub enum MoveObjectType {
 // Parsers
 
 pub const fn object_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<ObjectInnerSchema, BS, Output = CoinData> {
+) -> impl AsyncParser<ObjectInnerSchema, BS, Output = ObjectData> {
     Action(
         (DefaultInterp, DefaultInterp, DefaultInterp, DefaultInterp),
         |(d, _, _, _storage_rebate)| {
@@ -76,7 +76,7 @@ pub const fn object_parser<BS: Clone + Readable>(
 }
 
 impl HasOutput<ObjectDataSchema> for DefaultInterp {
-    type Output = CoinData;
+    type Output = ObjectData;
 }
 
 impl<BS: Clone + Readable> AsyncParser<ObjectDataSchema, BS> for DefaultInterp {
@@ -116,7 +116,7 @@ impl<BS: Clone + Readable> AsyncParser<ObjectDataSchema, BS> for DefaultInterp {
 }
 
 pub const fn move_object_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<MoveObject, BS, Output = CoinData> {
+) -> impl AsyncParser<MoveObject, BS, Output = ObjectData> {
     Action(
         (
             DefaultInterp,
@@ -127,34 +127,55 @@ pub const fn move_object_parser<BS: Clone + Readable>(
         |(object_type, _, _sequence_number, d): (_, _, _, ArrayVec<u8, OBJECT_CONTENTS_LEN>)| {
             info!("SequenceNumber {}", _sequence_number);
 
-            let (coin_type, is_stake) = match object_type {
-                MoveObjectType::GasCoin => (SUI_COIN_TYPE, false),
-                MoveObjectType::StakedSui => (SUI_COIN_TYPE, true),
-                MoveObjectType::Coin(v) => (v, false),
-            };
-
-            // A coin object is always of size 40, and StakedSui is 80
-            // Last 8 bytes contain the balance amount in both
-            let amount: Option<u64> = match (d.len(), is_stake) {
-                (40, false) => Some(u64::from_le_bytes(
-                    d.as_slice()[32..]
-                        .try_into()
-                        .expect("amount slice wrong length"),
-                )),
-                // StakedSui
-                (80, true) => Some(u64::from_le_bytes(
-                    d.as_slice()[72..]
-                        .try_into()
-                        .expect("amount slice wrong length"),
-                )),
-                _ => {
-                    info!("ObjectContents incorrect");
-                    None
+            // A coin object is always of size 40, and StakedSui is 80.
+            // The last 8 bytes contain the balance/principal amount in both layouts.
+            // The stake-vs-coin distinction MUST be preserved in the returned
+            // ObjectData so downstream transfer validation cannot mistake a
+            // StakedSui position for liquid SUI.
+            match object_type {
+                MoveObjectType::GasCoin => coin_amount(&d).map(|amount| ObjectData::Coin {
+                    coin_type: SUI_COIN_TYPE,
+                    amount,
+                }),
+                MoveObjectType::Coin(coin_type) => {
+                    coin_amount(&d).map(|amount| ObjectData::Coin { coin_type, amount })
                 }
-            };
-            amount.map(|v| (coin_type, v))
+                MoveObjectType::StakedSui => {
+                    staked_sui_amount(&d).map(|amount| ObjectData::StakedSui { amount })
+                }
+            }
         },
     )
+}
+
+// A Coin<T> object is 40 bytes: 32-byte UID followed by an 8-byte LE balance.
+fn coin_amount(d: &ArrayVec<u8, OBJECT_CONTENTS_LEN>) -> Option<u64> {
+    match d.len() {
+        40 => Some(u64::from_le_bytes(
+            d.as_slice()[32..]
+                .try_into()
+                .expect("amount slice wrong length"),
+        )),
+        _ => {
+            info!("ObjectContents incorrect (expected Coin of size 40)");
+            None
+        }
+    }
+}
+
+// A StakedSui object is 80 bytes with the 8-byte LE principal in the last bytes.
+fn staked_sui_amount(d: &ArrayVec<u8, OBJECT_CONTENTS_LEN>) -> Option<u64> {
+    match d.len() {
+        80 => Some(u64::from_le_bytes(
+            d.as_slice()[72..]
+                .try_into()
+                .expect("amount slice wrong length"),
+        )),
+        _ => {
+            info!("ObjectContents incorrect (expected StakedSui of size 80)");
+            None
+        }
+    }
 }
 
 impl HasOutput<MoveObjectType> for DefaultInterp {
