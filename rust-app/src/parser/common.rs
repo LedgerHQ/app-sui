@@ -77,6 +77,10 @@ pub const SUI_COIN_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ];
 
+pub const UNKNOWN_COIN_ID: CoinID = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
 pub const SUI_SYSTEM_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
 ];
@@ -87,6 +91,12 @@ pub const SUI_SYSTEM_STATE_ID: CoinID = [
 
 pub const SUI_COIN_TYPE: CoinType = (
     SUI_COIN_ID,
+    [0u8; COIN_STRING_LENGTH],
+    [0u8; COIN_STRING_LENGTH],
+);
+
+pub const UNKNOWN_COIN_TYPE: CoinType = (
+    UNKNOWN_COIN_ID,
     [0u8; COIN_STRING_LENGTH],
     [0u8; COIN_STRING_LENGTH],
 );

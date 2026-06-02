@@ -1,6 +1,7 @@
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::parser::common::{
     coin_name_trimmed, coin_type_from_short_str, CoinType, SUI_COIN_DECIMALS, SUI_COIN_TYPE,
+    UNKNOWN_COIN_TYPE,
 };
 use crate::utils::*;
 
@@ -102,7 +103,7 @@ pub fn coin_type_from_ticker(ticker: &str) -> CoinType {
             return coin_type_from_short_str(k.coin_id, k.module, k.function);
         }
     }
-    SUI_COIN_TYPE
+    UNKNOWN_COIN_TYPE
 }
 
 struct KnownCoin<'a> {

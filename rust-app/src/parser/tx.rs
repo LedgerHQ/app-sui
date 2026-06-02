@@ -2202,7 +2202,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                                 }
                                 // A StakedSui position cannot pay gas; treat the
                                 // total as unknown rather than as a liquid amount.
-                                Some(ObjectData::StakedSui { .. }) | None => total_gas_amount = None,
+                                Some(ObjectData::StakedSui { .. }) | None => {
+                                    total_gas_amount = None
+                                }
                             }
                         }
                     }

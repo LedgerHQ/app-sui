@@ -18,7 +18,7 @@ use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
 use crate::app_main::app_main;
-use crate::parser::common::coin_type_from_short_str;
+use crate::parser::common::{coin_type_from_short_str, UNKNOWN_COIN_TYPE};
 use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS, utils::get_amount_in_decimals};
 use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 
@@ -113,7 +113,12 @@ fn coin_type_ok(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool 
         "check_tx_params: received coin type: {:X?}",
         received.coin_type
     );
-    if expected.coin_type == received.coin_type {
+    // Never take the equality shortcut for the unknown-ticker sentinel: it is a
+    // representable coin type (all-zero id, empty module/name), and `received`
+    // comes from host-controlled object data, so a crafted `0x0::"":""` coin
+    // could otherwise match it and skip the dynamic-descriptor check below.
+    // An unknown ticker must always be resolved via a signed dynamic descriptor.
+    if expected.coin_type != UNKNOWN_COIN_TYPE && expected.coin_type == received.coin_type {
         return true;
     }
     info!(
