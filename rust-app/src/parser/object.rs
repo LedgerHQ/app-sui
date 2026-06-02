@@ -247,7 +247,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             SubInterp(DefaultInterp),
             SubInterp(DefaultInterp),
         ),
-        |(address, mut module, mut name, _type_tags): (
+        |(address, module, name, _type_tags): (
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
@@ -263,16 +263,22 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", _type_tags.len());
-            let mod_short: ArrayVec<u8, COIN_STRING_LENGTH> = module
-                .drain(..module.len().min(COIN_STRING_LENGTH))
-                .collect();
-            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> =
-                name.drain(..name.len().min(COIN_STRING_LENGTH)).collect();
+            // Fail safe: never silently truncate. A module/struct name longer than
+            // COIN_STRING_LENGTH cannot be represented faithfully in CoinType, and a
+            // truncated identity could collide with a different token (two distinct
+            // types sharing their first COIN_STRING_LENGTH bytes). Reject so the
+            // transaction is not clear-signed under an ambiguous identity: it falls
+            // back to the not-recognized / blind-sign path, and swaps reject outright.
+            if module.len() > COIN_STRING_LENGTH || name.len() > COIN_STRING_LENGTH {
+                info!("StructTag module/name exceeds COIN_STRING_LENGTH; rejecting");
+                return None;
+            }
             // Action requires `Fn(...) -> Option<R>` (see async_parser `Action` impl).
+            // Lengths are bounded above, so `pad_coin_name_bytes` cannot panic here.
             let out: CoinType = (
                 address,
-                pad_coin_name_bytes(mod_short.as_slice()),
-                pad_coin_name_bytes(name_short.as_slice()),
+                pad_coin_name_bytes(module.as_slice()),
+                pad_coin_name_bytes(name.as_slice()),
             );
             Some(out)
         },
