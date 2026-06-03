@@ -92,26 +92,30 @@ impl<BS: Readable> AsyncParser<ULEB128, BS> for DefaultInterp {
     fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
         async move {
             let mut value: u64 = 0;
+            let mut terminated = false;
+
             for shift in (0..32).step_by(7) {
                 let [byte]: [u8; 1] = input.read().await;
                 let digit = byte & 0x7f;
                 value |= u64::from(digit) << shift;
+
                 // If the highest bit of `byte` is 0, return the final value.
-                if digit == byte {
+                if byte & 0x80 == 0 {
                     if shift > 0 && digit == 0 {
                         // We only accept canonical ULEB128 encodings, therefore the
                         // heaviest (and last) base-128 digit must be non-zero.
                         reject_on(core::file!(), core::line!(), PARSE_ERROR_CODE).await
                     }
+                    terminated = true;
                     break;
                 }
             }
-            // Decoded integer must not overflow.
-            use core::convert::TryFrom;
-            match u32::try_from(value) {
-                Ok(v) => v,
-                Err(_) => reject_on::<u32>(core::file!(), core::line!(), PARSE_ERROR_CODE).await,
+            if !terminated || value > u32::MAX as u64 {
+                // We have read 5 bytes without seeing a termination, so the value is too large.
+                reject_on(core::file!(), core::line!(), PARSE_ERROR_CODE).await
             }
+
+            value as u32
         }
     }
 }

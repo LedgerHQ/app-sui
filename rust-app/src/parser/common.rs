@@ -32,7 +32,7 @@ pub type CoinID = [u8; 32];
 
 // Max string length which will be shown to the user
 // For parsing longer length is also handled, but it will be truncated to this
-pub const COIN_STRING_LENGTH: usize = 16;
+pub const COIN_STRING_LENGTH: usize = 32;
 
 /// Fixed-size, zero-padded module / function name bytes so `CoinType` is `Copy`.
 pub type CoinNameBytes = [u8; COIN_STRING_LENGTH];
@@ -43,7 +43,14 @@ pub type CoinType = (CoinID, CoinNameBytes, CoinNameBytes);
 #[inline]
 pub fn pad_coin_name_bytes(src: &[u8]) -> CoinNameBytes {
     let mut out = [0u8; COIN_STRING_LENGTH];
-    let n = src.len().min(COIN_STRING_LENGTH);
+    if src.len() > COIN_STRING_LENGTH {
+        panic!(
+            "Overlong coin name {} ({} bytes) not supported",
+            core::str::from_utf8(src).unwrap_or("<invalid utf-8>"),
+            src.len()
+        );
+    }
+    let n = src.len();
     out[..n].copy_from_slice(&src[..n]);
     out
 }
@@ -70,6 +77,10 @@ pub const SUI_COIN_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ];
 
+pub const UNKNOWN_COIN_ID: CoinID = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
 pub const SUI_SYSTEM_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
 ];
@@ -84,9 +95,22 @@ pub const SUI_COIN_TYPE: CoinType = (
     [0u8; COIN_STRING_LENGTH],
 );
 
+pub const UNKNOWN_COIN_TYPE: CoinType = (
+    UNKNOWN_COIN_ID,
+    [0u8; COIN_STRING_LENGTH],
+    [0u8; COIN_STRING_LENGTH],
+);
+
 pub const SUI_COIN_DECIMALS: u8 = 9;
 
-pub type ObjectData = CoinData;
+// Parsed on-ledger object data. The coin-vs-stake distinction must be preserved
+// here: a StakedSui object is NOT liquid SUI, so it must never be classified as a
+// plain coin by downstream transfer/split/merge validation.
+#[derive(Clone, Copy)]
+pub enum ObjectData {
+    Coin { coin_type: CoinType, amount: u64 },
+    StakedSui { amount: u64 },
+}
 
 pub trait HasObjectData {
     fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c>;

@@ -21,6 +21,7 @@ from pysui.sui.sui_types.bcs import (
     TransactionExpiration,
     TransactionKind,
     TransferObjects,
+    _DIGEST_LENGTH,
 )
 from ragger.backend.interface import BackendInterface, RAPDU
 from ragger.error import ExceptionRAPDU
@@ -84,94 +85,12 @@ class Errors(IntEnum):
     SW_TX_HASH_FAIL            = 0xB006
     SW_BAD_STATE               = 0xB007
     SW_SIGNATURE_FAIL          = 0xB008
+    SUI_SWAP_TX_PARAM_MISMATCH = 0x6E05
 
 DYNAMIC_TOKEN = 0x90
 
 def split_message(message: bytes, max_size: int) -> List[bytes]:
     return [message[x:x + max_size] for x in range(0, len(message), max_size)]
-
-
-def build_simple_transaction_empty_gas_payment(
-    sender_addr: str, destination: str, send_amount: int, fees: int
-) -> Tuple[bytes, List[bytes]]:
-    """
-    Build a TransferToken transaction with empty gas_data.payment (SIP-58).
-    Gas is paid from address balance. Uses Input(0) for the coin, not GasCoin.
-    Returns (transaction_bytes, object_list).
-    """
-    gas_budget = fees
-
-    intent_bsc = Intent.encode(Intent.from_list([0, 0, 0]))
-    tx = intent_bsc
-
-    amount_bytes = list(send_amount.to_bytes(8, byteorder="little"))
-    recepient_addr = list(bytes.fromhex(destination[2:]))
-
-    obj_info = USDC_OBJECTS_BY_AMOUNT[send_amount]
-    object_list = [base64.b64decode(obj_info["obj"])]
-
-    tx_data_v1 = TransactionDataV1(
-        TransactionKind=TransactionKind(
-            "ProgrammableTransaction",
-            ProgrammableTransaction(
-                Inputs=[
-                    CallArg(
-                        "Object",
-                        ObjectArg(
-                            "ImmOrOwnedObject",
-                            ObjectReference(
-                                ObjectID=Address.from_str(obj_info["object_id"]),
-                                SequenceNumber=obj_info["version"],
-                                ObjectDigest=Digest.from_str(obj_info["digest"]),
-                            ),
-                        ),
-                    ),
-                    CallArg("Pure", amount_bytes),
-                    CallArg("Pure", recepient_addr),
-                ],
-                Command=[
-                    Command(
-                        "SplitCoin",
-                        SplitCoin(
-                            FromCoin=Argument("Input", 0),
-                            Amount=[Argument("Input", 1)],
-                        ),
-                    ),
-                    Command(
-                        "TransferObjects",
-                        TransferObjects(
-                            Objects=[Argument("Result", 0)],
-                            Address=Argument("Input", 2),
-                        ),
-                    ),
-                ],
-            ),
-        ),
-        Sender=Address.from_str(sender_addr),
-        GasData=GasData(
-            Payment=[],  # SIP-58: empty payment, gas from address balance
-            Owner=Address.from_str(sender_addr),
-            Price=1,
-            Budget=gas_budget,
-        ),
-        TransactionExpiration=TransactionExpiration("None"),
-    )
-
-    tx_data = TransactionData("V1", tx_data_v1)
-    tx += TransactionData.encode(tx_data)
-
-    # SIP-58: pysui lacks ValidDuring; replace None (0x00) with ValidDuring for replay protection.
-    # ValidDuring: variant 2 + 4×Option(None) + chain(32) + nonce(4) = 02 00 00 00 00 [32 zeros] 00 00 00 00
-    valid_during = bytes(
-        [0x02]  # ValidDuring variant
-        + [0x00] * 4  # min_epoch, max_epoch, min_ts, max_ts = None
-        + 32 * [0x00]  # chain (zeros)
-        + [0x00, 0x00, 0x00, 0x00]  # nonce (u32 LE)
-    )
-    # Replace last byte (None=0x00) with ValidDuring encoding
-    tx = tx[:-1] + valid_during
-
-    return (tx, object_list)
 
 
 class PKIClient:
@@ -283,6 +202,147 @@ class Client:
                     p1=P1,
                     p2=P2,
                     payload=payload)
+
+    def build_simple_transaction(self, sender_addr: str, destination: str, send_amount: int, fees: int) -> bytes:
+
+        tx = b''
+        gas_budget = fees
+
+        # Intent message,
+        # only valid version = 0, scope = 0, app_id = 0 for TransactionData
+        intent_bsc = Intent.encode(Intent.from_list([0,0,0]))
+        tx += intent_bsc
+
+        amount_bytes = list(send_amount.to_bytes(8, byteorder='little'))
+        recepient_addr = list(bytes.fromhex(destination[2:]))
+        recepient_idx = 1
+
+        tx_data_v1 = TransactionDataV1(
+            TransactionKind = TransactionKind(
+                "ProgrammableTransaction", ProgrammableTransaction(
+                    Inputs = [
+                        CallArg("Pure", amount_bytes),
+                        CallArg("Pure", recepient_addr),
+                    ],
+                    Command = [
+                        Command(
+                            "SplitCoin", SplitCoin(
+                                FromCoin = Argument("GasCoin"),
+                                Amount = [Argument("Input", 0)],
+                            ),
+                        ),
+                        Command(
+                            "TransferObjects", TransferObjects(
+                                Objects = [Argument("Result", 0)],
+                                Address = Argument("Input", recepient_idx),
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            Sender = Address.from_str(sender_addr),
+            GasData = GasData(
+                Payment = [ObjectReference(
+                    ObjectID = Address.from_str("0xFEEE"),
+                    SequenceNumber = 6666,
+                    ObjectDigest = Digest.from_bytes(bytes(_DIGEST_LENGTH)),
+                )],
+                Owner = Address.from_str(sender_addr),
+                Price = 1,
+                Budget = gas_budget,
+            ),
+            TransactionExpiration = TransactionExpiration("None"),
+        )
+
+        tx_data = TransactionData("V1", tx_data_v1)
+        tx += TransactionData.encode(tx_data)
+
+        return tx
+
+    def build_usdc_simple_transaction_empty_gas_payment(
+        self,
+        sender_addr: str,
+        destination: str,
+        send_amount: int,
+        fees: int) -> Tuple[bytes, List[bytes]]:
+        """
+        Build a TransferToken transaction with empty gas_data.payment (SIP-58).
+        Gas is paid from address balance. Uses Input(0) for the coin, not GasCoin.
+        Returns (transaction_bytes, object_list).
+        """
+        gas_budget = fees
+
+        intent_bsc = Intent.encode(Intent.from_list([0, 0, 0]))
+        tx = intent_bsc
+
+        amount_bytes = list(send_amount.to_bytes(8, byteorder="little"))
+        recepient_addr = list(bytes.fromhex(destination[2:]))
+
+        obj_info = USDC_OBJECTS_BY_AMOUNT[send_amount]
+        object_list = [base64.b64decode(obj_info["obj"])]
+
+        tx_data_v1 = TransactionDataV1(
+            TransactionKind=TransactionKind(
+                "ProgrammableTransaction",
+                ProgrammableTransaction(
+                    Inputs=[
+                        CallArg(
+                            "Object",
+                            ObjectArg(
+                                "ImmOrOwnedObject",
+                                ObjectReference(
+                                    ObjectID=Address.from_str(obj_info["object_id"]),
+                                    SequenceNumber=obj_info["version"],
+                                    ObjectDigest=Digest.from_str(obj_info["digest"]),
+                                ),
+                            ),
+                        ),
+                        CallArg("Pure", amount_bytes),
+                        CallArg("Pure", recepient_addr),
+                    ],
+                    Command=[
+                        Command(
+                            "SplitCoin",
+                            SplitCoin(
+                                FromCoin=Argument("Input", 0),
+                                Amount=[Argument("Input", 1)],
+                            ),
+                        ),
+                        Command(
+                            "TransferObjects",
+                            TransferObjects(
+                                Objects=[Argument("Result", 0)],
+                                Address=Argument("Input", 2),
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            Sender=Address.from_str(sender_addr),
+            GasData=GasData(
+                Payment=[],  # SIP-58: empty payment, gas from address balance
+                Owner=Address.from_str(sender_addr),
+                Price=1,
+                Budget=gas_budget,
+            ),
+            TransactionExpiration=TransactionExpiration("None"),
+        )
+
+        tx_data = TransactionData("V1", tx_data_v1)
+        tx += TransactionData.encode(tx_data)
+
+        # SIP-58: pysui lacks ValidDuring; replace None (0x00) with ValidDuring for replay protection.
+        # ValidDuring: variant 2 + 4×Option(None) + chain(32) + nonce(4) = 02 00 00 00 00 [32 zeros] 00 00 00 00
+        valid_during = bytes(
+            [0x02]  # ValidDuring variant
+            + [0x00] * 4  # min_epoch, max_epoch, min_ts, max_ts = None
+            + 32 * [0x00]  # chain (zeros)
+            + [0x00, 0x00, 0x00, 0x00]  # nonce (u32 LE)
+        )
+        # Replace last byte (None=0x00) with ValidDuring encoding
+        tx = tx[:-1] + valid_during
+
+        return (tx, object_list)
 
     def sign_tx(self, path: str, transaction: bytes, object_list: Optional[list[bytes]] = None) -> bytes:
         if object_list is None:

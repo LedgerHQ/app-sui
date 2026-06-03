@@ -5,7 +5,7 @@ import concurrent.futures
 import time
 import base64
 
-from application_client.client import Client, Errors, build_simple_transaction_empty_gas_payment
+from application_client.client import Client, Errors
 from application_client.sui_utils import (
     USDC_AMOUNT,
     FEES,
@@ -101,7 +101,7 @@ def test_sign_tx_usdc_empty_gas_payment_sip58(backend, scenario_navigator, firmw
     _, public_key, _, _ = client.get_public_key(path=path)
     assert len(public_key) == 32
 
-    transaction, object_list = build_simple_transaction_empty_gas_payment(
+    transaction, object_list = client.build_usdc_simple_transaction_empty_gas_payment(
         OWNED_ADDRESS,
         "0x6fb21feead027da4873295affd6c4f3618fe176fa2fbf3e7b5ef1d9463b31e21",
         USDC_AMOUNT,

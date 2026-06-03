@@ -606,7 +606,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                let length = u16::try_from(length_u32).expect("u16 expected");
+                let length = match u16::try_from(length_u32) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        reject_on::<u16>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                };
 
                 info!("ProgrammableTransaction: Inputs: {}", length);
                 for i in 0..length {
@@ -678,7 +688,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             {
                 let length_u32 =
                     <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
-                let length = u16::try_from(length_u32).expect("u16 expected");
+                let length = match u16::try_from(length_u32) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        reject_on::<u16>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
+                };
                 info!("ProgrammableTransaction: Commands: {}", length);
                 for command_ix in 0..length {
                     check_heap_use(&inputs, &command_results).await;
@@ -1128,7 +1148,7 @@ async fn handle_move_call<OD: HasObjectData>(
         match get_arg_input(2) {
             Some(InputValue::RecipientAddress(addr)) => Left((
                 ProgrammableTransactionTypeState::StakeTx,
-                to_total_coin_amount(amt),
+                to_total_coin_amount(amt).await,
                 Some(*addr),
             )),
             _ => {
@@ -1258,15 +1278,23 @@ async fn handle_move_call<OD: HasObjectData>(
                         includes_gas_coin: false,
                     }
                 } else {
-                    to_total_coin_amount(
-                        NoinlineFut(get_coin_arg_amount(
-                            arg,
-                            inputs,
-                            &object_data_source,
-                            command_results,
-                        ))
-                        .await,
-                    )
+                    let arg_amount = NoinlineFut(get_coin_arg_amount(
+                        arg,
+                        inputs,
+                        &object_data_source,
+                        command_results,
+                    ))
+                    .await;
+                    match arg_amount {
+                        // The expected case: unstaking an owned StakedSui object.
+                        // Its principal is denominated in SUI.
+                        CommandArgumentAmount::StakedSui { amount } => TotalCoinAmount {
+                            coin_type: SUI_COIN_TYPE,
+                            total_amount: amount,
+                            includes_gas_coin: false,
+                        },
+                        other => to_total_coin_amount(other).await,
+                    }
                 }
             }
         };
@@ -1377,9 +1405,15 @@ pub struct TotalCoinAmount {
 pub enum CommandArgumentAmount {
     Coin { coin_type: CoinType, amount: u64 },
     GasCoin,
+    // A StakedSui position referenced as an argument. This is intentionally kept
+    // distinct from `Coin` so that coin flows (transfer/split/merge) reject it,
+    // while the unstake flow can read its principal amount.
+    StakedSui { amount: u64 },
 }
 
-fn to_total_coin_amount(c: CommandArgumentAmount) -> TotalCoinAmount {
+// Convert a coin argument into a running total. A StakedSui position is not a
+// liquid coin and must never feed coin accumulation, so it is rejected here.
+async fn to_total_coin_amount(c: CommandArgumentAmount) -> TotalCoinAmount {
     match c {
         CommandArgumentAmount::GasCoin => TotalCoinAmount {
             total_amount: 0,
@@ -1391,6 +1425,15 @@ fn to_total_coin_amount(c: CommandArgumentAmount) -> TotalCoinAmount {
             coin_type,
             includes_gas_coin: false,
         },
+        CommandArgumentAmount::StakedSui { .. } => {
+            info!("StakedSui object cannot be used as a coin");
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
     }
 }
 
@@ -1419,6 +1462,8 @@ fn add_to_total_coin_amount(
                 })
             }
         }
+        // A StakedSui position is not a liquid coin and cannot be aggregated.
+        CommandArgumentAmount::StakedSui { .. } => None,
     }
 }
 
@@ -1433,7 +1478,7 @@ async fn get_total_amount_for_coins<OD: HasObjectData>(
     if let Some((first, remaining)) = coins.split_first() {
         let amt = get_coin_arg_amount(first, inputs, object_data_source, command_results).await;
         let mut total_amount = match maybe_total_amount {
-            None => to_total_coin_amount(amt),
+            None => to_total_coin_amount(amt).await,
             Some(t) => match add_to_total_coin_amount(t, amt) {
                 Some(v) => v,
                 None => {
@@ -1488,10 +1533,17 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("get_coin_arg_amount trying object_data_source");
-                let coin_data = object_data_source.get_object_data(digest).await;
-                match coin_data {
-                    Some((coin_type, amount)) => CommandArgumentAmount::Coin { coin_type, amount },
-                    _ => {
+                let object_data = object_data_source.get_object_data(digest).await;
+                match object_data {
+                    Some(ObjectData::Coin { coin_type, amount }) => {
+                        CommandArgumentAmount::Coin { coin_type, amount }
+                    }
+                    // Preserve the staked classification; coin flows reject it,
+                    // while the unstake flow reads the principal amount.
+                    Some(ObjectData::StakedSui { amount }) => {
+                        CommandArgumentAmount::StakedSui { amount }
+                    }
+                    None => {
                         info!("get_coin_arg_amount Coin Object not found");
                         reject_on(
                             core::file!(),
@@ -1597,10 +1649,11 @@ async fn handle_split_coins<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("SplitCoins trying object_data_source");
-                let coin_data = object_data_source.get_object_data(digest).await;
-                match coin_data {
-                    Some((v, _)) => v,
-                    _ => {
+                let object_data = object_data_source.get_object_data(digest).await;
+                match object_data {
+                    Some(ObjectData::Coin { coin_type, .. }) => coin_type,
+                    // A StakedSui position cannot be split as a liquid coin.
+                    Some(ObjectData::StakedSui { .. }) | None => {
                         info!("SplitCoins Coin Object not found");
                         reject_on(
                             core::file!(),
@@ -1700,13 +1753,14 @@ async fn handle_merge_coins<OD: HasObjectData>(
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("MergeCoins trying object_data_source");
-                let coin_data = object_data_source.get_object_data(digest).await;
-                match coin_data {
-                    Some((v, amt)) => {
-                        total_amount_2 += amt;
-                        v
+                let object_data = object_data_source.get_object_data(digest).await;
+                match object_data {
+                    Some(ObjectData::Coin { coin_type, amount }) => {
+                        total_amount_2 += amount;
+                        coin_type
                     }
-                    _ => {
+                    // A StakedSui position cannot be merged as a liquid coin.
+                    Some(ObjectData::StakedSui { .. }) | None => {
                         info!("MergeCoins Coin Object not found");
                         reject_on(
                             core::file!(),
@@ -1776,9 +1830,12 @@ async fn handle_merge_coins<OD: HasObjectData>(
             Argument::Input(input_ix) => match inputs.get(input_ix) {
                 Some(InputValue::ObjectRef(digest)) => {
                     info!("MergeCoins trying object_data_source");
-                    let coin_data = object_data_source.get_object_data(digest).await;
-                    match coin_data {
-                        Some((coin_type_, amt)) => {
+                    let object_data = object_data_source.get_object_data(digest).await;
+                    match object_data {
+                        Some(ObjectData::Coin {
+                            coin_type: coin_type_,
+                            amount,
+                        }) => {
                             if coin_type_ != coin_type {
                                 info!("MergeCoins mismatch in coin_type(s)");
                                 reject_on(
@@ -1788,9 +1845,10 @@ async fn handle_merge_coins<OD: HasObjectData>(
                                 )
                                 .await
                             }
-                            total_amount_2 += amt;
+                            total_amount_2 += amount;
                         }
-                        _ => {
+                        // A StakedSui position cannot be merged as a liquid coin.
+                        Some(ObjectData::StakedSui { .. }) | None => {
                             info!("MergeCoins Coin Object not found");
                             reject_on(
                                 core::file!(),
@@ -2137,10 +2195,16 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     let mut total_gas_amount: Option<u64> = Some(0);
                     for digest in gas_coins.iter() {
                         if let Some(amt0) = total_gas_amount {
-                            let coin_data = self.object_data_source.get_object_data(digest).await;
-                            match coin_data {
-                                Some((_, amt)) => total_gas_amount = Some(amt0 + amt),
-                                _ => total_gas_amount = None,
+                            let object_data = self.object_data_source.get_object_data(digest).await;
+                            match object_data {
+                                Some(ObjectData::Coin { amount, .. }) => {
+                                    total_gas_amount = Some(amt0 + amount)
+                                }
+                                // A StakedSui position cannot pay gas; treat the
+                                // total as unknown rather than as a liquid amount.
+                                Some(ObjectData::StakedSui { .. }) | None => {
+                                    total_gas_amount = None
+                                }
                             }
                         }
                     }

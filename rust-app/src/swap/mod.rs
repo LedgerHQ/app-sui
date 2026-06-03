@@ -13,11 +13,12 @@ use ledger_device_sdk::libcall::{
     },
     LibCallCommand,
 };
-use ledger_device_sdk::log::{error, trace};
+use ledger_device_sdk::log::{error, info, trace};
 use panic_handler::{set_swap_panic_handler, swap_panic_handler};
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
 use crate::app_main::app_main;
+use crate::parser::common::{coin_type_from_short_str, UNKNOWN_COIN_TYPE};
 use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS, utils::get_amount_in_decimals};
 use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 
@@ -94,10 +95,54 @@ pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayStrin
     Ok(printable_amount)
 }
 
-pub fn check_tx_params(expected: &TxParams, received: &TxParams) -> bool {
+pub fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
+    info!("check_tx_params: expected: {:X?}", expected);
+    info!("check_tx_params: received: {:X?}", received);
     expected.amount == received.amount
         && expected.fee == received.fee
         && expected.destination_address == received.destination_address
+        && coin_type_ok(expected, received, ctx)
+}
+
+fn coin_type_ok(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
+    info!(
+        "check_tx_params: expected coin type: {:X?}",
+        expected.coin_type
+    );
+    info!(
+        "check_tx_params: received coin type: {:X?}",
+        received.coin_type
+    );
+    // Never take the equality shortcut for the unknown-ticker sentinel: it is a
+    // representable coin type (all-zero id, empty module/name), and `received`
+    // comes from host-controlled object data, so a crafted `0x0::"":""` coin
+    // could otherwise match it and skip the dynamic-descriptor check below.
+    // An unknown ticker must always be resolved via a signed dynamic descriptor.
+    if expected.coin_type != UNKNOWN_COIN_TYPE && expected.coin_type == received.coin_type {
+        return true;
+    }
+    info!(
+        "check_tx_params: expected ticker: {}",
+        expected.expected_ticker.as_str()
+    );
+    let dynamic_ticker = ctx.get_token_ticker();
+    if dynamic_ticker.is_empty() || expected.expected_ticker.as_str() != dynamic_ticker.as_str() {
+        return false;
+    }
+    info!(
+        "check_tx_params: dynamic ticker from ctx: {}",
+        dynamic_ticker
+    );
+    let dynamic_coin_type = coin_type_from_short_str(
+        ctx.get_token_coin_id(),
+        ctx.get_token_coin_module().as_str(),
+        ctx.get_token_coin_function().as_str(),
+    );
+    info!(
+        "check_tx_params: dynamic coin type from ctx: {:X?}",
+        dynamic_coin_type
+    );
+    received.coin_type == dynamic_coin_type
 }
 
 // For some reason heavy inlining + lto cause UB here, so we disable it
