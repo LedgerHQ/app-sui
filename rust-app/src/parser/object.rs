@@ -65,7 +65,7 @@ pub enum MoveObjectType {
 // Parsers
 
 pub const fn object_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<ObjectInnerSchema, BS, Output = CoinData> {
+) -> impl AsyncParser<ObjectInnerSchema, BS, Output = ObjectData> {
     Action(
         (DefaultInterp, DefaultInterp, DefaultInterp, DefaultInterp),
         |(d, _, _, _storage_rebate)| {
@@ -76,7 +76,7 @@ pub const fn object_parser<BS: Clone + Readable>(
 }
 
 impl HasOutput<ObjectDataSchema> for DefaultInterp {
-    type Output = CoinData;
+    type Output = ObjectData;
 }
 
 impl<BS: Clone + Readable> AsyncParser<ObjectDataSchema, BS> for DefaultInterp {
@@ -116,7 +116,7 @@ impl<BS: Clone + Readable> AsyncParser<ObjectDataSchema, BS> for DefaultInterp {
 }
 
 pub const fn move_object_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<MoveObject, BS, Output = CoinData> {
+) -> impl AsyncParser<MoveObject, BS, Output = ObjectData> {
     Action(
         (
             DefaultInterp,
@@ -127,34 +127,55 @@ pub const fn move_object_parser<BS: Clone + Readable>(
         |(object_type, _, _sequence_number, d): (_, _, _, ArrayVec<u8, OBJECT_CONTENTS_LEN>)| {
             info!("SequenceNumber {}", _sequence_number);
 
-            let (coin_type, is_stake) = match object_type {
-                MoveObjectType::GasCoin => (SUI_COIN_TYPE, false),
-                MoveObjectType::StakedSui => (SUI_COIN_TYPE, true),
-                MoveObjectType::Coin(v) => (v, false),
-            };
-
-            // A coin object is always of size 40, and StakedSui is 80
-            // Last 8 bytes contain the balance amount in both
-            let amount: Option<u64> = match (d.len(), is_stake) {
-                (40, false) => Some(u64::from_le_bytes(
-                    d.as_slice()[32..]
-                        .try_into()
-                        .expect("amount slice wrong length"),
-                )),
-                // StakedSui
-                (80, true) => Some(u64::from_le_bytes(
-                    d.as_slice()[72..]
-                        .try_into()
-                        .expect("amount slice wrong length"),
-                )),
-                _ => {
-                    info!("ObjectContents incorrect");
-                    None
+            // A coin object is always of size 40, and StakedSui is 80.
+            // The last 8 bytes contain the balance/principal amount in both layouts.
+            // The stake-vs-coin distinction MUST be preserved in the returned
+            // ObjectData so downstream transfer validation cannot mistake a
+            // StakedSui position for liquid SUI.
+            match object_type {
+                MoveObjectType::GasCoin => coin_amount(&d).map(|amount| ObjectData::Coin {
+                    coin_type: SUI_COIN_TYPE,
+                    amount,
+                }),
+                MoveObjectType::Coin(coin_type) => {
+                    coin_amount(&d).map(|amount| ObjectData::Coin { coin_type, amount })
                 }
-            };
-            amount.map(|v| (coin_type, v))
+                MoveObjectType::StakedSui => {
+                    staked_sui_amount(&d).map(|amount| ObjectData::StakedSui { amount })
+                }
+            }
         },
     )
+}
+
+// A Coin<T> object is 40 bytes: 32-byte UID followed by an 8-byte LE balance.
+fn coin_amount(d: &ArrayVec<u8, OBJECT_CONTENTS_LEN>) -> Option<u64> {
+    match d.len() {
+        40 => Some(u64::from_le_bytes(
+            d.as_slice()[32..]
+                .try_into()
+                .expect("amount slice wrong length"),
+        )),
+        _ => {
+            info!("ObjectContents incorrect (expected Coin of size 40)");
+            None
+        }
+    }
+}
+
+// A StakedSui object is 80 bytes with the 8-byte LE principal in the last bytes.
+fn staked_sui_amount(d: &ArrayVec<u8, OBJECT_CONTENTS_LEN>) -> Option<u64> {
+    match d.len() {
+        80 => Some(u64::from_le_bytes(
+            d.as_slice()[72..]
+                .try_into()
+                .expect("amount slice wrong length"),
+        )),
+        _ => {
+            info!("ObjectContents incorrect (expected StakedSui of size 80)");
+            None
+        }
+    }
 }
 
 impl HasOutput<MoveObjectType> for DefaultInterp {
@@ -226,7 +247,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             SubInterp(DefaultInterp),
             SubInterp(DefaultInterp),
         ),
-        |(address, mut module, mut name, _type_tags): (
+        |(address, module, name, _type_tags): (
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
@@ -242,16 +263,22 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
             info!("StructTag TypeTag len {}", _type_tags.len());
-            let mod_short: ArrayVec<u8, COIN_STRING_LENGTH> = module
-                .drain(..module.len().min(COIN_STRING_LENGTH))
-                .collect();
-            let name_short: ArrayVec<u8, COIN_STRING_LENGTH> =
-                name.drain(..name.len().min(COIN_STRING_LENGTH)).collect();
+            // Fail safe: never silently truncate. A module/struct name longer than
+            // COIN_STRING_LENGTH cannot be represented faithfully in CoinType, and a
+            // truncated identity could collide with a different token (two distinct
+            // types sharing their first COIN_STRING_LENGTH bytes). Reject so the
+            // transaction is not clear-signed under an ambiguous identity: it falls
+            // back to the not-recognized / blind-sign path, and swaps reject outright.
+            if module.len() > COIN_STRING_LENGTH || name.len() > COIN_STRING_LENGTH {
+                info!("StructTag module/name exceeds COIN_STRING_LENGTH; rejecting");
+                return None;
+            }
             // Action requires `Fn(...) -> Option<R>` (see async_parser `Action` impl).
+            // Lengths are bounded above, so `pad_coin_name_bytes` cannot panic here.
             let out: CoinType = (
                 address,
-                pad_coin_name_bytes(mod_short.as_slice()),
-                pad_coin_name_bytes(name_short.as_slice()),
+                pad_coin_name_bytes(module.as_slice()),
+                pad_coin_name_bytes(name.as_slice()),
             );
             Some(out)
         },

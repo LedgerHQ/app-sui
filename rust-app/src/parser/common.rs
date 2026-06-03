@@ -77,6 +77,10 @@ pub const SUI_COIN_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
 ];
 
+pub const UNKNOWN_COIN_ID: CoinID = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
 pub const SUI_SYSTEM_ID: CoinID = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
 ];
@@ -91,9 +95,22 @@ pub const SUI_COIN_TYPE: CoinType = (
     [0u8; COIN_STRING_LENGTH],
 );
 
+pub const UNKNOWN_COIN_TYPE: CoinType = (
+    UNKNOWN_COIN_ID,
+    [0u8; COIN_STRING_LENGTH],
+    [0u8; COIN_STRING_LENGTH],
+);
+
 pub const SUI_COIN_DECIMALS: u8 = 9;
 
-pub type ObjectData = CoinData;
+// Parsed on-ledger object data. The coin-vs-stake distinction must be preserved
+// here: a StakedSui object is NOT liquid SUI, so it must never be classified as a
+// plain coin by downstream transfer/split/merge validation.
+#[derive(Clone, Copy)]
+pub enum ObjectData {
+    Coin { coin_type: CoinType, amount: u64 },
+    StakedSui { amount: u64 },
+}
 
 pub trait HasObjectData {
     fn get_object_data<'a: 'c, 'b: 'c, 'c>(&'b self, digest: &'a ObjectDigest) -> Self::State<'c>;

@@ -48,10 +48,11 @@ cargo-ledger ledger -l nanosplus  # Builds, creates hex, and loads to device
 Run all device tests via Speculos emulator:
 ```bash
 ./run-ragger-tests.sh  # Tests all devices
-pytest ragger-tests --device nanosp  # Single device
+pytest tests/standalone --device nanosp  # Single device
+pytest tests/standalone/test_sign_cmd.py::test_sign_tx_sui_transfer --device flex  # Single test
 ```
 
-Tests are in [ragger-tests/](ragger-tests/) using Python's Ragger framework. Test naming convention: `test_<feature>_<scenario>.py`.
+APDU-level tests are in [tests/standalone/](tests/standalone/) using Python's Ragger framework. Test naming convention: `test_<feature>_<scenario>.py`. (There is no `ragger-tests/` directory.)
 
 **Swap tests**: Exchange integration tests are in [tests/swap/](tests/swap/). These treat the app as a library loaded alongside the Exchange app:
 ```bash
