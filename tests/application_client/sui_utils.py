@@ -44,17 +44,21 @@ USDC_OBJECTS_BY_AMOUNT = {
         'version': 497431093,
         'digest': '5DEmU82eeP1wJ6L7q8V7bLbAr4Vbjat2XkT3nbf5NmSN'
     },
+    # Balance field was previously encoded as 0 (a placeholder never read before
+    # SplitCoins started tracking source balances -- B2CA-2793 finding 3); fixed
+    # to match the nominal amount below.
     123456: {
-        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAHY11cyAAAAACgNUoPwzbihPgXLTLslYX+ffuP7V3HcROVn4uoGpl1dCwAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIDrjlmbO1hdZjMDrFaYKnvImvsNX7xaQ0ok9F6aKVSOjoC0UAAAAAAA=',
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAHY11cyAAAAACgNUoPwzbihPgXLTLslYX+ffuP7V3HcROVn4uoGpl1dC0DiAQAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIDrjlmbO1hdZjMDrFaYKnvImvsNX7xaQ0ok9F6aKVSOjoC0UAAAAAAA=',
         'object_id': '0x0d5283f0cdb8a13e05cb4cbb25617f9f7ee3fb5771dc44e567e2ea06a65d5d0b',
         'version': 844617688,
-        'digest': '4wYF9dEX4ajr7d1Cc6f1DPArmgjyJKNKuSHDAZHHTTUr'
+        'digest': '459kYi6rHje9ZC1xFoXzYoN5eRnMHrttFyrJS3PajWhk'
     },
+    # Balance field was previously encoded as 0; see comment above (finding 3).
     1234567: {
-        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAE400UyAAAAACi030ZTM4bNlRGM5DXjFcuwXeAuvRiPdVfswomzbOVg2QAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIKiui86Uf8v26hfPu4WBIXcAuDC18HpXtPMV5gYdno3boC0UAAAAAAA=',
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAE400UyAAAAACi030ZTM4bNlRGM5DXjFcuwXeAuvRiPdVfswomzbOVg2YfWEgAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIKiui86Uf8v26hfPu4WBIXcAuDC18HpXtPMV5gYdno3boC0UAAAAAAA=',
         'object_id': '0xb4df46533386cd95118ce435e315cbb05de02ebd188f7557ecc289b36ce560d9',
         'version': 843436856,
-        'digest': 'DnfEiFtm6QeTQnrAzo1DLED9YDhd2aE3LKfBXNTBD8od'
+        'digest': 'e69BnT3FjPocKa1UfQaPAXTS8kLxt2FeBaCW5JEBMsM'
     }
 }
 

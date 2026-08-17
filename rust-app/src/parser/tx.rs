@@ -749,6 +749,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             // we have added to the GasCoin by merge of other coins
             let mut added_amount_to_gas_coin: u64 = 0;
 
+            // Amount removed from GasCoin via SplitCoins (see handle_split_coins)
+            let mut split_amount_from_gas_coin: u64 = 0;
+
             let mut tx_type: ProgrammableTransactionTypeState =
                 ProgrammableTransactionTypeState::UnknownTx;
 
@@ -874,9 +877,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             let res = NoinlineFut(handle_split_coins(
                                 coin,
                                 amounts,
-                                &inputs,
+                                &mut inputs,
                                 self.object_data_source.clone(),
-                                &command_results,
+                                &mut command_results,
+                                &mut split_amount_from_gas_coin,
                             ))
                             .await;
                             command_results.insert(command_ix, res);
@@ -951,7 +955,23 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         }
                     } else {
                         if includes_gas_coin {
-                            total_amount += added_amount_to_gas_coin;
+                            // Net GasCoin adjustment from any MergeCoins/SplitCoins
+                            // touching it (B2CA-2793 finding 3): reject rather than
+                            // display an amount that doesn't reconcile.
+                            total_amount = match total_amount
+                                .checked_add(added_amount_to_gas_coin)
+                                .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
+                            {
+                                Some(v) => v,
+                                None => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            };
                         }
 
                         ProgrammableTransaction::TransferSuiTx {
@@ -981,6 +1001,23 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             .await
                         }
                     };
+
+                    if includes_gas_coin {
+                        // GasCoin reduced by a SplitCoins before being staked
+                        // (B2CA-2793 finding 3): reject rather than overstate the
+                        // staked amount.
+                        total_amount = match total_amount.checked_sub(split_amount_from_gas_coin) {
+                            Some(v) => v,
+                            None => {
+                                reject_on(
+                                    core::file!(),
+                                    core::line!(),
+                                    SyscallError::NotSupported as u16,
+                                )
+                                .await
+                            }
+                        };
+                    }
 
                     ProgrammableTransaction::StakeTx {
                         recipient,
@@ -1725,24 +1762,35 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
     }
 }
 
-// Obtain the coin type and the array of amounts it is being split into
+// Obtain the coin type and the array of amounts it is being split into.
+//
+// Splitting a coin reduces its own balance by the total amount split out. If that
+// same source coin is referenced again later (transferred, staked, or used as the
+// source/destination of a further split/merge), a stale pre-split balance would
+// overstate what the signed transaction actually delivers (B2CA-2793 finding 3).
+// So, like handle_merge_coins already does for its destination, the source's
+// tracked balance is reduced and written back here. GasCoin is the one exception:
+// its balance isn't resolved until all gas-payment objects are summed later, so
+// the amount split from it is accumulated in `split_amount_from_gas_coin` for the
+// caller to subtract at that point.
 async fn handle_split_coins<OD: HasObjectData>(
     coin: Argument,
     amounts: ArrayVec<Argument, SPLIT_COIN_ARRAY_LENGTH>,
-    inputs: &BTreeMap<u16, InputValue>,
+    inputs: &mut BTreeMap<u16, InputValue>,
     object_data_source: OD,
-    command_results: &BTreeMap<u16, CommandResult>,
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    split_amount_from_gas_coin: &mut u64,
 ) -> CommandResult {
-    // We are not validating whether the coin balance is sufficient for the amounts specified
-    // as the transaction would fail on the network with InsufficientCoinBalance error
-    let coin_type = match coin {
-        Argument::GasCoin => SUI_COIN_TYPE,
+    // `source_amount` is the coin's currently-known balance before this split;
+    // None only for GasCoin (balance not yet known).
+    let (coin_type, source_amount) = match coin {
+        Argument::GasCoin => (SUI_COIN_TYPE, None),
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
             Some(InputValue::ObjectRef(digest)) => {
                 info!("SplitCoins trying object_data_source");
                 let object_data = object_data_source.get_object_data(digest).await;
                 match object_data {
-                    Some(ObjectData::Coin { coin_type, .. }) => coin_type,
+                    Some(ObjectData::Coin { coin_type, amount }) => (coin_type, Some(amount)),
                     // A StakedSui position cannot be split as a liquid coin.
                     Some(ObjectData::StakedSui { .. }) | None => {
                         info!("SplitCoins Coin Object not found");
@@ -1755,7 +1803,7 @@ async fn handle_split_coins<OD: HasObjectData>(
                     }
                 }
             }
-            Some(InputValue::Object((v, _))) => *v,
+            Some(InputValue::Object((v, amt))) => (*v, Some(*amt)),
             _ => {
                 info!("SplitCoins input refers to non ObjectRef");
                 reject_on(
@@ -1766,15 +1814,17 @@ async fn handle_split_coins<OD: HasObjectData>(
                 .await
             }
         },
-        Argument::NestedResult(command_ix, _) => {
-            if let Some(v) = command_results
+        Argument::NestedResult(command_ix, coin_ix) => {
+            if let Some((v, amt)) = command_results
                 .get(&command_ix)
                 .and_then(|result| match result {
-                    CommandResult::SplitCoinAmounts(id, _) => Some(id),
+                    CommandResult::SplitCoinAmounts(id, coin_amounts) => {
+                        coin_amounts.get(coin_ix as usize).map(|amt| (*id, *amt))
+                    }
                     _ => None,
                 })
             {
-                *v
+                (v, Some(amt))
             } else {
                 reject_on(
                     core::file!(),
@@ -1786,7 +1836,7 @@ async fn handle_split_coins<OD: HasObjectData>(
         }
 
         Argument::Result(command_ix) => match command_results.get(&command_ix) {
-            Some(CommandResult::MergedCoin((v, _))) => *v,
+            Some(CommandResult::MergedCoin((v, amt))) => (*v, Some(*amt)),
             _ => {
                 reject_on(
                     core::file!(),
@@ -1798,10 +1848,22 @@ async fn handle_split_coins<OD: HasObjectData>(
         },
     };
     let mut coin_amounts = ArrayVec::<u64, SPLIT_COIN_ARRAY_LENGTH>::new();
+    let mut split_total: u64 = 0;
     for arg in &amounts {
         match arg {
             Argument::Input(inp_index) => match inputs.get(inp_index) {
                 Some(InputValue::Amount(amt)) => {
+                    split_total = match split_total.checked_add(*amt) {
+                        Some(v) => v,
+                        None => {
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    };
                     coin_amounts.push(*amt);
                 }
                 _ => {
@@ -1824,6 +1886,77 @@ async fn handle_split_coins<OD: HasObjectData>(
             }
         }
     }
+
+    // Write the reduced source balance back. Any inability to reconcile it
+    // (unknown balance, or splitting more than the coin is known to hold) is
+    // treated as ambiguous and rejected, rather than risking a display value
+    // that understates what's actually held/moved.
+    match coin {
+        Argument::GasCoin => {
+            *split_amount_from_gas_coin = match split_amount_from_gas_coin.checked_add(split_total)
+            {
+                Some(v) => v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
+        }
+        Argument::Input(input_ix) => {
+            let new_amount = match source_amount.and_then(|amt| amt.checked_sub(split_total)) {
+                Some(v) => v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
+            inputs.insert(input_ix, InputValue::Object((coin_type, new_amount)));
+        }
+        Argument::NestedResult(command_ix, coin_ix) => {
+            let new_amount = match source_amount.and_then(|amt| amt.checked_sub(split_total)) {
+                Some(v) => v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
+            if let Some(CommandResult::SplitCoinAmounts(_, coin_amounts)) =
+                command_results.get_mut(&command_ix)
+            {
+                coin_amounts[coin_ix as usize] = new_amount;
+            }
+        }
+        Argument::Result(command_ix) => {
+            let new_amount = match source_amount.and_then(|amt| amt.checked_sub(split_total)) {
+                Some(v) => v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
+            command_results.insert(
+                command_ix,
+                CommandResult::MergedCoin((coin_type, new_amount)),
+            );
+        }
+    }
+
     CommandResult::SplitCoinAmounts(coin_type, coin_amounts)
 }
 
