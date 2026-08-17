@@ -127,13 +127,44 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             )
                             .await,
                         ),
-                        1 | 9 => CallArg::OptionalAmount(
-                            <SubInterp<DefaultInterp> as AsyncParser<Option<Amount>, BS>>::parse(
-                                &SubInterp(DefaultInterp),
-                                input,
-                            )
-                            .await,
-                        ),
+                        // BCS Option<u64> is 1 byte (tag 0x00, None) or 9 bytes (tag 0x01 +
+                        // 8-byte value, Some). The declared Pure length must be authoritative:
+                        // a length of 1 can only legitimately hold `None`, and a length of 9
+                        // can only legitimately hold `Some`.
+                        1 => {
+                            let [tag]: [u8; 1] = input.read().await;
+                            match tag {
+                                0 => CallArg::OptionalAmount(None),
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
+                        9 => {
+                            let [tag]: [u8; 1] = input.read().await;
+                            match tag {
+                                1 => CallArg::OptionalAmount(Some(
+                                    <DefaultInterp as AsyncParser<Amount, BS>>::parse(
+                                        &DefaultInterp,
+                                        input,
+                                    )
+                                    .await,
+                                )),
+                                _ => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
                         32 => CallArg::RecipientAddress(
                             <DefaultInterp as AsyncParser<Recipient, BS>>::parse(
                                 &DefaultInterp,
