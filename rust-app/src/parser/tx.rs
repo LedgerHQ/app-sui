@@ -1086,10 +1086,29 @@ async fn handle_move_call<OD: HasObjectData>(
             && core::str::from_utf8(function.as_slice()) == Ok("withdrawal_split")
         {
             info!("MoveCall 0x2::funds_accumulator::withdrawal_split");
+            // `withdrawal_split(reservation: FundsWithdrawal, amount: u64): Balance<T>`.
+            // Argument 0 is the SIP-58 reservation (an upper bound); argument 1 is the
+            // actual amount split out of it and returned. The amount actually moved is
+            // argument 1, not the reservation -- using the reservation here would
+            // over-display/over-validate a transfer that sends less than it reserved
+            // (B2CA-2793 finding 6). Require the split to fit within the reservation,
+            // and reject if either value can't be determined.
             match (get_arg_input(0), get_arg_input(1)) {
-                (Some(InputValue::FundsWithdrawal(coin_type, amt)), Some(_)) => {
+                (
+                    Some(InputValue::FundsWithdrawal(coin_type, reservation)),
+                    Some(InputValue::Amount(split)),
+                ) => {
+                    if split > reservation {
+                        info!("withdrawal_split: split exceeds reservation");
+                        reject_on(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await
+                    }
                     let total = TotalCoinAmount {
-                        total_amount: *amt,
+                        total_amount: *split,
                         coin_type: *coin_type,
                         includes_gas_coin: false,
                     };
