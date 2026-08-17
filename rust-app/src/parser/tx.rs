@@ -1078,6 +1078,23 @@ async fn handle_move_call<OD: HasObjectData>(
                     .await
                 }
             }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("coin")
+            && core::str::from_utf8(function.as_slice()) == Ok("redeem_funds")
+        {
+            info!("MoveCall 0x2::coin::redeem_funds");
+            match get_arg_input(0) {
+                Some(InputValue::FundsWithdrawal(coin_type, amt)) => {
+                    return Right(CommandResult::MergedCoin((*coin_type, *amt)));
+                }
+                _ => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            }
         }
     }
 
@@ -1591,6 +1608,12 @@ async fn get_coin_arg_amount<OD: HasObjectData>(
                         SyscallError::NotSupported as u16,
                     )
                     .await
+                }
+            }
+            Some(CommandResult::MergedCoin((coin_type, amount))) if *coin_ix == 0 => {
+                CommandArgumentAmount::Coin {
+                    coin_type: *coin_type,
+                    amount: *amount,
                 }
             }
             _ => {
