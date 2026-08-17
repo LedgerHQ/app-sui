@@ -2413,10 +2413,21 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
 
                     let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
 
+                    // SIP-58: gas_coins may be empty (gas paid from address balance). The
+                    // gas coin's balance is then genuinely unknown to the device, so seed
+                    // total_gas_amount with None (same as the "coin object not found"
+                    // fallback below) rather than Some(0) -- otherwise a GasCoin
+                    // transfer/stake would clear-sign a false "0 SUI" instead of falling
+                    // back to the unrecognized-tx path (B2CA-2793 finding 4).
+                    let gas_from_address_balance = gas_coins.is_empty();
+
                     // Try to find the total amount of all gas payment objects
                     // This value may be necessary if the transaction contains transfer of entire GasCoin
-                    // SIP-58: gas_coins may be empty (gas paid from address balance)
-                    let mut total_gas_amount: Option<u64> = Some(0);
+                    let mut total_gas_amount: Option<u64> = if gas_from_address_balance {
+                        None
+                    } else {
+                        Some(0)
+                    };
                     for digest in gas_coins.iter() {
                         if let Some(amt0) = total_gas_amount {
                             let object_data = self.object_data_source.get_object_data(digest).await;
@@ -2434,7 +2445,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     }
 
                     let expiration = TransactionExpirationParser.parse(input).await;
-                    let gas_from_address_balance = gas_coins.is_empty();
 
                     // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
                     if gas_from_address_balance
