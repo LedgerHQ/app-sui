@@ -1003,10 +1003,18 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     };
 
                     if includes_gas_coin {
-                        // GasCoin reduced by a SplitCoins before being staked
-                        // (B2CA-2793 finding 3): reject rather than overstate the
-                        // staked amount.
-                        total_amount = match total_amount.checked_sub(split_amount_from_gas_coin) {
+                        // Net GasCoin adjustment from any MergeCoins/SplitCoins
+                        // touching it before being staked: coins merged into the
+                        // gas coin must be reflected in the staked amount (same
+                        // as TransferTx already does), or the display would
+                        // understate what's actually staked (B2CA-2793 finding
+                        // 5); a SplitCoins reducing it must also be reflected, or
+                        // the display would overstate it (finding 3). Reject
+                        // rather than show an amount that doesn't reconcile.
+                        total_amount = match total_amount
+                            .checked_add(added_amount_to_gas_coin)
+                            .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
+                        {
                             Some(v) => v,
                             None => {
                                 reject_on(
