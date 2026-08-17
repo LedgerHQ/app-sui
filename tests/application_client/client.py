@@ -332,10 +332,14 @@ class Client:
         tx += TransactionData.encode(tx_data)
 
         # SIP-58: pysui lacks ValidDuring; replace None (0x00) with ValidDuring for replay protection.
-        # ValidDuring: variant 2 + 4×Option(None) + chain(32) + nonce(4) = 02 00 00 00 00 [32 zeros] 00 00 00 00
+        # ValidDuring: variant 2 + 4×Option(None) + chain(len-prefixed 32) + nonce(4)
+        #            = 02 00 00 00 00 20 [32 zeros] 00 00 00 00
+        # `chain` (ChainIdentifier/CheckpointDigest) is BCS-encoded as a length-prefixed
+        # byte vector, not a bare fixed array -- unlike the other digests in this schema.
         valid_during = bytes(
             [0x02]  # ValidDuring variant
             + [0x00] * 4  # min_epoch, max_epoch, min_ts, max_ts = None
+            + [0x20]  # chain length prefix (ULEB128, 32 bytes)
             + 32 * [0x00]  # chain (zeros)
             + [0x00, 0x00, 0x00, 0x00]  # nonce (u32 LE)
         )

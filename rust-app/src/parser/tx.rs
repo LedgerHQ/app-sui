@@ -53,9 +53,46 @@ pub type ValidDuringSchema = (
     Option<Amount>,
     Option<Amount>,
     Option<Amount>,
-    SuiAddress, // ChainIdentifier (CheckpointDigest)
-    U32LE,      // nonce
+    ChainIdentifierSchema, // ChainIdentifier (CheckpointDigest)
+    U32LE,                 // nonce
 );
+
+/// SIP-58 `ValidDuring.chain` (`ChainIdentifier`/`CheckpointDigest`). Unlike the other
+/// 32-byte digests parsed in this file, this one is length-prefixed on the wire (ULEB
+/// length + bytes), not a bare fixed array. Getting this wrong used to be silently
+/// masked because nothing verified the reviewed parse against the signed byte range
+/// (B2CA-2793 finding 2); require exactly SUI_ADDRESS_LENGTH bytes and reject
+/// otherwise rather than mis-consuming the stream.
+pub struct ChainIdentifierSchema;
+
+pub struct ChainIdentifierParser;
+
+impl HasOutput<ChainIdentifierSchema> for ChainIdentifierParser {
+    type Output = ();
+}
+
+impl<BS: Clone + Readable> AsyncParser<ChainIdentifierSchema, BS> for ChainIdentifierParser {
+    type State<'c>
+        = impl Future<Output = Self::Output> + 'c
+    where
+        BS: 'c;
+    fn parse<'a: 'c, 'b: 'c, 'c>(&'b self, input: &'a mut BS) -> Self::State<'c> {
+        async move {
+            let length =
+                <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input).await;
+            if length as usize != SUI_ADDRESS_LENGTH {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            } else {
+                <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await;
+            }
+        }
+    }
+}
 
 pub type SharedObject = (
     ObjectID,       // id
@@ -2127,7 +2164,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
-                        DefaultInterp,
+                        ChainIdentifierParser,
                         DefaultInterp,
                     ) as AsyncParser<ValidDuringSchema, BS>>::parse(
                         &(
@@ -2135,7 +2172,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                             SubInterp(DefaultInterp),
                             SubInterp(DefaultInterp),
                             SubInterp(DefaultInterp),
-                            DefaultInterp,
+                            ChainIdentifierParser,
                             DefaultInterp,
                         ),
                         input,

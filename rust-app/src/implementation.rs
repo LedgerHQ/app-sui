@@ -116,11 +116,25 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     info!("apdu sign tx length: {}\n", length);
 
     let known_txn = {
-        let mut txn = input[0].clone();
+        let mut txn = LengthTrack(input[0].clone(), 0);
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
         NoinlineFut(async move {
             info!("Beginning tx_parse");
-            TryFuture(tx_parser(object_data_source).parse(&mut txn)).await
+            let parsed = TryFuture(tx_parser(object_data_source).parse(&mut txn)).await;
+            // The reviewed parse must consume exactly the host-declared signed byte
+            // range, or the display and the signed bytes can disagree (B2CA-2793
+            // finding 2). Treat any mismatch as an unrecognized tx, the same
+            // fail-safe already used for parse ambiguity elsewhere.
+            if txn.index() == length {
+                parsed
+            } else {
+                info!(
+                    "sign_apdu: reviewed parse consumed {} bytes, signed length is {}",
+                    txn.index(),
+                    length
+                );
+                None
+            }
         })
         .await
     };
