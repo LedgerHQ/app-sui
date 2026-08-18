@@ -601,6 +601,12 @@ pub enum ProgrammableTransaction {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         includes_gas_coin: bool,
+        // Net MergeCoins/SplitCoins delta touching the GasCoin (B2CA-2793 findings
+        // 3/5), carried unresolved: the real gas-coin balance isn't known until
+        // later, so it must be combined with these deltas in one checked step
+        // downstream (see tx_parser below) rather than here.
+        added_amount_to_gas_coin: u64,
+        split_amount_from_gas_coin: u64,
     },
     TransferTokenTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
@@ -611,6 +617,8 @@ pub enum ProgrammableTransaction {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         includes_gas_coin: bool,
+        added_amount_to_gas_coin: u64,
+        split_amount_from_gas_coin: u64,
     },
     UnstakeTx {
         total_amount: u64,
@@ -911,7 +919,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             }
 
             // We must have the coin_type info by now, irrespective of the tx type
-            let (coin_type, mut total_amount, includes_gas_coin) = match total_coin_amount {
+            let (coin_type, total_amount, includes_gas_coin) = match total_coin_amount {
                 Some(v) => (v.coin_type, v.total_amount, v.includes_gas_coin),
                 _ => {
                     reject_on(
@@ -954,30 +962,19 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             coin_type,
                         }
                     } else {
-                        if includes_gas_coin {
-                            // Net GasCoin adjustment from any MergeCoins/SplitCoins
-                            // touching it (B2CA-2793 finding 3): reject rather than
-                            // display an amount that doesn't reconcile.
-                            total_amount = match total_amount
-                                .checked_add(added_amount_to_gas_coin)
-                                .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
-                            {
-                                Some(v) => v,
-                                None => {
-                                    reject_on(
-                                        core::file!(),
-                                        core::line!(),
-                                        SyscallError::NotSupported as u16,
-                                    )
-                                    .await
-                                }
-                            };
-                        }
-
+                        // Net GasCoin adjustment from any MergeCoins/SplitCoins
+                        // touching it (B2CA-2793 findings 3/5) is combined with the
+                        // real gas-coin balance downstream in tx_parser, using
+                        // checked arithmetic in the order additions-then-subtraction
+                        // -- doing the subtraction here, before the real balance is
+                        // known, would spuriously underflow the common case of a
+                        // bare split off the gas coin with no compensating merge.
                         ProgrammableTransaction::TransferSuiTx {
                             recipient,
                             amount: total_amount,
                             includes_gas_coin,
+                            added_amount_to_gas_coin,
+                            split_amount_from_gas_coin,
                         }
                     }
                 }
@@ -1002,35 +999,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         }
                     };
 
-                    if includes_gas_coin {
-                        // Net GasCoin adjustment from any MergeCoins/SplitCoins
-                        // touching it before being staked: coins merged into the
-                        // gas coin must be reflected in the staked amount (same
-                        // as TransferTx already does), or the display would
-                        // understate what's actually staked (B2CA-2793 finding
-                        // 5); a SplitCoins reducing it must also be reflected, or
-                        // the display would overstate it (finding 3). Reject
-                        // rather than show an amount that doesn't reconcile.
-                        total_amount = match total_amount
-                            .checked_add(added_amount_to_gas_coin)
-                            .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
-                        {
-                            Some(v) => v,
-                            None => {
-                                reject_on(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await
-                            }
-                        };
-                    }
-
+                    // Net GasCoin adjustment from any MergeCoins/SplitCoins
+                    // touching it before being staked (B2CA-2793 findings 3/5) is
+                    // combined with the real gas-coin balance downstream in
+                    // tx_parser -- see the matching comment in the TransferSuiTx
+                    // branch above for why the order of operations matters.
                     ProgrammableTransaction::StakeTx {
                         recipient,
                         amount: total_amount,
                         includes_gas_coin,
+                        added_amount_to_gas_coin,
+                        split_amount_from_gas_coin,
                     }
                 }
                 ProgrammableTransactionTypeState::UnstakeTx => {
@@ -1605,10 +1584,13 @@ fn add_to_total_coin_amount(
             if t.coin_type != coin_type {
                 None
             } else {
-                Some(TotalCoinAmount {
-                    total_amount: t.total_amount + amount,
-                    ..t
-                })
+                // B2CA-2793 follow-up: use checked arithmetic so a very large
+                // combined balance (e.g. summing several coins of a custom Move
+                // token with a supply near u64::MAX) rejects rather than silently
+                // wrapping to a small displayed amount.
+                t.total_amount
+                    .checked_add(amount)
+                    .map(|total_amount| TotalCoinAmount { total_amount, ..t })
             }
         }
         // A StakedSui position is not a liquid coin and cannot be aggregated.
@@ -2196,7 +2178,21 @@ async fn handle_merge_coins<OD: HasObjectData>(
     // MergeCoins does an overwrite of existing coins
     match dest_coin {
         Argument::GasCoin => {
-            *added_amount_to_gas_coin += total_amount_2;
+            // B2CA-2793 follow-up: checked, like split_amount_from_gas_coin's
+            // accumulation already is, so a very large merged-in balance rejects
+            // rather than silently wrapping before it ever reaches the final
+            // (also checked) combination in tx_parser.
+            *added_amount_to_gas_coin = match added_amount_to_gas_coin.checked_add(total_amount_2) {
+                Some(v) => v,
+                None => {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                }
+            };
         }
         Argument::Input(input_ix) => {
             inputs.insert(input_ix, InputValue::Object((coin_type, total_amount_2)));
@@ -2542,12 +2538,25 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     recipient,
                     amount,
                     includes_gas_coin,
+                    added_amount_to_gas_coin,
+                    split_amount_from_gas_coin,
                 } => {
                     let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
-                        // total value of all gas payment objects
-                        maybe_gas_coin_amount.map(|amt| amount + amt)
+                        // total value of all gas payment objects. Combine the real
+                        // balance, the logical amount, and any net
+                        // MergeCoins/SplitCoins delta (B2CA-2793 findings 3/5) with
+                        // checked arithmetic throughout, additions before the
+                        // final subtraction: doing the subtraction before the real
+                        // balance is known would spuriously underflow the common
+                        // case of a bare split off the gas coin with no
+                        // compensating merge (B2CA-2793 follow-up).
+                        maybe_gas_coin_amount.and_then(|amt| {
+                            amt.checked_add(amount)
+                                .and_then(|v| v.checked_add(added_amount_to_gas_coin))
+                                .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
+                        })
                     } else {
                         Some(amount)
                     };
@@ -2578,12 +2587,21 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     recipient,
                     amount,
                     includes_gas_coin,
+                    added_amount_to_gas_coin,
+                    split_amount_from_gas_coin,
                 } => {
                     let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
                         // We will treat this as an unknown tx if we don't know the
-                        // total value of all gas payment objects
-                        maybe_gas_coin_amount.map(|amt| amount + amt)
+                        // total value of all gas payment objects. See the matching
+                        // comment in the TransferSuiTx arm above for why the
+                        // checked-arithmetic order matters (B2CA-2793 findings
+                        // 3/5 follow-up).
+                        maybe_gas_coin_amount.and_then(|amt| {
+                            amt.checked_add(amount)
+                                .and_then(|v| v.checked_add(added_amount_to_gas_coin))
+                                .and_then(|v| v.checked_sub(split_amount_from_gas_coin))
+                        })
                     } else {
                         Some(amount)
                     };
