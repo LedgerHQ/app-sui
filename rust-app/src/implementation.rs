@@ -115,28 +115,34 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     info!("apdu sign tx length: {}\n", length);
 
-    let known_txn = {
-        let mut txn = LengthTrack(input[0].clone(), 0);
+    let mut txn = LengthTrack(input[0].clone(), 0);
+    let parsed = {
         let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
+        let txn = &mut txn;
         NoinlineFut(async move {
             info!("Beginning tx_parse");
-            let parsed = TryFuture(tx_parser(object_data_source).parse(&mut txn)).await;
-            // The reviewed parse must consume exactly the host-declared signed byte
-            // range, or the display and the signed bytes can disagree (B2CA-2793
-            // finding 2). Treat any mismatch as an unrecognized tx, the same
-            // fail-safe already used for parse ambiguity elsewhere.
-            if txn.index() == length {
-                parsed
-            } else {
-                info!(
-                    "sign_apdu: reviewed parse consumed {} bytes, signed length is {}",
-                    txn.index(),
-                    length
-                );
-                None
-            }
+            TryFuture(tx_parser(object_data_source).parse(txn)).await
         })
         .await
+    };
+    // The reviewed parse must consume exactly the host-declared signed byte range,
+    // or the display and the signed bytes can disagree (B2CA-2793 finding 2).
+    // Treat any mismatch as an unrecognized tx, the same fail-safe already used
+    // for parse ambiguity elsewhere. This check is deliberately kept outside the
+    // async block above: folding it into that block's tail expression (rather
+    // than leaving `TryFuture(...).await` itself as the tail) changes the
+    // generated state machine's drop timing for the (heap-backed) parser state
+    // nested within it, which was observed to trip embedded-alloc's reentrancy
+    // guard ("RefCell already borrowed") specifically on nanox.
+    let known_txn = if txn.index() == length {
+        parsed
+    } else {
+        info!(
+            "sign_apdu: reviewed parse consumed {} bytes, signed length is {}",
+            txn.index(),
+            length
+        );
+        None
     };
 
     info!("End of tx_parse");
