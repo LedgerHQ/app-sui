@@ -37,8 +37,15 @@ def _build_tx() -> bytes:
     fixture by stripping the gas coin ObjectRef from gas_data.payment and replacing
     TransactionExpiration::None (0x00) with ValidDuring (all-zero chain/nonce).
     """
+    # Note: `withdrawal_split`'s second argument (Input 1) below is fixed to the
+    # correct BCS encoding: a plain 8-byte u64 Pure equal to the split amount
+    # (612_000, matching the reservation), not a 32-byte Pure with the same value
+    # zero-padded. That 32-byte encoding was never actually a valid `u64` Move
+    # argument and only "worked" while the parser ignored this argument's value
+    # entirely (B2CA-2793 finding 6); it is now validated against the reservation
+    # (see test_sign_sui_funds_withdrawal.py, from which this fixture derives).
     regular = base64.b64decode(
-        "AAAAAAADAgCgVgkAAAAAAAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAAACCgVgkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgHT8mQzBXYCJuUYybWpYWU4OAjdl3lx9z3qlxVDsL5IgDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEWZ1bmRzX2FjY3VtdWxhdG9yEHdpdGhkcmF3YWxfc3BsaXQBBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UHQmFsYW5jZQEHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQACAQAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UMcmVkZWVtX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAECAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIHYmFsYW5jZQpzZW5kX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAICAQABAgBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQFADb3P7ajh5k679XEMz1pnv6bn+UXJK8hhHgy0S3IZ3tN2QhEAAAAAIGbFq2VJip03FgAaA0gV/0q8p2X39vI3XMkdKt23nCCKb7If7q0CfaSHMpWv/WxPNhj+F2+i+/Pnte8dlGOzHiHoAwAAAAAAACChBwAAAAAAAA=="
+        "AAAAAAADAgCgVgkAAAAAAAAHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQAAAAigVgkAAAAAAAAgHT8mQzBXYCJuUYybWpYWU4OAjdl3lx9z3qlxVDsL5IgDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACEWZ1bmRzX2FjY3VtdWxhdG9yEHdpdGhkcmF3YWxfc3BsaXQBBwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UHQmFsYW5jZQEHAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDc3VpA1NVSQACAQAAAQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACB2JhbGFuY2UMcmVkZWVtX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAECAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIHYmFsYW5jZQpzZW5kX2Z1bmRzAQcAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgNzdWkDU1VJAAICAQABAgBvsh/urQJ9pIcyla/9bE82GP4Xb6L78+e17x2UY7MeIQFADb3P7ajh5k679XEMz1pnv6bn+UXJK8hhHgy0S3IZ3tN2QhEAAAAAIGbFq2VJip03FgAaA0gV/0q8p2X39vI3XMkdKt23nCCKb7If7q0CfaSHMpWv/WxPNhj+F2+i+/Pnte8dlGOzHiHoAwAAAAAAACChBwAAAAAAAA=="
     )
     # Sanity-check: payment count byte and first 32 bytes of ObjectRef must match the gas coin.
     assert regular[-_GAS_TAIL_LEN] == 0x01, (
@@ -58,11 +65,16 @@ def _build_tx() -> bytes:
     tail = regular[-_GAS_TAIL_LEN:]
     owner_price_budget = tail[74:122]
 
-    # ValidDuring: variant(1) + 4×Option::None(4) + chain_id(32) + nonce(4) = 41 bytes.
+    # ValidDuring: variant(1) + 4×Option::None(4) + chain_id(1+32) + nonce(4) = 42 bytes.
     # All-zero chain and nonce are accepted by the emulator parser (no on-chain validation).
+    # The chain identifier is length-prefixed on the wire (ULEB length + bytes), not a
+    # bare fixed array (B2CA-2793 finding 2; see ChainIdentifierParser in
+    # rust-app/src/parser/tx.rs) -- confirmed against the tool-generated fixture in
+    # test_sign_sui_transfer_address_balance.py, which encodes it the same way.
     valid_during = bytes(
         [0x02]       # ValidDuring variant
         + [0x00] * 4   # min_epoch=None, max_epoch=None, min_ts=None, max_ts=None
+        + [0x20]       # chain identifier length prefix (ULEB128 32)
         + [0x00] * 32  # chain identifier (all-zero for emulator)
         + [0x00] * 4   # nonce (u32 LE = 0)
     )
