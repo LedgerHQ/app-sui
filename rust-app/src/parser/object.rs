@@ -238,8 +238,13 @@ impl<BS: Clone + Readable> AsyncParser<MoveObjectType, BS> for DefaultInterp {
     }
 }
 
+/// Parses a `StructTag` into the `CoinType` identity it denotes.
+///
+/// `Some(None)` means the tag parsed fine but has no representable identity (it is
+/// generic); the caller decides whether that is fatal. Returning `None` rejects the
+/// parse outright.
 pub const fn struct_tag_parser<BS: Clone + Readable>(
-) -> impl AsyncParser<StructTag, BS, Output = CoinType> {
+) -> impl AsyncParser<StructTag, BS, Output = Option<CoinType>> {
     Action(
         (
             DefaultInterp,
@@ -247,7 +252,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
             SubInterp(DefaultInterp),
             SubInterp(DefaultInterp),
         ),
-        |(address, module, name, _type_tags): (
+        |(address, module, name, type_params): (
             [u8; 32],
             ArrayVec<u8, STRING_LENGTH>,
             ArrayVec<u8, STRING_LENGTH>,
@@ -262,7 +267,22 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 "StructTag Name {}",
                 core::str::from_utf8(name.as_slice()).unwrap_or("invalid utf-8")
             );
-            info!("StructTag TypeTag len {}", _type_tags.len());
+            info!("StructTag TypeTag len {}", type_params.len());
+            // A generic type's identity includes its type parameters, but CoinType
+            // only holds (address, module, name): `0xP::m::Token<A>` and
+            // `0xP::m::Token<B>` would collapse into one identity that the UI, the
+            // KNOWN_COINS table, the dynamic token descriptor and the swap
+            // coin_type comparison cannot tell apart. The parameters are
+            // structurally skipped (SkipTypeTag) but never represented, so report
+            // "no representable identity" and let the caller fail closed
+            // (B2CA-2793 follow-up finding 3). This is not a parse error: a
+            // MoveCall type argument is allowed to be generic -- SIP-58's
+            // `withdrawal_split<0x2::balance::Balance<0x2::sui::SUI>>` is -- and the
+            // app derives no identity from those, it only skips them.
+            if !type_params.is_empty() {
+                info!("StructTag has type parameters; identity not representable");
+                return Some(None);
+            }
             // Fail safe: never silently truncate. A module/struct name longer than
             // COIN_STRING_LENGTH cannot be represented faithfully in CoinType, and a
             // truncated identity could collide with a different token (two distinct
@@ -280,7 +300,7 @@ pub const fn struct_tag_parser<BS: Clone + Readable>(
                 pad_coin_name_bytes(module.as_slice()),
                 pad_coin_name_bytes(name.as_slice()),
             );
-            Some(out)
+            Some(Some(out))
         },
     )
 }
@@ -329,7 +349,11 @@ impl<BS: Clone + Readable> AsyncParser<TypeTag, BS> for DefaultInterp {
                 }
                 7 => {
                     info!("TypeTag: Struct(StructTag)");
-                    Some(struct_tag_parser().parse(input).await)
+                    // A generic struct tag yields None here, so an object whose
+                    // `Coin<T>` type erases parameters is rejected by the
+                    // MoveObjectType::Coin arm above rather than clear-signed under
+                    // a truncated identity (B2CA-2793 follow-up finding 3).
+                    struct_tag_parser().parse(input).await
                 }
                 _ => {
                     reject_on(

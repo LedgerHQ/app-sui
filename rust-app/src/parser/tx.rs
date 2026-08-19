@@ -357,7 +357,13 @@ impl<BS: Clone + Readable> AsyncParser<TypeInput, BS> for DefaultInterp {
                 }
                 7 => {
                     info!("TypeInput: Struct(Box<StructInput>)");
-                    // TypeInput::Struct contains StructTag directly (no TypeTag variant prefix)
+                    // TypeInput::Struct contains StructTag directly (no TypeTag variant prefix).
+                    // A MoveCall's type arguments are only skipped, never used as an
+                    // asset identity (that always comes from the referenced object's
+                    // own type), so a generic one is fine here -- SIP-58's
+                    // `withdrawal_split<0x2::balance::Balance<0x2::sui::SUI>>` is
+                    // generic. The identity check lives at the object site
+                    // (B2CA-2793 follow-up finding 3).
                     let _ = struct_tag_parser().parse(input).await;
                 }
                 8 => {
