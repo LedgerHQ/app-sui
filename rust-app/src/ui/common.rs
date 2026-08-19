@@ -23,12 +23,15 @@ pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
 /// (or the stake) ends up with, not an exact figure -- say so rather than asserting a
 /// precision the device cannot have (B2CA-2793 follow-up finding 2).
 fn amount_field_name(base: &str, includes_gas_coin: bool) -> ArrayString<32> {
-    let name = if includes_gas_coin {
-        format!("{base} (max)")
-    } else {
-        format!("{base}")
-    };
-    ArrayString::from(&name).unwrap_or_else(|_| ArrayString::from(base).unwrap())
+    // Built in place: `base` is one of a few short static labels and the suffix is
+    // 6 bytes, so both always fit. Keep whatever fitted on overflow rather than
+    // panicking -- a panic exits the app.
+    let mut name = ArrayString::new();
+    let _ = name.try_push_str(base);
+    if includes_gas_coin {
+        let _ = name.try_push_str(" (max)");
+    }
+    name
 }
 
 #[inline(never)]
