@@ -1986,7 +1986,15 @@ async fn handle_merge_coins<OD: HasObjectData>(
     command_results: &mut BTreeMap<u16, CommandResult>,
     added_amount_to_gas_coin: &mut u64,
 ) {
-    let mut total_amount_2: u64 = 0;
+    // B2CA-2793 follow-up (finding 1): accumulate the merged balance with checked
+    // arithmetic. `overflow-checks` is off in both profiles, so a plain `+=` wraps
+    // modulo 2^64 and would hand the UI (and the no-UI swap comparison) an amount
+    // far below what the transaction actually moves. Kept as an Option so every
+    // accumulation site short-circuits, with a single rejection once the sources
+    // have been walked -- an overflow is an ambiguity, so it takes the same
+    // fail-safe path (unrecognized tx / blind-sign, swap rejects) as the rest of
+    // this function.
+    let mut total_amount_2: Option<u64> = Some(0);
     let coin_type = match dest_coin {
         Argument::GasCoin => SUI_COIN_TYPE,
         Argument::Input(input_ix) => match inputs.get(&input_ix) {
@@ -1995,7 +2003,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 let object_data = object_data_source.get_object_data(digest).await;
                 match object_data {
                     Some(ObjectData::Coin { coin_type, amount }) => {
-                        total_amount_2 += amount;
+                        total_amount_2 = total_amount_2.and_then(|t| t.checked_add(amount));
                         coin_type
                     }
                     // A StakedSui position cannot be merged as a liquid coin.
@@ -2011,7 +2019,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                 }
             }
             Some(InputValue::Object((coin_type, amt))) => {
-                total_amount_2 += amt;
+                total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                 *coin_type
             }
             _ => {
@@ -2034,7 +2042,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                     _ => None,
                 })
             {
-                total_amount_2 += amt;
+                total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                 *v
             } else {
                 reject_on(
@@ -2084,7 +2092,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                                 )
                                 .await
                             }
-                            total_amount_2 += amount;
+                            total_amount_2 = total_amount_2.and_then(|t| t.checked_add(amount));
                         }
                         // A StakedSui position cannot be merged as a liquid coin.
                         Some(ObjectData::StakedSui { .. }) | None => {
@@ -2108,7 +2116,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         )
                         .await
                     }
-                    total_amount_2 += amt;
+                    total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                 }
                 _ => {
                     info!("MergeCoins input refers to non ObjectRef");
@@ -2134,7 +2142,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         _ => None,
                     })
                 {
-                    total_amount_2 += amt;
+                    total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                 } else {
                     reject_on(
                         core::file!(),
@@ -2155,7 +2163,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         .await
                     }
                     for amt in coin_amounts {
-                        total_amount_2 += amt;
+                        total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                     }
                 }
                 Some(CommandResult::MergedCoin((coin_type_, amt))) => {
@@ -2167,7 +2175,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
                         )
                         .await
                     }
-                    total_amount_2 += amt;
+                    total_amount_2 = total_amount_2.and_then(|t| t.checked_add(*amt));
                 }
                 _ => {
                     reject_on(
@@ -2180,6 +2188,22 @@ async fn handle_merge_coins<OD: HasObjectData>(
             },
         }
     }
+
+    // B2CA-2793 follow-up (finding 1): a merged total that overflowed u64 cannot be
+    // displayed or swap-checked faithfully, so reject instead of writing back a
+    // wrapped (understated) balance.
+    let total_amount_2 = match total_amount_2 {
+        Some(v) => v,
+        None => {
+            info!("MergeCoins total amount overflows u64");
+            reject_on(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await
+        }
+    };
 
     // MergeCoins does an overwrite of existing coins
     match dest_coin {
@@ -2461,8 +2485,15 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         if let Some(amt0) = total_gas_amount {
                             let object_data = self.object_data_source.get_object_data(digest).await;
                             match object_data {
+                                // B2CA-2793 follow-up (finding 1): checked. If the
+                                // gas payment balances sum past u64::MAX the total is
+                                // not representable, so leave it unknown (None) --
+                                // exactly like an unresolvable payment object below.
+                                // A GasCoin transfer/stake then falls back to the
+                                // unrecognized-tx path instead of clear-signing a
+                                // wrapped, understated amount.
                                 Some(ObjectData::Coin { amount, .. }) => {
-                                    total_gas_amount = Some(amt0 + amount)
+                                    total_gas_amount = amt0.checked_add(amount)
                                 }
                                 // A StakedSui position cannot pay gas; treat the
                                 // total as unknown rather than as a liquid amount.
