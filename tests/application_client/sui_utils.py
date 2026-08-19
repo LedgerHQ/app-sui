@@ -1,3 +1,6 @@
+import base64
+import hashlib
+
 from ragger.utils import create_currency_config
 from ragger.bip import pack_derivation_path
 from bip_utils import Bip32Utils
@@ -22,6 +25,34 @@ AMOUNT_BYTES    = mist_to_bytes(AMOUNT)
 
 AMOUNT_2        = sui_to_mist(101.000001234)
 AMOUNT_2_BYTES  = mist_to_bytes(AMOUNT_2)
+
+### Gas coin object (Move/GasCoin) used to give a transaction a resolvable gas
+### balance. Taken from test_sign_sui_transfer_1.py::test_sign_tx_sui_whole_gas_coin
+### (a real on-network object); only the 8-byte LE balance inside `contents` is
+### rewritten, so the surrounding owner/digest/rebate fields still parse.
+_GAS_COIN_OBJECT = base64.b64decode(
+    'AAEB03ZCEQAAAAAoQA29z+2o4eZOu/VxDM9aZ7+m5/lFySvIYR4MtEtyGd4QDpQ5AAAAAABvsh/urQJ9'
+    'pIcyla/9bE82GP4Xb6L78+e17x2UY7MeISB0/j3Uc6ljNbb1tbWgvj5PAz7MCgIO6e91iU9asLM9x2AT'
+    'DwAAAAAA')
+# Layout: 0x00 0x01 | has_public_transfer | version[8] | contents(vec: uid[32] | balance[8])
+_GAS_COIN_BALANCE_OFFSET = 2 + 1 + 8 + 1 + 32
+
+GAS_COIN_OBJECT_ID = "0x400dbdcfeda8e1e64ebbf5710ccf5a67bfa6e7f945c92bc8611e0cb44b7219de"
+GAS_COIN_VERSION   = 289568467
+
+
+def object_digest(obj: bytes) -> bytes:
+    """Digest an object is referenced by in a transaction."""
+    return hashlib.blake2b(b"Object::" + obj, digest_size=32).digest()
+
+
+def gas_coin_object(balance: int) -> bytes:
+    """A GasCoin object blob holding exactly `balance` MIST."""
+    off = _GAS_COIN_BALANCE_OFFSET
+    return (_GAS_COIN_OBJECT[:off]
+            + balance.to_bytes(8, byteorder='little')
+            + _GAS_COIN_OBJECT[off + 8:])
+
 
 USDC_AMOUNT       = 100023 #0.100023 USDC
 USDC_AMOUNT_2     = 123393 #0.123393 USDC

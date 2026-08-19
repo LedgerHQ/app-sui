@@ -2542,12 +2542,21 @@ pub enum KnownTx {
         gas_budget: u64,
         /// SIP-58: true when gas paid from address balance (empty gas_data.payment)
         gas_from_address_balance: bool,
+        /// True when the transferred coin *is* the gas coin, so gas is charged out
+        /// of `total_amount` instead of on top of it: the recipient receives at
+        /// most `total_amount`, and the exact figure is not knowable before
+        /// execution. Must survive down to the UI and the swap check rather than
+        /// being folded away here (B2CA-2793 follow-up finding 2).
+        includes_gas_coin: bool,
     },
     StakeTx {
         recipient: SuiAddressRaw,
         total_amount: u64,
         gas_budget: u64,
         gas_from_address_balance: bool,
+        /// See `TransferTx::includes_gas_coin`: staking the gas coin by value
+        /// stakes at most `total_amount`.
+        includes_gas_coin: bool,
     },
     UnstakeTx {
         total_amount: u64,
@@ -2604,6 +2613,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         total_amount,
                         gas_budget,
                         gas_from_address_balance,
+                        includes_gas_coin,
                     })
                 }
                 ProgrammableTransaction::TransferTokenTx {
@@ -2618,6 +2628,10 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         total_amount: amount,
                         gas_budget,
                         gas_from_address_balance,
+                        // The gas coin is SUI; a token transfer that touched it is
+                        // rejected upstream, so this is always a plain transfer
+                        // whose amount is charged independently of gas.
+                        includes_gas_coin: false,
                     })
                 }
                 ProgrammableTransaction::StakeTx {
@@ -2648,6 +2662,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         total_amount,
                         gas_budget,
                         gas_from_address_balance,
+                        includes_gas_coin,
                     })
                 }
                 ProgrammableTransaction::UnstakeTx { total_amount } => {

@@ -156,6 +156,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             coin_type,
             gas_budget,
             gas_from_address_balance,
+            includes_gas_coin,
         }) => {
             info!("Known transfer tx\n");
             let mut bs = input[1].clone();
@@ -170,6 +171,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 destination_address: recipient,
                 coin_type,
                 gas_from_address_balance,
+                includes_gas_coin,
                 ..Default::default()
             };
 
@@ -186,6 +188,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             total_amount,
             gas_budget,
             gas_from_address_balance,
+            includes_gas_coin,
         }) => {
             info!("Known stake tx\n");
             if ctx.is_swap() {
@@ -204,6 +207,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     total_amount,
                     gas_budget,
                     gas_from_address_balance,
+                    includes_gas_coin,
                 ))
             })
             .ok()

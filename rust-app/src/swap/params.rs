@@ -133,6 +133,11 @@ pub struct TxParams {
     pub destination_address: SuiAddressRaw,
     pub coin_type: CoinType,
     pub gas_from_address_balance: bool,
+    /// Received-side only: the transferred coin *is* the gas coin, so `amount` is a
+    /// pre-gas upper bound rather than what the recipient actually gets
+    /// (B2CA-2793 follow-up finding 2). Always false on the expected side -- an
+    /// Exchange quote is an exact figure, never a send-max.
+    pub includes_gas_coin: bool,
     pub expected_ticker: ArrayString<MAX_SWAP_TICKER_LENGTH>,
 }
 
@@ -144,6 +149,7 @@ impl Default for TxParams {
             destination_address: SuiAddressRaw::default(),
             coin_type: SUI_COIN_TYPE,
             gas_from_address_balance: false,
+            includes_gas_coin: false,
             expected_ticker: ArrayString::new(),
         }
     }
@@ -184,6 +190,7 @@ impl TryFrom<&custom::CreateTxParams> for TxParams {
             destination_address,
             coin_type,
             gas_from_address_balance,
+            includes_gas_coin: false,
             expected_ticker,
         })
     }

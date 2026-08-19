@@ -98,6 +98,18 @@ pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayStrin
 pub fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx) -> bool {
     info!("check_tx_params: expected: {:X?}", expected);
     info!("check_tx_params: received: {:X?}", received);
+    // A transfer of the gas coin itself can never be bound to a swap quote: gas is
+    // charged out of the transferred coin, so the recipient gets the coin's balance
+    // minus the gas actually consumed -- a figure that is not knowable before
+    // execution. Matching `amount` here would only prove the *pre-gas* balance
+    // equals the quote, letting a host underpay the counterparty by up to the gas
+    // budget with no UI shown (B2CA-2793 follow-up finding 2). A swap must instead
+    // split the exact amount off the gas coin and transfer that split output, which
+    // is what the Exchange flow already does.
+    if received.includes_gas_coin {
+        info!("check_tx_params: GasCoin transfer cannot be bound to a swap quote");
+        return false;
+    }
     expected.amount == received.amount
         && expected.fee == received.fee
         && expected.destination_address == received.destination_address
