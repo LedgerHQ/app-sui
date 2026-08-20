@@ -62,13 +62,20 @@ impl UserInterface {
             name: "To",
             value: &format!("0x{}", HexSlice(&params.destination_address)),
         };
-        let gas_val = format_gas_amount(params.fee, params.gas_from_address_balance);
+        let gas_val = format_gas_amount(
+            params.fee,
+            GasSource::new(params.gas_from_address_balance, params.includes_gas_coin),
+        );
         let gas = Field {
             name: "Max Gas",
             value: &gas_val,
         };
-        let ((amt_str, amt_val), coin_fields) =
-            get_coin_and_amount_fields(params.amount, params.coin_type, ctx);
+        let ((amt_str, amt_val), coin_fields) = get_coin_and_amount_fields(
+            params.amount,
+            params.coin_type,
+            ctx,
+            params.includes_gas_coin,
+        );
         let amt = Field {
             name: amt_str.as_str(),
             value: amt_val.as_str(),
@@ -109,6 +116,7 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
         gas_from_address_balance: bool,
+        includes_gas_coin: bool,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
@@ -123,15 +131,24 @@ impl UserInterface {
                 &format!("0x{}", HexSlice(&recipient))
             },
         };
-        let gas_val = format_gas_amount(gas_budget, gas_from_address_balance);
+        let gas_val = format_gas_amount(
+            gas_budget,
+            GasSource::new(gas_from_address_balance, includes_gas_coin),
+        );
         let gas = Field {
             name: "Max Gas",
             value: &gas_val,
         };
 
         let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
+        // Staking the gas coin by value stakes at most this much: gas comes out of
+        // it (B2CA-2793 follow-up finding 2).
         let amt = Field {
-            name: "Stake amount",
+            name: if includes_gas_coin {
+                "Stake amount (max)"
+            } else {
+                "Stake amount"
+            },
             value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
         };
 
@@ -166,7 +183,10 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
-        let gas_val = format_gas_amount(gas_budget, gas_from_address_balance);
+        // Unstaking never consumes the gas coin as the unstaked object, so gas is
+        // always charged separately here.
+        let gas_val =
+            format_gas_amount(gas_budget, GasSource::new(gas_from_address_balance, false));
         let gas = Field {
             name: "Max Gas",
             value: &gas_val,
@@ -237,11 +257,45 @@ impl UserInterface {
     }
 }
 
-pub fn format_gas_amount(gas_budget: u64, gas_from_address_balance: bool) -> alloc::string::String {
+/// Where the gas for this transaction is charged from. This is user-visible
+/// information, not a detail: for `PaymentObjects` the gas is charged on top of the
+/// reviewed amount (a separate coin pays it), while for `TransferredCoin` it comes
+/// *out of* that amount, so the same two on-screen numbers must not be read the same
+/// way (B2CA-2793 follow-up finding 2).
+#[derive(Copy, Clone)]
+pub enum GasSource {
+    /// Gas paid by the transaction's own gas payment objects.
+    PaymentObjects,
+    /// SIP-58: empty `gas_data.payment`, gas paid from the sender's address balance.
+    AddressBalance,
+    /// The reviewed amount *is* the gas coin, so gas is deducted from it.
+    TransferredCoin,
+}
+
+impl GasSource {
+    pub fn new(gas_from_address_balance: bool, includes_gas_coin: bool) -> Self {
+        // A GasCoin transfer/stake whose gas also comes from the address balance
+        // cannot be resolved to a real balance and is rejected as an unrecognized
+        // tx upstream (B2CA-2793 finding 4), so these cannot both hold here.
+        if gas_from_address_balance {
+            GasSource::AddressBalance
+        } else if includes_gas_coin {
+            GasSource::TransferredCoin
+        } else {
+            GasSource::PaymentObjects
+        }
+    }
+}
+
+pub fn format_gas_amount(gas_budget: u64, gas_source: GasSource) -> alloc::string::String {
     let (quotient, remainder_str) = get_amount_in_decimals(gas_budget, SUI_COIN_DECIMALS);
-    if gas_from_address_balance {
-        format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
-    } else {
-        format!("SUI {}.{}", quotient, remainder_str.as_str())
+    match gas_source {
+        GasSource::AddressBalance => {
+            format!("SUI {}.{} (from balance)", quotient, remainder_str.as_str())
+        }
+        GasSource::TransferredCoin => {
+            format!("SUI {}.{} (from amount)", quotient, remainder_str.as_str())
+        }
+        GasSource::PaymentObjects => format!("SUI {}.{}", quotient, remainder_str.as_str()),
     }
 }

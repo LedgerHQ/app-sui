@@ -1,3 +1,6 @@
+import base64
+import hashlib
+
 from ragger.utils import create_currency_config
 from ragger.bip import pack_derivation_path
 from bip_utils import Bip32Utils
@@ -23,6 +26,34 @@ AMOUNT_BYTES    = mist_to_bytes(AMOUNT)
 AMOUNT_2        = sui_to_mist(101.000001234)
 AMOUNT_2_BYTES  = mist_to_bytes(AMOUNT_2)
 
+### Gas coin object (Move/GasCoin) used to give a transaction a resolvable gas
+### balance. Taken from test_sign_sui_transfer_1.py::test_sign_tx_sui_whole_gas_coin
+### (a real on-network object); only the 8-byte LE balance inside `contents` is
+### rewritten, so the surrounding owner/digest/rebate fields still parse.
+_GAS_COIN_OBJECT = base64.b64decode(
+    'AAEB03ZCEQAAAAAoQA29z+2o4eZOu/VxDM9aZ7+m5/lFySvIYR4MtEtyGd4QDpQ5AAAAAABvsh/urQJ9'
+    'pIcyla/9bE82GP4Xb6L78+e17x2UY7MeISB0/j3Uc6ljNbb1tbWgvj5PAz7MCgIO6e91iU9asLM9x2AT'
+    'DwAAAAAA')
+# Layout: 0x00 0x01 | has_public_transfer | version[8] | contents(vec: uid[32] | balance[8])
+_GAS_COIN_BALANCE_OFFSET = 2 + 1 + 8 + 1 + 32
+
+GAS_COIN_OBJECT_ID = "0x400dbdcfeda8e1e64ebbf5710ccf5a67bfa6e7f945c92bc8611e0cb44b7219de"
+GAS_COIN_VERSION   = 289568467
+
+
+def object_digest(obj: bytes) -> bytes:
+    """Digest an object is referenced by in a transaction."""
+    return hashlib.blake2b(b"Object::" + obj, digest_size=32).digest()
+
+
+def gas_coin_object(balance: int) -> bytes:
+    """A GasCoin object blob holding exactly `balance` MIST."""
+    off = _GAS_COIN_BALANCE_OFFSET
+    return (_GAS_COIN_OBJECT[:off]
+            + balance.to_bytes(8, byteorder='little')
+            + _GAS_COIN_OBJECT[off + 8:])
+
+
 USDC_AMOUNT       = 100023 #0.100023 USDC
 USDC_AMOUNT_2     = 123393 #0.123393 USDC
 USDC_AMOUNT_3     = 123456 #0.123456 USDC
@@ -44,17 +75,21 @@ USDC_OBJECTS_BY_AMOUNT = {
         'version': 497431093,
         'digest': '5DEmU82eeP1wJ6L7q8V7bLbAr4Vbjat2XkT3nbf5NmSN'
     },
+    # Balance field was previously encoded as 0 (a placeholder never read before
+    # SplitCoins started tracking source balances -- B2CA-2793 finding 3); fixed
+    # to match the nominal amount below.
     123456: {
-        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAHY11cyAAAAACgNUoPwzbihPgXLTLslYX+ffuP7V3HcROVn4uoGpl1dCwAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIDrjlmbO1hdZjMDrFaYKnvImvsNX7xaQ0ok9F6aKVSOjoC0UAAAAAAA=',
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAHY11cyAAAAACgNUoPwzbihPgXLTLslYX+ffuP7V3HcROVn4uoGpl1dC0DiAQAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIDrjlmbO1hdZjMDrFaYKnvImvsNX7xaQ0ok9F6aKVSOjoC0UAAAAAAA=',
         'object_id': '0x0d5283f0cdb8a13e05cb4cbb25617f9f7ee3fb5771dc44e567e2ea06a65d5d0b',
         'version': 844617688,
-        'digest': '4wYF9dEX4ajr7d1Cc6f1DPArmgjyJKNKuSHDAZHHTTUr'
+        'digest': '459kYi6rHje9ZC1xFoXzYoN5eRnMHrttFyrJS3PajWhk'
     },
+    # Balance field was previously encoded as 0; see comment above (finding 3).
     1234567: {
-        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAE400UyAAAAACi030ZTM4bNlRGM5DXjFcuwXeAuvRiPdVfswomzbOVg2QAAAAAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIKiui86Uf8v26hfPu4WBIXcAuDC18HpXtPMV5gYdno3boC0UAAAAAAA=',
+        'obj': 'AAMHkJy6Ys6W1U3iW+yVAt5cp7TyiQF0e7+Wt2wuY+xfHLoEY29pbgRDT0lOAAE400UyAAAAACi030ZTM4bNlRGM5DXjFcuwXeAuvRiPdVfswomzbOVg2YfWEgAAAAAAAF24RF8Gf8G5kKKpl315ef0YwGE0d/tb2yp0PacXL02gIKiui86Uf8v26hfPu4WBIXcAuDC18HpXtPMV5gYdno3boC0UAAAAAAA=',
         'object_id': '0xb4df46533386cd95118ce435e315cbb05de02ebd188f7557ecc289b36ce560d9',
         'version': 843436856,
-        'digest': 'DnfEiFtm6QeTQnrAzo1DLED9YDhd2aE3LKfBXNTBD8od'
+        'digest': 'e69BnT3FjPocKa1UfQaPAXTS8kLxt2FeBaCW5JEBMsM'
     }
 }
 
