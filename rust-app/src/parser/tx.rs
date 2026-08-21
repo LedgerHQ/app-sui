@@ -613,11 +613,14 @@ pub enum ProgrammableTransaction {
         // downstream (see tx_parser below) rather than here.
         added_amount_to_gas_coin: u64,
         split_amount_from_gas_coin: u64,
+        // SIP-58 coin::send_funds change recipient (asserted == tx sender).
+        self_deposit: Option<SuiAddressRaw>,
     },
     TransferTokenTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         coin_type: CoinType,
+        self_deposit: Option<SuiAddressRaw>,
     },
     StakeTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
@@ -769,6 +772,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             let mut tx_type: ProgrammableTransactionTypeState =
                 ProgrammableTransactionTypeState::UnknownTx;
 
+            let mut self_deposit: Option<SuiAddressRaw> = None;
+
             // Parse commands
             {
                 let length_u32 =
@@ -793,7 +798,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     ))
                     .await;
                     match c {
-                        Command::MoveCall(package, module, function, args) => {
+                        call @ Command::MoveCall(..) => {
                             match tx_type {
                                 ProgrammableTransactionTypeState::UnknownTx => {}
                                 _ => {
@@ -809,13 +814,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 }
                             }
                             let res = NoinlineFut(handle_move_call(
-                                package,
-                                module,
-                                function,
-                                args,
+                                call,
                                 &inputs,
                                 self.object_data_source.clone(),
                                 &command_results,
+                                &mut self_deposit,
                             ))
                             .await;
                             match res {
@@ -966,6 +969,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             recipient,
                             amount: total_amount,
                             coin_type,
+                            self_deposit,
                         }
                     } else {
                         // Net GasCoin adjustment from any MergeCoins/SplitCoins
@@ -981,6 +985,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             includes_gas_coin,
                             added_amount_to_gas_coin,
                             split_amount_from_gas_coin,
+                            self_deposit,
                         }
                     }
                 }
@@ -1043,13 +1048,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 }
 
 async fn handle_move_call<OD: HasObjectData>(
-    package: CoinID,
-    module: ArrayVec<u8, STRING_LENGTH>,
-    function: ArrayVec<u8, STRING_LENGTH>,
-    args: ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+    call: Command,
     inputs: &BTreeMap<u16, InputValue>,
     object_data_source: OD,
     command_results: &BTreeMap<u16, CommandResult>,
+    self_deposit: &mut Option<SuiAddressRaw>,
 ) -> Either<
     (
         ProgrammableTransactionTypeState,
@@ -1058,6 +1061,14 @@ async fn handle_move_call<OD: HasObjectData>(
     ),
     CommandResult,
 > {
+    let Command::MoveCall(package, module, function, args) = call else {
+        reject_on(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await
+    };
     let get_arg_input = |arg_ix: usize| -> Option<&InputValue> {
         args.get(arg_ix).and_then(|arg| match arg {
             Argument::Input(ix) => inputs.get(ix),
@@ -1212,6 +1223,49 @@ async fn handle_move_call<OD: HasObjectData>(
                     .await
                 }
             }
+        } else if core::str::from_utf8(module.as_slice()) == Ok("coin")
+            && core::str::from_utf8(function.as_slice()) == Ok("send_funds")
+        {
+            info!("MoveCall 0x2::coin::send_funds");
+            // SIP-58 coin idiom: redeem_funds -> split -> send_funds(change -> signer) -> transfer.
+            // send_funds returns the remainder to the signer's address balance, so it is an inert
+            // intermediate (Right), not the user-facing transfer (TransferObjects). Record the deposit
+            // recipient; TransactionDataParser asserts it == sender so a hostile host cannot redirect
+            // the redeemed change to another address.
+            let Some(Argument::Result(ix)) = args.first() else {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            };
+            let Some(Argument::Input(recipient_ix)) = args.get(1) else {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            };
+            let Some(CommandResult::MergedCoin((coin_type, _))) = command_results.get(ix) else {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            };
+            let Some(InputValue::RecipientAddress(addr)) = inputs.get(recipient_ix) else {
+                reject_on(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await
+            };
+            *self_deposit = Some(*addr);
+            return Right(CommandResult::MergedCoin((*coin_type, 0)));
         }
     }
 
@@ -2461,8 +2515,35 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     .parse(input)
                     .await;
 
-                    <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input)
-                        .await;
+                    let sender = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(
+                        &DefaultInterp,
+                        input,
+                    )
+                    .await;
+
+                    // SIP-58: coin::send_funds returns the redeemed change to the signer's address
+                    // balance. Its recipient never reaches the display (only TransferObjects is
+                    // shown), so a hostile host could redeem the whole balance, show a small decoy
+                    // transfer, and divert the remainder. Reject (routes to not-recognized; hard
+                    // reject in swap) unless the change returns to the sender.
+                    let self_deposit = match &v {
+                        ProgrammableTransaction::TransferSuiTx { self_deposit, .. }
+                        | ProgrammableTransaction::TransferTokenTx { self_deposit, .. } => {
+                            *self_deposit
+                        }
+                        _ => None,
+                    };
+                    if let Some(deposit) = self_deposit {
+                        if deposit != sender {
+                            error!("coin::send_funds change recipient is not the sender (SIP-58)");
+                            reject_on::<()>(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await;
+                        }
+                    }
 
                     let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
 
@@ -2586,6 +2667,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     includes_gas_coin,
                     added_amount_to_gas_coin,
                     split_amount_from_gas_coin,
+                    ..
                 } => {
                     let (gas_budget, maybe_gas_coin_amount, gas_from_address_balance) = d.1;
                     let maybe_total_amount = if includes_gas_coin {
@@ -2620,6 +2702,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     recipient,
                     amount,
                     coin_type,
+                    ..
                 } => {
                     let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::TransferTx {
