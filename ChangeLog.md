@@ -1,5 +1,8 @@
 # Change Log
 
+## 1.5.9
+* Fix SIP-58 address-balance transfers rejected as unknown transaction (`coin::redeem_funds`)
+
 ## 1.2.4
 * Fix bug that causes a panic when an incomplete command is sent
 

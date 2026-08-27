@@ -18,11 +18,28 @@ use ledger_device_sdk::log::trace;
 pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
     hex!("3d9fb148e35ef4d74fcfc36995da14fc504b885d5f2bfeca37d6ea2cc044a32d");
 
+/// Label for the reviewed amount. When the transferred/staked coin is the gas coin,
+/// gas is charged out of this amount, so it is an upper bound on what the recipient
+/// (or the stake) ends up with, not an exact figure -- say so rather than asserting a
+/// precision the device cannot have (B2CA-2793 follow-up finding 2).
+fn amount_field_name(base: &str, includes_gas_coin: bool) -> ArrayString<32> {
+    // Built in place: `base` is one of a few short static labels and the suffix is
+    // 6 bytes, so both always fit. Keep whatever fitted on overflow rather than
+    // panicking -- a panic exits the app.
+    let mut name = ArrayString::new();
+    let _ = name.try_push_str(base);
+    if includes_gas_coin {
+        let _ = name.try_push_str(" (max)");
+    }
+    name
+}
+
 #[inline(never)]
 pub fn get_coin_and_amount_fields(
     total_amount: u64,
     coin_type: CoinType,
     ctx: &RunCtx,
+    includes_gas_coin: bool,
 ) -> (
     (ArrayString<32>, ArrayString<32>),
     Either<ArrayString<8>, (ArrayString<4>, ArrayString<256>)>,
@@ -36,14 +53,14 @@ pub fn get_coin_and_amount_fields(
             remainder_str.as_str()
         );
         let amount = (
-            ArrayString::from("Amount").unwrap(),
+            amount_field_name("Amount", includes_gas_coin),
             ArrayString::from(&v1).unwrap(),
         );
         (amount, Left(ticker))
     } else {
         let v1 = format!("{}", total_amount);
         let amount = (
-            ArrayString::from("Raw Amount").unwrap(),
+            amount_field_name("Raw Amount", includes_gas_coin),
             ArrayString::from(&v1).unwrap(),
         );
         let (coin_id, module, name) = coin_type;

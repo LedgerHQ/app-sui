@@ -33,7 +33,13 @@ from contextlib import contextmanager
 
 from .tlv import format_tlv
 from .sui_keychain import Key, sign_data
-from .sui_utils import USDC_OBJECTS_BY_AMOUNT
+from .sui_utils import (
+    GAS_COIN_OBJECT_ID,
+    GAS_COIN_VERSION,
+    USDC_OBJECTS_BY_AMOUNT,
+    gas_coin_object,
+    object_digest,
+)
 
 # https://ledgerhq.atlassian.net/wiki/spaces/TA/pages/6196265191/Sui+Token+Dynamic+Descriptor#2nd-solution
 class DynamicTokenTag_TUID(IntEnum):
@@ -259,6 +265,65 @@ class Client:
 
         return tx
 
+    def build_whole_gas_coin_transaction(
+        self,
+        sender_addr: str,
+        destination: str,
+        send_amount: int,
+        fees: int) -> Tuple[bytes, List[bytes]]:
+        """
+        Build `TransferObjects{objects: [GasCoin], address}` -- the Sui send-max
+        idiom -- paid by a single gas object whose balance is exactly `send_amount`.
+
+        The recipient actually receives that balance MINUS the gas consumed, so the
+        gross balance must not be accepted as an exact swap amount even though it
+        equals the quote (B2CA-2793 follow-up finding 2). Returns
+        (transaction_bytes, object_list); the gas object must be resolvable or the
+        parser would reject for an unrelated reason (unknown gas balance).
+        """
+        gas_budget = fees
+
+        intent_bsc = Intent.encode(Intent.from_list([0, 0, 0]))
+        tx = intent_bsc
+
+        recepient_addr = list(bytes.fromhex(destination[2:]))
+        gas_obj = gas_coin_object(send_amount)
+
+        tx_data_v1 = TransactionDataV1(
+            TransactionKind = TransactionKind(
+                "ProgrammableTransaction", ProgrammableTransaction(
+                    Inputs = [
+                        CallArg("Pure", recepient_addr),
+                    ],
+                    Command = [
+                        Command(
+                            "TransferObjects", TransferObjects(
+                                Objects = [Argument("GasCoin")],
+                                Address = Argument("Input", 0),
+                            ),
+                        ),
+                    ],
+                ),
+            ),
+            Sender = Address.from_str(sender_addr),
+            GasData = GasData(
+                Payment = [ObjectReference(
+                    ObjectID = Address.from_str(GAS_COIN_OBJECT_ID),
+                    SequenceNumber = GAS_COIN_VERSION,
+                    ObjectDigest = Digest.from_bytes(object_digest(gas_obj)),
+                )],
+                Owner = Address.from_str(sender_addr),
+                Price = 1,
+                Budget = gas_budget,
+            ),
+            TransactionExpiration = TransactionExpiration("None"),
+        )
+
+        tx_data = TransactionData("V1", tx_data_v1)
+        tx += TransactionData.encode(tx_data)
+
+        return [tx, [gas_obj]]
+
     def build_usdc_simple_transaction_empty_gas_payment(
         self,
         sender_addr: str,
@@ -332,10 +397,14 @@ class Client:
         tx += TransactionData.encode(tx_data)
 
         # SIP-58: pysui lacks ValidDuring; replace None (0x00) with ValidDuring for replay protection.
-        # ValidDuring: variant 2 + 4×Option(None) + chain(32) + nonce(4) = 02 00 00 00 00 [32 zeros] 00 00 00 00
+        # ValidDuring: variant 2 + 4×Option(None) + chain(len-prefixed 32) + nonce(4)
+        #            = 02 00 00 00 00 20 [32 zeros] 00 00 00 00
+        # `chain` (ChainIdentifier/CheckpointDigest) is BCS-encoded as a length-prefixed
+        # byte vector, not a bare fixed array -- unlike the other digests in this schema.
         valid_during = bytes(
             [0x02]  # ValidDuring variant
             + [0x00] * 4  # min_epoch, max_epoch, min_ts, max_ts = None
+            + [0x20]  # chain length prefix (ULEB128, 32 bytes)
             + 32 * [0x00]  # chain (zeros)
             + [0x00, 0x00, 0x00, 0x00]  # nonce (u32 LE)
         )
