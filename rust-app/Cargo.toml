@@ -10,7 +10,7 @@ resolver = "2"
 members = ["alamgu-async-block"]
 
 [workspace.dependencies]
-ledger_device_sdk = { version = "1.36.2" }
+ledger_device_sdk = { version = "1.37.0" }
 arrayvec = { version = "0.7.2", default-features = false }
 pin-project = "1.0.12"
 
