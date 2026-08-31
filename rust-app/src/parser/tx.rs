@@ -680,7 +680,11 @@ pub enum ProgrammableTransactionTypeState {
 }
 
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
-    type Output = ProgrammableTransaction;
+    /// The recognized shape, plus whether any command moved value into or out of
+    /// the gas coin (V-129). The second element is deliberately not folded into
+    /// the enum: the token-transfer and unstake shapes carry no gas deltas, yet
+    /// the sponsorship gate must still see that the gas coin was touched.
+    type Output = (ProgrammableTransaction, bool);
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTransactionSchema, BS>
@@ -972,7 +976,13 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            match tx_type {
+            // Whether any command moved value into or out of the gas coin. The
+            // per-variant deltas below only survive on the SUI transfer and stake
+            // shapes, but the sponsorship gate in TransactionDataParser has to see
+            // this for every shape, so it is reported separately (V-129).
+            let touches_gas_coin = added_amount_to_gas_coin != 0 || split_amount_from_gas_coin != 0;
+
+            let programmable_tx = match tx_type {
                 ProgrammableTransactionTypeState::TransferTx => {
                     let recipient = match recipient_addr {
                         Some(addr) => addr,
@@ -1074,7 +1084,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     )
                     .await
                 }
-            }
+            };
+
+            (programmable_tx, touches_gas_coin)
         }
     }
 }
@@ -2522,18 +2534,16 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
     )
 }
 
-type TransactionDataV1Output<OD> = (
-    <TransactionKindParser<OD> as HasOutput<TransactionKindSchema>>::Output,
-    GasData,
-    TxPrincipals,
-);
+/// The gas-coin-touched flag from the kind parser is consumed here (it gates
+/// sponsorship, see below) and so does not appear in this output.
+type TransactionDataV1Output = (ProgrammableTransaction, GasData, TxPrincipals);
 
 pub struct TransactionDataParser<OD> {
     object_data_source: OD,
 }
 
 impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
-    type Output = TransactionDataV1Output<OD>;
+    type Output = TransactionDataV1Output;
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDataSchema, BS>
@@ -2552,7 +2562,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    let v = (TransactionKindParser {
+                    let (v, touches_gas_coin) = (TransactionKindParser {
                         object_data_source: self.object_data_source.clone(),
                     })
                     .parse(input)
@@ -2643,10 +2653,36 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         .await;
                     }
 
+                    // V-129: in a sponsored transaction the gas coin belongs to the
+                    // sponsor while the other inputs belong to the sender, and the
+                    // parser tracks only aggregate amounts, not per-coin ownership.
+                    // SplitCoins(GasCoin, X) followed by MergeCoins into a
+                    // sender-owned coin therefore moves X out of the sponsor's coin
+                    // with nothing to display it: the gas deltas are applied only
+                    // when the reviewed command itself involves the gas coin, so an
+                    // unrelated visible transfer hides the flow entirely.
+                    //
+                    // Modelling coin ownership end to end is the real fix. Until
+                    // then, fail closed on the combination rather than clear-sign an
+                    // amount the device cannot account for. Ordinary sponsorship is
+                    // unaffected; this routes to the not-recognized/blind-sign path
+                    // and is a hard reject in swap, the same fail-safe used for
+                    // parse ambiguity elsewhere.
+                    let principals = TxPrincipals { sender, gas_owner };
+                    if principals.is_sponsored() && touches_gas_coin {
+                        error!("Sponsored tx splits or merges the gas coin (V-129)");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
                     (
                         v,
                         (gas_budget, total_gas_amount, gas_from_address_balance),
-                        TxPrincipals { sender, gas_owner },
+                        principals,
                     )
                 }
                 _ => {
