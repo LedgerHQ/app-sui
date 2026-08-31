@@ -146,14 +146,26 @@ impl TxPrincipals {
 
 // Tx Parsers
 
+/// SIP-58 `FundsWithdrawalArg.withdraw_from`: whose address balance is drawn on.
+///
+/// In a sponsored transaction the sponsor is a different account from the sender,
+/// so this decides whose funds a withdrawal actually spends. It was previously
+/// parsed and thrown away (V-128).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum WithdrawFrom {
+    Sender,
+    Sponsor,
+}
+
 pub enum CallArg {
     RecipientAddress(SuiAddressRaw),
     Amount(u64),
     OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
-    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag + amount)
-    FundsWithdrawal(CoinType, u64),
+    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag +
+    /// amount + whose balance is drawn on)
+    FundsWithdrawal(CoinType, u64, WithdrawFrom),
     Other,
 }
 
@@ -325,10 +337,30 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         )
                         .await
                     };
-                    let _withdraw_from =
+                    let withdraw_from_variant =
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
-                    CallArg::FundsWithdrawal(coin_type, amount)
+                    let withdraw_from = match withdraw_from_variant {
+                        0 => WithdrawFrom::Sender,
+                        1 => WithdrawFrom::Sponsor,
+                        other => {
+                            // Unknown variants used to be accepted silently, which
+                            // let the wire format mean something the device did not
+                            // model (V-128).
+                            error!("Unknown SIP-58 WithdrawFrom variant: {}", other);
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    };
+                    // Whether Sponsor is safe depends on the sender/sponsor split,
+                    // which is not known until GasData is parsed (it follows the
+                    // programmable transaction). So retain it and let
+                    // TransactionDataParser decide (V-128).
+                    CallArg::FundsWithdrawal(coin_type, amount, withdraw_from)
                 }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
@@ -679,12 +711,22 @@ pub enum ProgrammableTransactionTypeState {
     UnstakeTx,
 }
 
+/// Facts about a programmable transaction that only become security-relevant once
+/// the sender/sponsor split is known -- which is not until GasData has been parsed,
+/// after the transaction kind. Reported alongside the recognized shape rather than
+/// folded into it, because the token-transfer and unstake shapes carry no gas
+/// deltas yet still have to be gated.
+#[derive(Copy, Clone, Default)]
+pub struct SponsorRelevantFlow {
+    /// A command moved value into or out of the gas coin, which in a sponsored
+    /// transaction belongs to the sponsor rather than the sender (V-129).
+    pub touches_gas_coin: bool,
+    /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance (V-128).
+    pub withdraws_from_sponsor: bool,
+}
+
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
-    /// The recognized shape, plus whether any command moved value into or out of
-    /// the gas coin (V-129). The second element is deliberately not folded into
-    /// the enum: the token-transfer and unstake shapes carry no gas deltas, yet
-    /// the sponsorship gate must still see that the gas coin was touched.
-    type Output = (ProgrammableTransaction, bool);
+    type Output = (ProgrammableTransaction, SponsorRelevantFlow);
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTransactionSchema, BS>
@@ -699,6 +741,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
             let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
+            let mut flow = SponsorRelevantFlow::default();
 
             // By using heap we have the flexibility to handle transactions of various sizes
             // But if we exceed the heap usage it would crash the app while parsing the transaction.
@@ -753,8 +796,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Other => {
                             info!("Input {}: Other - not supported", i);
                         }
-                        CallArg::FundsWithdrawal(coin_type, amt) => {
+                        CallArg::FundsWithdrawal(coin_type, amt, withdraw_from) => {
                             info!("Input {}: FundsWithdrawal: amount {}", i, amt);
+                            if withdraw_from == WithdrawFrom::Sponsor {
+                                flow.withdraws_from_sponsor = true;
+                            }
                             inputs.insert(i, InputValue::FundsWithdrawal(coin_type, amt));
                         }
                         CallArg::RecipientAddress(v) => {
@@ -980,7 +1026,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
             // per-variant deltas below only survive on the SUI transfer and stake
             // shapes, but the sponsorship gate in TransactionDataParser has to see
             // this for every shape, so it is reported separately (V-129).
-            let touches_gas_coin = added_amount_to_gas_coin != 0 || split_amount_from_gas_coin != 0;
+            flow.touches_gas_coin =
+                added_amount_to_gas_coin != 0 || split_amount_from_gas_coin != 0;
 
             let programmable_tx = match tx_type {
                 ProgrammableTransactionTypeState::TransferTx => {
@@ -1086,7 +1133,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            (programmable_tx, touches_gas_coin)
+            (programmable_tx, flow)
         }
     }
 }
@@ -2562,7 +2609,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    let (v, touches_gas_coin) = (TransactionKindParser {
+                    let (v, flow) = (TransactionKindParser {
                         object_data_source: self.object_data_source.clone(),
                     })
                     .parse(input)
@@ -2669,7 +2716,26 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     // and is a hard reject in swap, the same fail-safe used for
                     // parse ambiguity elsewhere.
                     let principals = TxPrincipals { sender, gas_owner };
-                    if principals.is_sponsored() && touches_gas_coin {
+                    if principals.is_sponsored() && flow.withdraws_from_sponsor {
+                        // V-128: the withdrawal drew on the sponsor's address
+                        // balance, but the source is not carried through
+                        // redeem_funds -> split -> send_funds, so the change check
+                        // below compares the deposit against the *sender*. In a
+                        // sponsored transaction that passes while the money came from
+                        // the sponsor, letting the undisplayed remainder go to the
+                        // sender. When sender and sponsor are the same account the
+                        // two resolve to one address and that check is already
+                        // correct, so only the sponsored case is gated here.
+                        error!("Sponsored tx withdraws from the sponsor's balance (V-128)");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    if principals.is_sponsored() && flow.touches_gas_coin {
                         error!("Sponsored tx splits or merges the gas coin (V-129)");
                         reject_on::<()>(
                             core::file!(),
