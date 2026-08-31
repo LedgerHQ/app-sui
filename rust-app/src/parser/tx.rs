@@ -112,6 +112,38 @@ pub type AppId = ULEB128;
 // Gas Budget + total gas coin amount (if known) + SIP-58: gas from address balance
 pub type GasData = (u64, Option<u64>, bool);
 
+/// Who the transaction says it is from, and who is paying for it.
+///
+/// Sui allows these to differ (a sponsored transaction), and the network accepts
+/// a gas-owner signature as authorization on its own. The device must therefore
+/// be able to tell the review which role it is playing rather than assuming the
+/// signing key is the sender (V-025).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TxPrincipals {
+    pub sender: SuiAddressRaw,
+    pub gas_owner: SuiAddressRaw,
+}
+
+impl TxPrincipals {
+    /// The transaction is sponsored when the account paying gas is not the one
+    /// sending it.
+    pub fn is_sponsored(&self) -> bool {
+        self.sender != self.gas_owner
+    }
+
+    /// The sender to disclose when `signer` is only sponsoring this transaction:
+    /// it pays the gas (and so `Argument::GasCoin` spends its coin) while some
+    /// other account is the sender. `None` when the signer is the sender, which
+    /// is the ordinary case and needs no extra disclosure.
+    pub fn sponsored_sender_for(&self, signer: &SuiAddressRaw) -> Option<SuiAddressRaw> {
+        if self.gas_owner == *signer && self.sender != *signer {
+            Some(self.sender)
+        } else {
+            None
+        }
+    }
+}
+
 // Tx Parsers
 
 pub enum CallArg {
@@ -2433,7 +2465,11 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
     }
 }
 
-pub type GasDataParserOutput = (ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>, u64);
+pub type GasDataParserOutput = (
+    ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>,
+    SuiAddressRaw,
+    u64,
+);
 
 const fn gas_data_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<GasDataSchema, BS, Output = GasDataParserOutput> {
@@ -2445,13 +2481,19 @@ const fn gas_data_parser<BS: Clone + Readable>(
             DefaultInterp,
         ),
         {
-            |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
+            |(coins, owner, _gas_price, gas_budget): (_, SuiAddressRaw, u64, u64)| {
                 // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
                 // gas price. We only care about the total, not the price or amount in isolation , so we
                 // just ignore that field.
                 //
                 // C.F. https://github.com/MystenLabs/sui/pull/8676
-                Some((coins, gas_budget))
+                //
+                // `owner` is the gas sponsor, which Sui does not require to be the
+                // transaction sender. It must survive down to the review: when this
+                // device is the owner but not the sender it is sponsoring someone
+                // else's transaction, and `Argument::GasCoin` then spends *this*
+                // device's coin on their behalf (V-025/V-130).
+                Some((coins, owner, gas_budget))
             }
         },
     )
@@ -2483,6 +2525,7 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
 type TransactionDataV1Output<OD> = (
     <TransactionKindParser<OD> as HasOutput<TransactionKindSchema>>::Output,
     GasData,
+    TxPrincipals,
 );
 
 pub struct TransactionDataParser<OD> {
@@ -2545,7 +2588,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         }
                     }
 
-                    let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
+                    let (gas_coins, gas_owner, gas_budget) = gas_data_parser().parse(input).await;
 
                     // SIP-58: gas_coins may be empty (gas paid from address balance). The
                     // gas coin's balance is then genuinely unknown to the device, so seed
@@ -2600,7 +2643,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         .await;
                     }
 
-                    (v, (gas_budget, total_gas_amount, gas_from_address_balance))
+                    (
+                        v,
+                        (gas_budget, total_gas_amount, gas_from_address_balance),
+                        TxPrincipals { sender, gas_owner },
+                    )
                 }
                 _ => {
                     reject_on(
@@ -2648,9 +2695,16 @@ pub enum KnownTx {
 
 use crate::crypto_helpers::common::HexSlice;
 
+/// A recognized transaction together with the accounts it names, so the caller
+/// can tell whether the signing key is the sender or merely the gas sponsor.
+pub struct ParsedTx {
+    pub tx: KnownTx,
+    pub principals: TxPrincipals,
+}
+
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
-) -> impl AsyncParser<IntentMessage, BS, Output = KnownTx> {
+) -> impl AsyncParser<IntentMessage, BS, Output = ParsedTx> {
     Action(
         (
             intent_parser(),
@@ -2660,7 +2714,8 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
             _,
             <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
         )| {
-            match d.0 {
+            let principals = d.2;
+            let known = match d.0 {
                 ProgrammableTransaction::TransferSuiTx {
                     recipient,
                     amount,
@@ -2756,7 +2811,8 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         gas_from_address_balance,
                     })
                 }
-            }
+            };
+            known.map(|tx| ParsedTx { tx, principals })
         },
     )
 }

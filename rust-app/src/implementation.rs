@@ -3,10 +3,12 @@ use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_pu
 use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
+use crate::parser::common::{
+    HasObjectData, ObjectData, ObjectDigest, SuiAddressRaw, COIN_STRING_LENGTH,
+};
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
-use crate::parser::tx::{tx_parser, KnownTx};
+use crate::parser::tx::{tx_parser, KnownTx, TxPrincipals};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
@@ -79,9 +81,35 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-async fn prompt_tx_params(ui: &UserInterface, path: &[u32], tx_params: TxParams, ctx: &RunCtx) {
+/// The sender to disclose in the review, or `None` for an ordinary transaction.
+///
+/// Sui accepts a gas-owner signature as authorization in its own right, so this
+/// device can be made to fund a transaction it did not send. `Argument::GasCoin`
+/// then resolves to *this* device's coin while the transaction's effects accrue
+/// to the sender. The review must say so rather than rendering "From" off the
+/// signing path and letting it read as the user's own transaction (V-025/V-130).
+fn sponsored_sender(
+    address: &SuiPubKeyAddress,
+    principals: &TxPrincipals,
+) -> Option<SuiAddressRaw> {
+    let signer: SuiAddressRaw = address.get_binary_address().try_into().ok()?;
+    principals.sponsored_sender_for(&signer)
+}
+
+async fn prompt_tx_params(
+    ui: &UserInterface,
+    path: &[u32],
+    tx_params: TxParams,
+    principals: TxPrincipals,
+    ctx: &RunCtx,
+) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(address, &tx_params, ctx))
+        try_option(ui.confirm_sign_tx(
+            address,
+            &tx_params,
+            sponsored_sender(address, &principals),
+            ctx,
+        ))
     })
     .ok()
     .is_none()
@@ -149,6 +177,11 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     let is_unknown_txn = known_txn.is_none();
 
+    // Kept alongside the recognized tx so every review branch can disclose a
+    // sponsorship, and so swap can refuse one outright (V-025).
+    let principals = known_txn.as_ref().map(|p| p.principals);
+    let known_txn = known_txn.map(|p| p.tx);
+
     match known_txn {
         Some(KnownTx::TransferTx {
             recipient,
@@ -175,12 +208,30 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                 ..Default::default()
             };
 
+            let principals = match principals {
+                Some(p) => p,
+                None => reject(SyscallError::InvalidState as u16).await,
+            };
+
             if ctx.is_swap() {
+                // Swap signs with no review at all, so a sponsorship could never be
+                // disclosed. The Exchange quote describes the user's own transfer,
+                // never one they merely fund, so refuse rather than sign blind.
+                if principals.is_sponsored() {
+                    reject::<()>(SyscallError::NotSupported as u16).await;
+                }
                 let expected = ctx.get_swap_tx_params();
                 check_tx_params(expected, &tx_params, ctx).await;
             } else {
                 // Show prompts after all inputs have been parsed
-                NoinlineFut(prompt_tx_params(&ui, path.as_slice(), tx_params, ctx)).await;
+                NoinlineFut(prompt_tx_params(
+                    &ui,
+                    path.as_slice(),
+                    tx_params,
+                    principals,
+                    ctx,
+                ))
+                .await;
             }
         }
         Some(KnownTx::StakeTx {
@@ -208,6 +259,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     gas_budget,
                     gas_from_address_balance,
                     includes_gas_coin,
+                    principals.and_then(|p| sponsored_sender(address, &p)),
                 ))
             })
             .ok()
@@ -237,6 +289,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     total_amount,
                     gas_budget,
                     gas_from_address_balance,
+                    principals.and_then(|p| sponsored_sender(address, &p)),
                 ))
             })
             .ok()

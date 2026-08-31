@@ -1,6 +1,6 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::parser::common::{SuiAddressRaw, SUI_COIN_DECIMALS};
 use crate::swap::params::TxParams;
 use crate::ui::common::*;
 use crate::utils::*;
@@ -51,6 +51,7 @@ impl UserInterface {
         &self,
         address: &SuiPubKeyAddress,
         params: &TxParams,
+        sponsored_sender: Option<SuiAddressRaw>,
         ctx: &RunCtx,
     ) -> Option<()> {
         self.do_refresh.replace(true);
@@ -58,6 +59,14 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
+        // Sponsored: this device pays the gas for a transaction someone else sent,
+        // so its gas coin funds their PTB. "From" alone would read as the user's
+        // own transaction, which is the deception in V-025/V-130.
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Sent by",
+            value: v.as_str(),
+        });
         let to = Field {
             name: "To",
             value: &format!("0x{}", HexSlice(&params.destination_address)),
@@ -81,22 +90,37 @@ impl UserInterface {
             value: amt_val.as_str(),
         };
 
-        let do_review = |fields, ticker| {
-            let first_msg = &format!("Review transaction to transfer {ticker}");
-            let last_msg = &format!("Sign transaction to transfer {ticker}");
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
+        };
+        let do_review = |fields: &[Field], ticker: &str| {
+            let first_msg = &format!("Review {kind} to transfer {ticker}");
+            let last_msg = &format!("Sign {kind} to transfer {ticker}");
             NbglReview::new()
                 .glyph(&APP_ICON)
                 .titles(first_msg, "", last_msg)
                 .show(fields)
         };
-        let success = match coin_fields {
-            Left(ticker) => do_review(&[from, to, amt, gas], ticker.as_str()),
-            Right((coin_str, id_str)) => {
+        let success = match (coin_fields, sponsor) {
+            (Left(ticker), None) => do_review(&[from, to, amt, gas], ticker.as_str()),
+            (Left(ticker), Some(sponsor)) => {
+                do_review(&[from, sponsor, to, amt, gas], ticker.as_str())
+            }
+            (Right((coin_str, id_str)), None) => {
                 let coin = Field {
                     name: coin_str.as_str(),
                     value: id_str.as_str(),
                 };
                 do_review(&[from, to, coin, amt, gas], "coins")
+            }
+            (Right((coin_str, id_str)), Some(sponsor)) => {
+                let coin = Field {
+                    name: coin_str.as_str(),
+                    value: id_str.as_str(),
+                };
+                do_review(&[from, sponsor, to, coin, amt, gas], "coins")
             }
         };
         NbglReviewStatus::new()
@@ -117,12 +141,20 @@ impl UserInterface {
         gas_budget: u64,
         gas_from_address_balance: bool,
         includes_gas_coin: bool,
+        sponsored_sender: Option<SuiAddressRaw>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        // See confirm_sign_tx: when sponsoring, the staked coin is this device's
+        // gas coin but the resulting StakedSui accrues to the sender (V-130).
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Sent by",
+            value: v.as_str(),
+        });
         let to = Field {
             name: "Validator",
             value: if recipient == LEDGER_STAKE_ADDRESS {
@@ -152,15 +184,23 @@ impl UserInterface {
             value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
         };
 
-        let do_review = |fields| {
-            let first_msg = "Review transaction to stake SUI".to_string();
-            let last_msg = "Sign transaction to stake SUI".to_string();
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
+        };
+        let do_review = |fields: &[Field]| {
+            let first_msg = format!("Review {kind} to stake SUI");
+            let last_msg = format!("Sign {kind} to stake SUI");
             NbglReview::new()
                 .glyph(&APP_ICON)
                 .titles(&first_msg, "", &last_msg)
                 .show(fields)
         };
-        let success = do_review(&[from, amt, to, gas]);
+        let success = match sponsor {
+            None => do_review(&[from, amt, to, gas]),
+            Some(sponsor) => do_review(&[from, sponsor, amt, to, gas]),
+        };
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);
@@ -177,12 +217,19 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
         gas_from_address_balance: bool,
+        sponsored_sender: Option<SuiAddressRaw>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        // See confirm_sign_tx.
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Sent by",
+            value: v.as_str(),
+        });
         // Unstaking never consumes the gas coin as the unstaked object, so gas is
         // always charged separately here.
         let gas_val =
@@ -198,15 +245,23 @@ impl UserInterface {
             value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
         };
 
-        let do_review = |fields| {
-            let first_msg = "Review transaction to unstake SUI".to_string();
-            let last_msg = "Sign transaction to unstake SUI".to_string();
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
+        };
+        let do_review = |fields: &[Field]| {
+            let first_msg = format!("Review {kind} to unstake SUI");
+            let last_msg = format!("Sign {kind} to unstake SUI");
             NbglReview::new()
                 .glyph(&APP_ICON)
                 .titles(&first_msg, "", &last_msg)
                 .show(fields)
         };
-        let success = do_review(&[from, amt, gas]);
+        let success = match sponsor {
+            None => do_review(&[from, amt, gas]),
+            Some(sponsor) => do_review(&[from, sponsor, amt, gas]),
+        };
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);
