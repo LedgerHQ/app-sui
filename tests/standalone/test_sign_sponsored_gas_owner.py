@@ -1,5 +1,5 @@
-# Regression test for Cerberus V-025 / V-130: a sponsored transaction, where this
-# device pays the gas but some other account is the sender.
+# A sponsored transaction, where this device pays the gas but some other account
+# is the sender.
 #
 #   TransactionData.sender = SPONSORED_SENDER (not this device)
 #   GasData.owner          = this device

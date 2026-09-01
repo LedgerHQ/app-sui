@@ -1,5 +1,5 @@
-# Regression test for Cerberus V-143: a second APDU arriving while a review is on
-# screen must be rejected outright, and must not disturb the command being reviewed.
+# A second APDU arriving while a review is on screen must be rejected outright,
+# and must not disturb the command being reviewed.
 #
 # The app registers its Comm with NBGL (app_main.rs, init_comm) and runs reviews
 # synchronously from inside a live APDU future, so the in-flight command owns the
@@ -21,8 +21,8 @@
 #   * Speculos broadcasts every response the SE emits to every connected APDU client
 #     (seproxyhal.py, SephTag.RAPDU), so the reviewed command's transport also sees
 #     the rejection meant for the intruder. It is dropped below. A device with real
-#     per-transport routing would not emit it there at all, which is the part of the
-#     finding's verification plan this test cannot reach.
+#     per-transport routing would not emit it there at all, which is the part this
+#     test cannot reach.
 #   * There is no second physical transport, so the USB-command/BLE-intruder case is
 #     out of scope here.
 
@@ -312,9 +312,9 @@ def test_double_apdu_during_address_review_rejected(
     assert follow_up_key == public_key
 
 
-# The same race during a transaction review. This is the case the finding is really
-# about: the intruding peer must not be able to collect the signature for a
-# transaction the user approved on someone else's request.
+# The same race during a transaction review: the intruding peer must not be able to
+# collect the signature for a transaction the user approved on someone else's
+# request.
 def test_double_apdu_during_tx_review_rejected(
     backend, raw_peer, scenario_navigator, firmware, navigator
 ):

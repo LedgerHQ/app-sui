@@ -1,6 +1,5 @@
-# Regression test for Cerberus V-128: a SIP-58 FundsWithdrawal drawing on the gas
-# sponsor's address balance, in a transaction this device is only sponsoring, must
-# not be clear-signed.
+# A SIP-58 FundsWithdrawal drawing on the gas sponsor's address balance, in a
+# transaction this device is only sponsoring, must not be clear-signed.
 #
 # FundsWithdrawalArg.withdraw_from says whose address balance a withdrawal spends:
 # the transaction sender's, or the gas sponsor's. It used to be parsed and thrown

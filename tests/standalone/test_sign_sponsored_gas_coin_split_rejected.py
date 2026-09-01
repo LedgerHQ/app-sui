@@ -1,5 +1,5 @@
-# Regression test for Cerberus V-129: a sponsored transaction that splits value
-# off the gas coin must not be clear-signed.
+# A sponsored transaction that splits value off the gas coin must not be
+# clear-signed.
 #
 # In a sponsored transaction the gas coin belongs to the sponsor (this device)
 # while the other inputs belong to the sender. The parser tracks aggregate amounts
