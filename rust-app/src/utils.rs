@@ -28,7 +28,15 @@ impl<F: Future> Future for NoinlineFut<F> {
 
 use arrayvec::ArrayString;
 
+/// Largest `decimals` this can divide by: 10^19 is the biggest power of ten that
+/// fits in a u64. Beyond it `u64::pow` wraps -- `overflow-checks` is off in both
+/// profiles -- and reaches exactly zero from 10^64 on, which would make the division
+/// below panic. Every source of a decimals value must be bounded by this before it
+/// gets here.
+pub const MAX_COIN_DECIMALS: u8 = 19;
+
 pub fn get_amount_in_decimals(amount: u64, decimals: u8) -> (u64, ArrayString<12>) {
+    debug_assert!(decimals <= MAX_COIN_DECIMALS);
     let factor_pow = decimals as u32;
     let factor = u64::pow(10, factor_pow);
     let quotient = amount / factor;

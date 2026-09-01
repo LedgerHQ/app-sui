@@ -463,6 +463,16 @@ pub async fn validate_tlv(io: HostIO, ctx: &RunCtx) {
         }
     };
 
+    // Same bound as the swap coin config: a magnitude past MAX_COIN_DECIMALS makes
+    // the amount rendering divide by a wrapped divisor. Descriptors are signed, so
+    // this is a sanity check rather than a trust boundary, but the crash would be
+    // the same.
+    if out.magnitude > MAX_COIN_DECIMALS {
+        trace!("Descriptor magnitude out of range: {}\n", out.magnitude);
+        reject::<()>(TLV_ERROR_OFFSET + TlvError::UnexpectedEof as u16).await;
+        return;
+    }
+
     ctx.set_token(tuid.package_addr, module, function, out.magnitude, ticker);
 
     io.result_final(&[]).await;

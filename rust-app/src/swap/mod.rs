@@ -14,7 +14,7 @@ use ledger_device_sdk::libcall::{
     LibCallCommand,
 };
 use ledger_device_sdk::log::{error, info, trace};
-use panic_handler::{set_swap_panic_handler, swap_panic_handler};
+use panic_handler::arm_swap_panic;
 use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKER_LENGTH};
 
 use crate::app_main::app_main;
@@ -212,10 +212,11 @@ pub fn lib_main(arg0: u32) {
             let result = TxParams::try_from(&raw_params).map(|params| {
                 trace!("{:X?}", params);
 
-                // SAFETY: at this point, the app is initialized,
-                // so we can safely set the panic handler
+                // SAFETY: at this point, the app is initialized, so the swap
+                // panic path can be armed. Only this command writes it: the
+                // pre-sign commands must not touch .bss the caller owns.
                 unsafe {
-                    set_swap_panic_handler(swap_panic_handler);
+                    arm_swap_panic();
                 }
 
                 let ctx = RunCtx::lib_swap(params);
