@@ -115,9 +115,8 @@ pub type GasData = (u64, Option<u64>, bool);
 /// Who the transaction says it is from, and who is paying for it.
 ///
 /// Sui allows these to differ (a sponsored transaction), and the network accepts
-/// a gas-owner signature as authorization on its own. The device must therefore
-/// be able to tell the review which role it is playing rather than assuming the
-/// signing key is the sender (V-025).
+/// a gas-owner signature as authorization on its own, so the signing key cannot be
+/// assumed to be the sender.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TxPrincipals {
     pub sender: SuiAddressRaw,
@@ -149,8 +148,7 @@ impl TxPrincipals {
 /// SIP-58 `FundsWithdrawalArg.withdraw_from`: whose address balance is drawn on.
 ///
 /// In a sponsored transaction the sponsor is a different account from the sender,
-/// so this decides whose funds a withdrawal actually spends. It was previously
-/// parsed and thrown away (V-128).
+/// so this decides whose funds a withdrawal actually spends.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum WithdrawFrom {
     Sender,
@@ -344,9 +342,8 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         0 => WithdrawFrom::Sender,
                         1 => WithdrawFrom::Sponsor,
                         other => {
-                            // Unknown variants used to be accepted silently, which
-                            // let the wire format mean something the device did not
-                            // model (V-128).
+                            // Reject rather than accept a variant the device does
+                            // not model.
                             error!("Unknown SIP-58 WithdrawFrom variant: {}", other);
                             reject_on(
                                 core::file!(),
@@ -358,8 +355,7 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                     };
                     // Whether Sponsor is safe depends on the sender/sponsor split,
                     // which is not known until GasData is parsed (it follows the
-                    // programmable transaction). So retain it and let
-                    // TransactionDataParser decide (V-128).
+                    // programmable transaction), so retain it for the check there.
                     CallArg::FundsWithdrawal(coin_type, amount, withdraw_from)
                 }
                 _ => {
@@ -719,9 +715,9 @@ pub enum ProgrammableTransactionTypeState {
 #[derive(Copy, Clone, Default)]
 pub struct SponsorRelevantFlow {
     /// A command moved value into or out of the gas coin, which in a sponsored
-    /// transaction belongs to the sponsor rather than the sender (V-129).
+    /// transaction belongs to the sponsor rather than the sender.
     pub touches_gas_coin: bool,
-    /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance (V-128).
+    /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance.
     pub withdraws_from_sponsor: bool,
 }
 
@@ -1022,10 +1018,9 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            // Whether any command moved value into or out of the gas coin. The
-            // per-variant deltas below only survive on the SUI transfer and stake
-            // shapes, but the sponsorship gate in TransactionDataParser has to see
-            // this for every shape, so it is reported separately (V-129).
+            // The per-variant deltas below only survive on the SUI transfer and
+            // stake shapes, but the sponsorship gate in TransactionDataParser has to
+            // see this for every shape, so it is reported separately.
             flow.touches_gas_coin =
                 added_amount_to_gas_coin != 0 || split_amount_from_gas_coin != 0;
 
@@ -2551,7 +2546,7 @@ const fn gas_data_parser<BS: Clone + Readable>(
                 // transaction sender. It must survive down to the review: when this
                 // device is the owner but not the sender it is sponsoring someone
                 // else's transaction, and `Argument::GasCoin` then spends *this*
-                // device's coin on their behalf (V-025/V-130).
+                // device's coin on their behalf.
                 Some((coins, owner, gas_budget))
             }
         },
@@ -2700,33 +2695,19 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         .await;
                     }
 
-                    // V-129: in a sponsored transaction the gas coin belongs to the
-                    // sponsor while the other inputs belong to the sender, and the
-                    // parser tracks only aggregate amounts, not per-coin ownership.
-                    // SplitCoins(GasCoin, X) followed by MergeCoins into a
-                    // sender-owned coin therefore moves X out of the sponsor's coin
-                    // with nothing to display it: the gas deltas are applied only
-                    // when the reviewed command itself involves the gas coin, so an
-                    // unrelated visible transfer hides the flow entirely.
-                    //
-                    // Modelling coin ownership end to end is the real fix. Until
-                    // then, fail closed on the combination rather than clear-sign an
-                    // amount the device cannot account for. Ordinary sponsorship is
-                    // unaffected; this routes to the not-recognized/blind-sign path
-                    // and is a hard reject in swap, the same fail-safe used for
-                    // parse ambiguity elsewhere.
+                    // Both checks below only fire when sender and gas owner differ:
+                    // when they are the same account the two resolve to one address
+                    // and the existing checks are already correct. Rejecting here
+                    // routes to the not-recognized/blind-sign path, and is a hard
+                    // reject in swap, like other parse ambiguity.
                     let principals = TxPrincipals { sender, gas_owner };
+
+                    // The withdrawal source is not carried through redeem_funds ->
+                    // split -> send_funds, so the change check further down compares
+                    // the deposit against the sender while the funds came from the
+                    // sponsor.
                     if principals.is_sponsored() && flow.withdraws_from_sponsor {
-                        // V-128: the withdrawal drew on the sponsor's address
-                        // balance, but the source is not carried through
-                        // redeem_funds -> split -> send_funds, so the change check
-                        // below compares the deposit against the *sender*. In a
-                        // sponsored transaction that passes while the money came from
-                        // the sponsor, letting the undisplayed remainder go to the
-                        // sender. When sender and sponsor are the same account the
-                        // two resolve to one address and that check is already
-                        // correct, so only the sponsored case is gated here.
-                        error!("Sponsored tx withdraws from the sponsor's balance (V-128)");
+                        error!("Sponsored tx withdraws from the sponsor's balance");
                         reject_on::<()>(
                             core::file!(),
                             core::line!(),
@@ -2735,8 +2716,12 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         .await;
                     }
 
+                    // Only aggregate amounts are tracked, not per-coin ownership, and
+                    // the gas deltas are applied only when the reviewed command itself
+                    // involves the gas coin. A split off the sponsor's gas coin that
+                    // ends up elsewhere would therefore never be displayed.
                     if principals.is_sponsored() && flow.touches_gas_coin {
-                        error!("Sponsored tx splits or merges the gas coin (V-129)");
+                        error!("Sponsored tx splits or merges the gas coin");
                         reject_on::<()>(
                             core::file!(),
                             core::line!(),

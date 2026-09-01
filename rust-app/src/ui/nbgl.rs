@@ -61,7 +61,7 @@ impl UserInterface {
         };
         // Sponsored: this device pays the gas for a transaction someone else sent,
         // so its gas coin funds their PTB. "From" alone would read as the user's
-        // own transaction, which is the deception in V-025/V-130.
+        // own transaction.
         let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
         let sponsor = sponsor_val.as_ref().map(|v| Field {
             name: "Sent by",
@@ -149,7 +149,7 @@ impl UserInterface {
             value: &format!("{address}"),
         };
         // See confirm_sign_tx: when sponsoring, the staked coin is this device's
-        // gas coin but the resulting StakedSui accrues to the sender (V-130).
+        // gas coin but the resulting StakedSui accrues to the sender.
         let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
         let sponsor = sponsor_val.as_ref().map(|v| Field {
             name: "Sent by",

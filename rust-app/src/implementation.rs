@@ -86,8 +86,8 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
 /// Sui accepts a gas-owner signature as authorization in its own right, so this
 /// device can be made to fund a transaction it did not send. `Argument::GasCoin`
 /// then resolves to *this* device's coin while the transaction's effects accrue
-/// to the sender. The review must say so rather than rendering "From" off the
-/// signing path and letting it read as the user's own transaction (V-025/V-130).
+/// to the sender, so the review has to name that sender rather than rendering
+/// "From" off the signing path.
 fn sponsored_sender(
     address: &SuiPubKeyAddress,
     principals: &TxPrincipals,
@@ -178,7 +178,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     let is_unknown_txn = known_txn.is_none();
 
     // Kept alongside the recognized tx so every review branch can disclose a
-    // sponsorship, and so swap can refuse one outright (V-025).
+    // sponsorship, and so swap can refuse one outright.
     let principals = known_txn.as_ref().map(|p| p.principals);
     let known_txn = known_txn.map(|p| p.tx);
 
