@@ -8,10 +8,11 @@ use crate::parser::common::{
 };
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
-use crate::parser::tx::{tx_parser, KnownTx, TxPrincipals};
+use crate::parser::tx::{tx_parser, KnownTx, TransactionExpirationVariant, TxPrincipals};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
+use crate::ui::common::ReplayDomain;
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
@@ -96,11 +97,22 @@ fn sponsored_sender(
     principals.sponsored_sender_for(&signer)
 }
 
+/// The SIP-58 replay domain to show, when the transaction carries one.
+fn replay_domain(expiration: TransactionExpirationVariant) -> Option<ReplayDomain> {
+    match expiration {
+        TransactionExpirationVariant::ValidDuring { chain, nonce } => {
+            Some(ReplayDomain { chain, nonce })
+        }
+        _ => None,
+    }
+}
+
 async fn prompt_tx_params(
     ui: &UserInterface,
     path: &[u32],
     tx_params: TxParams,
     principals: TxPrincipals,
+    replay: Option<ReplayDomain>,
     ctx: &RunCtx,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
@@ -108,6 +120,7 @@ async fn prompt_tx_params(
             address,
             &tx_params,
             sponsored_sender(address, &principals),
+            replay,
             ctx,
         ))
     })
@@ -180,6 +193,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
     // Kept alongside the recognized tx so every review branch can disclose a
     // sponsorship, and so swap can refuse one outright.
     let principals = known_txn.as_ref().map(|p| p.principals);
+    let replay = known_txn.as_ref().and_then(|p| replay_domain(p.expiration));
     let known_txn = known_txn.map(|p| p.tx);
 
     match known_txn {
@@ -229,6 +243,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     path.as_slice(),
                     tx_params,
                     principals,
+                    replay,
                     ctx,
                 ))
                 .await;
@@ -260,6 +275,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     gas_from_address_balance,
                     includes_gas_coin,
                     principals.and_then(|p| sponsored_sender(address, &p)),
+                    replay,
                 ))
             })
             .ok()
@@ -290,6 +306,7 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
                     gas_budget,
                     gas_from_address_balance,
                     principals.and_then(|p| sponsored_sender(address, &p)),
+                    replay,
                 ))
             })
             .ok()

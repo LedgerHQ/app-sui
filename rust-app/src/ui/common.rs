@@ -1,7 +1,7 @@
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::parser::common::{
-    coin_name_trimmed, coin_type_from_short_str, CoinType, SUI_COIN_DECIMALS, SUI_COIN_TYPE,
-    UNKNOWN_COIN_TYPE,
+    coin_name_trimmed, coin_type_from_short_str, CoinType, SuiAddressRaw, SUI_COIN_DECIMALS,
+    SUI_COIN_TYPE, UNKNOWN_COIN_TYPE,
 };
 use crate::utils::*;
 
@@ -14,6 +14,35 @@ use either::*;
 use hex_literal::hex;
 
 use ledger_device_sdk::log::trace;
+
+/// SIP-58 `ValidDuring.chain` is the network's genesis checkpoint digest. The short
+/// chain identifiers Sui publishes are its first four bytes: 35834a8a for mainnet,
+/// 4c78adac for testnet. Verified against each network's genesis checkpoint.
+const SUI_MAINNET_CHAIN: SuiAddressRaw =
+    hex!("35834a8ac17ca48fb14ac8f99c17c98747e95dd07294ae41a46b382246a4499b");
+const SUI_TESTNET_CHAIN: SuiAddressRaw =
+    hex!("4c78adacf2a2f5ad80f27ed7d54aa69d3a78f1ca67fdef9ecf5754f5b8bb77b0");
+
+/// The network a `ValidDuring.chain` names, when it is one this app knows. Devnet
+/// and local networks are regenerated and so have no fixed digest; those fall back
+/// to the raw value rather than being refused, since signing for them is legitimate.
+pub fn chain_name(chain: &SuiAddressRaw) -> Option<&'static str> {
+    match *chain {
+        SUI_MAINNET_CHAIN => Some("Sui Mainnet"),
+        SUI_TESTNET_CHAIN => Some("Sui Testnet"),
+        _ => None,
+    }
+}
+
+/// SIP-58 `ValidDuring` replay domain, as shown in the review: which network the
+/// transaction is scoped to, and the caller-chosen value distinguishing otherwise
+/// identical transactions. Without these on screen, two requests that differ only
+/// here look like the same transaction.
+#[derive(Copy, Clone)]
+pub struct ReplayDomain {
+    pub chain: SuiAddressRaw,
+    pub nonce: u32,
+}
 
 pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
     hex!("3d9fb148e35ef4d74fcfc36995da14fc504b885d5f2bfeca37d6ea2cc044a32d");

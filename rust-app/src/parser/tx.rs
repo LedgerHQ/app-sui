@@ -68,7 +68,7 @@ pub struct ChainIdentifierSchema;
 pub struct ChainIdentifierParser;
 
 impl HasOutput<ChainIdentifierSchema> for ChainIdentifierParser {
-    type Output = ();
+    type Output = SuiAddressRaw;
 }
 
 impl<BS: Clone + Readable> AsyncParser<ChainIdentifierSchema, BS> for ChainIdentifierParser {
@@ -88,7 +88,7 @@ impl<BS: Clone + Readable> AsyncParser<ChainIdentifierSchema, BS> for ChainIdent
                 )
                 .await
             } else {
-                <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await;
+                <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await
             }
         }
     }
@@ -2451,11 +2451,22 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKin
 }
 
 /// Parsed TransactionExpiration variant. SIP-58: ValidDuring required for stateless tx (empty gas payment).
+///
+/// ValidDuring carries the replay domain: `chain` scopes the transaction to one
+/// network and `nonce` distinguishes otherwise identical transactions. Both reach
+/// the review, so two requests that differ only there are not shown as the same
+/// transaction.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TransactionExpirationVariant {
     None,
     Epoch,
-    ValidDuring,
+    ValidDuring { chain: SuiAddressRaw, nonce: u32 },
+}
+
+impl TransactionExpirationVariant {
+    pub fn is_valid_during(&self) -> bool {
+        matches!(self, TransactionExpirationVariant::ValidDuring { .. })
+    }
 }
 
 pub struct TransactionExpirationParser;
@@ -2485,7 +2496,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                 }
                 2 => {
                     info!("TransactionExpiration: ValidDuring (SIP-58)");
-                    <(
+                    let valid_during = <(
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
@@ -2504,7 +2515,8 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                         input,
                     )
                     .await;
-                    TransactionExpirationVariant::ValidDuring
+                    let (_min_epoch, _max_epoch, _min_ts, _max_ts, chain, nonce) = valid_during;
+                    TransactionExpirationVariant::ValidDuring { chain, nonce }
                 }
                 _ => {
                     reject_on(
@@ -2578,7 +2590,12 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
 
 /// The gas-coin-touched flag from the kind parser is consumed here (it gates
 /// sponsorship, see below) and so does not appear in this output.
-type TransactionDataV1Output = (ProgrammableTransaction, GasData, TxPrincipals);
+type TransactionDataV1Output = (
+    ProgrammableTransaction,
+    GasData,
+    TxPrincipals,
+    TransactionExpirationVariant,
+);
 
 pub struct TransactionDataParser<OD> {
     object_data_source: OD,
@@ -2683,9 +2700,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     let expiration = TransactionExpirationParser.parse(input).await;
 
                     // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
-                    if gas_from_address_balance
-                        && expiration != TransactionExpirationVariant::ValidDuring
-                    {
+                    if gas_from_address_balance && !expiration.is_valid_during() {
                         error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
                         reject_on::<u64>(
                             core::file!(),
@@ -2734,6 +2749,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         v,
                         (gas_budget, total_gas_amount, gas_from_address_balance),
                         principals,
+                        expiration,
                     )
                 }
                 _ => {
@@ -2787,6 +2803,8 @@ use crate::crypto_helpers::common::HexSlice;
 pub struct ParsedTx {
     pub tx: KnownTx,
     pub principals: TxPrincipals,
+    /// SIP-58 replay domain, when the transaction carries one.
+    pub expiration: TransactionExpirationVariant,
 }
 
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
@@ -2802,6 +2820,7 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
             <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
         )| {
             let principals = d.2;
+            let expiration = d.3;
             let known = match d.0 {
                 ProgrammableTransaction::TransferSuiTx {
                     recipient,
@@ -2899,7 +2918,11 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     })
                 }
             };
-            known.map(|tx| ParsedTx { tx, principals })
+            known.map(|tx| ParsedTx {
+                tx,
+                principals,
+                expiration,
+            })
         },
     )
 }
