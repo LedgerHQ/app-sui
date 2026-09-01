@@ -673,14 +673,11 @@ pub enum ProgrammableTransaction {
         // downstream (see tx_parser below) rather than here.
         added_amount_to_gas_coin: u64,
         split_amount_from_gas_coin: u64,
-        // SIP-58 coin::send_funds change recipient (asserted == tx sender).
-        self_deposit: Option<SuiAddressRaw>,
     },
     TransferTokenTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         coin_type: CoinType,
-        self_deposit: Option<SuiAddressRaw>,
     },
     StakeTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
@@ -707,22 +704,26 @@ pub enum ProgrammableTransactionTypeState {
     UnstakeTx,
 }
 
-/// Facts about a programmable transaction that only become security-relevant once
-/// the sender/sponsor split is known -- which is not until GasData has been parsed,
-/// after the transaction kind. Reported alongside the recognized shape rather than
-/// folded into it, because the token-transfer and unstake shapes carry no gas
-/// deltas yet still have to be gated.
+/// Facts gathered while parsing a programmable transaction that can only be judged
+/// once the sender and gas owner are known -- which is not until GasData has been
+/// parsed, after the transaction kind. Reported alongside the recognized shape
+/// rather than folded into it, so no shape can drop them: the token-transfer and
+/// unstake variants carry neither the gas deltas nor the hidden deposit, yet all of
+/// them have to be checked.
 #[derive(Copy, Clone, Default)]
-pub struct SponsorRelevantFlow {
+pub struct PtbFacts {
     /// A command moved value into or out of the gas coin, which in a sponsored
     /// transaction belongs to the sponsor rather than the sender.
     pub touches_gas_coin: bool,
     /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance.
     pub withdraws_from_sponsor: bool,
+    /// Recipient of a `coin::send_funds`, which moves a coin into an address balance
+    /// without appearing in the review. Must be the sender.
+    pub self_deposit: Option<SuiAddressRaw>,
 }
 
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
-    type Output = (ProgrammableTransaction, SponsorRelevantFlow);
+    type Output = (ProgrammableTransaction, PtbFacts);
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTransactionSchema, BS>
@@ -737,7 +738,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
             let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
-            let mut flow = SponsorRelevantFlow::default();
+            let mut flow = PtbFacts::default();
 
             // By using heap we have the flexibility to handle transactions of various sizes
             // But if we exceed the heap usage it would crash the app while parsing the transaction.
@@ -1053,7 +1054,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             recipient,
                             amount: total_amount,
                             coin_type,
-                            self_deposit,
                         }
                     } else {
                         // Net GasCoin adjustment from any MergeCoins/SplitCoins
@@ -1069,7 +1069,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             includes_gas_coin,
                             added_amount_to_gas_coin,
                             split_amount_from_gas_coin,
-                            self_deposit,
                         }
                     }
                 }
@@ -1128,6 +1127,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
+            flow.self_deposit = self_deposit;
             (programmable_tx, flow)
         }
     }
@@ -1350,7 +1350,23 @@ async fn handle_move_call<OD: HasObjectData>(
                 )
                 .await
             };
-            *self_deposit = Some(*addr);
+            // Only one recipient is carried, and the check below sees only that one.
+            // Overwriting would let a large hidden send to an attacker be replaced by a
+            // small one back to the sender, and pass. Repeats of the same recipient are
+            // harmless, so only a differing one is refused.
+            if let Some(existing) = *self_deposit {
+                if existing != *addr {
+                    error!("multiple coin::send_funds recipients");
+                    reject_on::<()>(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await;
+                }
+            } else {
+                *self_deposit = Some(*addr);
+            }
             return Right(CommandResult::MergedCoin((*coin_type, 0)));
         }
     }
@@ -2638,14 +2654,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     // shown), so a hostile host could redeem the whole balance, show a small decoy
                     // transfer, and divert the remainder. Reject (routes to not-recognized; hard
                     // reject in swap) unless the change returns to the sender.
-                    let self_deposit = match &v {
-                        ProgrammableTransaction::TransferSuiTx { self_deposit, .. }
-                        | ProgrammableTransaction::TransferTokenTx { self_deposit, .. } => {
-                            *self_deposit
-                        }
-                        _ => None,
-                    };
-                    if let Some(deposit) = self_deposit {
+                    if let Some(deposit) = flow.self_deposit {
                         if deposit != sender {
                             error!("coin::send_funds change recipient is not the sender (SIP-58)");
                             reject_on::<()>(
