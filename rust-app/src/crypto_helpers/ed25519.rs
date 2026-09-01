@@ -1,6 +1,7 @@
 use arrayvec::ArrayVec;
 use core::default::Default;
 use ledger_device_sdk::ecc::{ECPrivateKey, Ed25519Stream, SeedDerive};
+use zeroize::Zeroize;
 
 use crate::crypto_helpers::common::*;
 
@@ -20,8 +21,21 @@ impl Ed25519 {
         rv.init(path, slip10)?;
         Ok(rv)
     }
+    /// Clear the streaming state that holds the per-signature nonce scalar.
+    ///
+    /// Between the two `sign_finalize` calls the SDK stream keeps the deterministic
+    /// nonce `r` in `signature`. That is key-critical: for a signature that was
+    /// returned, `S = r + H(R||A||M) * a` recovers the private scalar `a` from `r`.
+    /// So it is cleared whenever a signing operation starts, ends, or is abandoned.
+    fn clear_nonce_state(&mut self) {
+        self.ctx.signature.zeroize();
+        self.ctx.big_r.zeroize();
+    }
+
     #[inline(never)]
     pub fn init(&mut self, path: ArrayVec<u32, 10>, slip10: bool) -> Result<(), CryptographyError> {
+        // A reused signer must not carry the previous operation's nonce into this one.
+        self.clear_nonce_state();
         self.sk = if slip10 {
             ledger_device_sdk::ecc::Ed25519::derive_from_path_slip10(&path)
         } else {
@@ -52,7 +66,19 @@ impl Ed25519 {
 
         buf.copy_from_slice(&self.ctx.signature);
 
+        // The stream buffer has served its purpose; the caller owns the signature now.
+        self.clear_nonce_state();
+
         Ok(Ed25519Signature(buf))
+    }
+}
+
+/// Covers the paths `init` and `finalize` cannot: an error or cancellation between
+/// `done_with_r` and `finalize` leaves the nonce in the stream, and the signer may
+/// then simply be dropped.
+impl Drop for Ed25519 {
+    fn drop(&mut self) {
+        self.clear_nonce_state();
     }
 }
 
