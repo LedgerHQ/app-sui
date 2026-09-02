@@ -177,11 +177,14 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
-        // See confirm_sign_tx: when sponsoring, the staked coin is this device's
-        // gas coin but the resulting StakedSui accrues to the sender.
+        // request_add_stake credits the resulting StakedSui to the sender, so on a
+        // sponsored stake the position belongs to that account and not to the
+        // signer paying for it. Labelled by that role rather than "Sent by" as
+        // elsewhere, because for a stake the beneficiary is the fact that matters
+        // and the two are the same address.
         let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
         let sponsor = sponsor_val.as_ref().map(|v| Field {
-            name: "Sent by",
+            name: "Stake owner",
             value: v.as_str(),
         });
         let to = Field {

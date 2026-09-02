@@ -715,6 +715,9 @@ pub struct PtbFacts {
     /// A command moved value into or out of the gas coin, which in a sponsored
     /// transaction belongs to the sponsor rather than the sender.
     pub touches_gas_coin: bool,
+    /// The stake principal included the gas coin, by value or inside the coin
+    /// vector of `request_add_stake_mul_coin`.
+    pub stakes_gas_coin: bool,
     /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance.
     pub withdraws_from_sponsor: bool,
     /// Recipient of a `coin::send_funds`, which moves a coin into an address balance
@@ -1092,6 +1095,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             .await
                         }
                     };
+
+                    // Only the stake shape reports this: transferring the gas coin
+                    // names its recipient on screen, whereas a stake never names
+                    // the account the resulting position accrues to.
+                    flow.stakes_gas_coin = includes_gas_coin;
 
                     // Net GasCoin adjustment from any MergeCoins/SplitCoins
                     // touching it before being staked (B2CA-2793 findings 3/5) is
@@ -2746,6 +2754,24 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     // ends up elsewhere would therefore never be displayed.
                     if principals.is_sponsored() && flow.touches_gas_coin {
                         error!("Sponsored tx splits or merges the gas coin");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    // request_add_stake transfers the resulting StakedSui to
+                    // tx_context::sender(). Every stake input other than the gas
+                    // coin must be owned by the sender, so this is precisely the
+                    // case where the signer supplies the principal and another
+                    // account keeps the position -- and because gas comes out of
+                    // that same coin, the amount given away is not even exactly
+                    // knowable before execution. A stake funded from the sender's
+                    // own coins stays clear-signable and names its owner.
+                    if principals.is_sponsored() && flow.stakes_gas_coin {
+                        error!("Sponsored tx stakes the sponsor's gas coin");
                         reject_on::<()>(
                             core::file!(),
                             core::line!(),
