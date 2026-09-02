@@ -12,7 +12,7 @@ use crate::parser::tx::{tx_parser, KnownTx, TransactionExpirationVariant, TxPrin
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
-use crate::ui::common::ReplayDomain;
+use crate::ui::common::{ReplayDomain, StakeParams};
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
@@ -269,11 +269,13 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
                 try_option(ui.confirm_stake_tx(
                     address,
-                    recipient,
-                    total_amount,
-                    gas_budget,
-                    gas_from_address_balance,
-                    includes_gas_coin,
+                    &StakeParams {
+                        recipient,
+                        total_amount,
+                        gas_budget,
+                        gas_from_address_balance,
+                        includes_gas_coin,
+                    },
                     principals.and_then(|p| sponsored_sender(address, &p)),
                     replay,
                 ))

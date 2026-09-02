@@ -34,6 +34,21 @@ pub fn chain_name(chain: &SuiAddressRaw) -> Option<&'static str> {
     }
 }
 
+/// What a stake review says about the transaction itself, as distinct from the
+/// signing address and the disclosures shown alongside it. Grouped so the review
+/// function stays within a sane argument count as fields are added.
+#[derive(Copy, Clone)]
+pub struct StakeParams {
+    /// The validator being staked to.
+    pub recipient: SuiAddressRaw,
+    pub total_amount: u64,
+    pub gas_budget: u64,
+    pub gas_from_address_balance: bool,
+    /// Staking the gas coin by value stakes at most `total_amount`, since gas comes
+    /// out of it.
+    pub includes_gas_coin: bool,
+}
+
 /// SIP-58 `ValidDuring` replay domain, as shown in the review: which network the
 /// transaction is scoped to, and the caller-chosen value distinguishing otherwise
 /// identical transactions. Without these on screen, two requests that differ only

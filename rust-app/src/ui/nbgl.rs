@@ -168,11 +168,7 @@ impl UserInterface {
     pub fn confirm_stake_tx(
         &self,
         address: &SuiPubKeyAddress,
-        recipient: [u8; 32],
-        total_amount: u64,
-        gas_budget: u64,
-        gas_from_address_balance: bool,
-        includes_gas_coin: bool,
+        params: &StakeParams,
         sponsored_sender: Option<SuiAddressRaw>,
         replay: Option<ReplayDomain>,
     ) -> Option<()> {
@@ -190,26 +186,27 @@ impl UserInterface {
         });
         let to = Field {
             name: "Validator",
-            value: if recipient == LEDGER_STAKE_ADDRESS {
+            value: if params.recipient == LEDGER_STAKE_ADDRESS {
                 "Ledger by P2P"
             } else {
-                &format!("0x{}", HexSlice(&recipient))
+                &format!("0x{}", HexSlice(&params.recipient))
             },
         };
         let gas_val = format_gas_amount(
-            gas_budget,
-            GasSource::new(gas_from_address_balance, includes_gas_coin),
+            params.gas_budget,
+            GasSource::new(params.gas_from_address_balance, params.includes_gas_coin),
         );
         let gas = Field {
             name: "Max Gas",
             value: &gas_val,
         };
 
-        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
+        let (quotient, remainder_str) =
+            get_amount_in_decimals(params.total_amount, SUI_COIN_DECIMALS);
         // Staking the gas coin by value stakes at most this much: gas comes out of
         // it (B2CA-2793 follow-up finding 2).
         let amt = Field {
-            name: if includes_gas_coin {
+            name: if params.includes_gas_coin {
                 "Stake amount (max)"
             } else {
                 "Stake amount"
