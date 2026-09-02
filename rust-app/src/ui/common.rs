@@ -78,6 +78,15 @@ fn amount_field_name(base: &str, includes_gas_coin: bool) -> ArrayString<32> {
     name
 }
 
+/// Capacity of a review field's name and value strings.
+pub const FIELD_TEXT_LEN: usize = 32;
+
+// The amount value below is unwrapped into a FIELD_TEXT_LEN buffer, so the widest
+// ticker, a blank, and the widest amount text have to fit: 8 + 1 + 21 = 30 of 32.
+// Asserted so raising MAX_COIN_DECIMALS or TICKER_LENGTH cannot turn that unwrap
+// into a panic.
+const _: () = assert!(TICKER_LENGTH + 1 + AMOUNT_TEXT_LEN <= FIELD_TEXT_LEN);
+
 #[inline(never)]
 pub fn get_coin_and_amount_fields(
     total_amount: u64,
@@ -85,7 +94,7 @@ pub fn get_coin_and_amount_fields(
     ctx: &RunCtx,
     includes_gas_coin: bool,
 ) -> (
-    (ArrayString<32>, ArrayString<32>),
+    (ArrayString<FIELD_TEXT_LEN>, ArrayString<FIELD_TEXT_LEN>),
     Either<ArrayString<8>, (ArrayString<4>, ArrayString<256>)>,
 ) {
     if let Some((ticker, divisor)) = get_known_coin_ticker(&coin_type, ctx) {

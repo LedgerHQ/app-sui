@@ -19,7 +19,8 @@ use params::{CheckAddressParams, PrintableAmountParams, TxParams, MAX_SWAP_TICKE
 
 use crate::app_main::app_main;
 use crate::parser::common::{coin_type_from_short_str, UNKNOWN_COIN_TYPE};
-use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS, utils::get_amount_in_decimals};
+use crate::utils::{get_amount_in_decimals, AMOUNT_TEXT_LEN};
+use crate::{ctx::RunCtx, parser::common::SUI_COIN_DECIMALS};
 use crate::{implementation::BIP32_PREFIX, interface::SuiPubKeyAddress};
 
 pub mod panic_handler;
@@ -65,11 +66,18 @@ pub fn check_address(params: &CheckAddressParams) -> Result<bool, Error> {
     )?)
 }
 
+pub const PRINTABLE_AMOUNT_LEN: usize = 40;
+
+// The write below expects its buffer to be big enough and panics otherwise, which
+// here would be a panic inside a pre-sign libcall. Worst case is the ticker, a
+// blank, and the widest amount text: 15 + 1 + 21 = 37 of the 40 available. Asserted
+// so raising MAX_COIN_DECIMALS or a ticker length cannot quietly overrun it.
+const _: () = assert!(MAX_SWAP_TICKER_LENGTH + 1 + AMOUNT_TEXT_LEN <= PRINTABLE_AMOUNT_LEN);
+
 // Outputs a string with the amount of SUI.
-//
-// Max sui amount 10_000_000_000 SUI.
-// So max string length is 15 (ticker) + 1 (blank) + 11 (quotient) + 1 (dot) + 12 (reminder) = 40
-pub fn get_printable_amount(params: &PrintableAmountParams) -> Result<ArrayString<40>, Error> {
+pub fn get_printable_amount(
+    params: &PrintableAmountParams,
+) -> Result<ArrayString<PRINTABLE_AMOUNT_LEN>, Error> {
     let mut ticker = ArrayString::<MAX_SWAP_TICKER_LENGTH>::default();
     let decimals;
 
