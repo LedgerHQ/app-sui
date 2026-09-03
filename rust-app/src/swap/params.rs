@@ -6,6 +6,7 @@ use core::str;
 use crate::parser::common::{CoinType, SuiAddressRaw, SUI_COIN_TYPE};
 use crate::swap::Error;
 use crate::ui::common::coin_type_from_ticker;
+use crate::utils::MAX_COIN_DECIMALS;
 
 // Max SUI address str length is 32*2
 const SUI_ADDRESS_STR_LENGTH: usize = 64;
@@ -93,6 +94,13 @@ impl CoinConfig {
             return Err(Error::DecodeCoinConfig);
         }
         let decimals = buf[0];
+
+        // The Exchange app supplies this unvalidated. Above MAX_COIN_DECIMALS the
+        // divisor used to render the amount wraps, and from 10^64 it wraps to zero,
+        // so a single out-of-range byte would panic the libcall.
+        if decimals > MAX_COIN_DECIMALS {
+            return Err(Error::DecodeCoinConfig);
+        }
 
         Ok(Some(CoinConfig { ticker, decimals }))
     }

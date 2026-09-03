@@ -78,41 +78,23 @@ _TX_SIP58_005 = _intent_message(_TX_SIP58_005_UNSIGNED)
 
 
 def _nav_transfer_nano(navigator, scenario_navigator):
-    navigator.navigate_and_compare(
-        instructions=[
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.BOTH_CLICK,
-        ],
-        timeout=10,
-        test_case_name=scenario_navigator.test_name,
-        path=scenario_navigator.screenshot_path,
-        screen_change_before_first_instruction=True,
+    navigator.navigate_until_text_and_compare(
+        NavInsID.RIGHT_CLICK,
+        [NavInsID.BOTH_CLICK],
+        "Sign transaction",
+        scenario_navigator.screenshot_path,
+        scenario_navigator.test_name,
         screen_change_after_last_instruction=False,
     )
 
 
 def _nav_stake_nano(navigator, scenario_navigator):
-    navigator.navigate_and_compare(
-        instructions=[
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.RIGHT_CLICK,
-            NavInsID.BOTH_CLICK,
-        ],
-        timeout=10,
-        test_case_name=scenario_navigator.test_name,
-        path=scenario_navigator.screenshot_path,
-        screen_change_before_first_instruction=True,
+    navigator.navigate_until_text_and_compare(
+        NavInsID.RIGHT_CLICK,
+        [NavInsID.BOTH_CLICK],
+        "Sign transaction",
+        scenario_navigator.screenshot_path,
+        scenario_navigator.test_name,
         screen_change_after_last_instruction=False,
     )
 
