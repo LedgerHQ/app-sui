@@ -1,5 +1,11 @@
 # Common deps for all tests (standalone, swap, application_client)
-# pysui 0.89+ requires jsonschema>=4.23 which conflicts with speculos (jsonschema<4.18)
+# Two reasons for the pysui upper bound:
+#  - 0.89+ requires jsonschema>=4.23, which conflicts with speculos (jsonschema<4.18)
+#  - 0.84+ ships protos compiled against a betterproto2_compiler that no released
+#    betterproto2 matches, so importing the client raises "Unsupported version. The
+#    proto files were compiled with a version of betterproto2_compiler which is not
+#    compatible with this version of betterproto2" and no test can be collected.
+#    0.83.0 is the last working release; pinning betterproto2 instead does not help.
 pytest
 ragger[tests,speculos,ledgerwallet]>=1.36.1
 speculos>=0.25.13
@@ -8,5 +14,5 @@ safe-pysha3>=1.0.0
 tomli>=2.0.1
 protobuf>=3.19.0
 GitPython==3.1.46
-pysui>=0.73.0,<0.89.0
+pysui>=0.73.0,<0.84.0
 deprecated==1.2.18
