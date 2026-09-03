@@ -7,6 +7,7 @@ from ragger.error import ExceptionRAPDU
 from application_client.client import Client, Errors
 from cal_helper import (
     SUI_CURRENCY_CONFIGURATION,
+    SUI_OVERSIZED_DECIMALS_CURRENCY_CONFIGURATION,
     SUI_USDC_CURRENCY_CONFIGURATION,
     SUI_UNKNOWN_CURRENCY_CONFIGURATION,
 )
@@ -16,6 +17,10 @@ from application_client.sui_utils import *
 USDC_DYNAMIC_TOKEN_ADDRESS = "0x909cba62ce96d54de25bec9502de5ca7b4f28901747bbf96b76c2e63ec5f1cba"
 USDC_DYNAMIC_TOKEN_MODULE = "coin"
 USDC_DYNAMIC_TOKEN_STRUCT = "COIN"
+
+# Status the Exchange app returns when a library GET_PRINTABLE_AMOUNT yields no
+# amount. Owned by app-exchange, not by this app's Errors enum.
+EXCHANGE_PRINTABLE_AMOUNT_MISSING = 0x6A8B
 
 # ExchangeTestRunner implementation for Sui
 class GenericSuiTests(ExchangeTestRunner):
@@ -167,6 +172,45 @@ class SuiSwapUnknownTokenDynamicTests(ExchangeTestRunner):
 # The pre-execution balance therefore matches the quote, but the recipient receives
 # that balance minus the gas actually consumed, so the swap must not be bound to it
 # (B2CA-2793 follow-up finding 2).
+# Security regression: the Exchange app supplies the coin config's decimals byte and
+# the app used it unvalidated. Rendering an amount divides by 10^decimals, computed
+# with u64::pow while overflow-checks are off, so the divisor wraps -- and from 10^64
+# it wraps to exactly zero, making the division panic.
+#
+# That panic lands inside GET_PRINTABLE_AMOUNT, a pre-sign libcall. Libcall startup
+# deliberately does not clear the app's .bss (it is shared with the calling Exchange
+# app), and SWAP_PANIC_HANDLER -- an Option<fn> whose None is all-zero -- is only
+# written by SwapSignTransaction. So the panic handler read whatever the Exchange
+# app's live RAM held there and, for any nonzero value, called it as a function
+# pointer. Observed before the fix: the app never returned control and the Exchange
+# call timed out.
+#
+# With the config refused at parse, the libcall returns normally with no printable
+# amount and Exchange reports it, so the test asserts a clean status rather than a
+# timeout.
+class SuiSwapOversizedDecimalsTests(ExchangeTestRunner):
+    currency_configuration = SUI_OVERSIZED_DECIMALS_CURRENCY_CONFIGURATION
+    valid_destination_1 = FOREIGN_ADDRESS
+    valid_destination_2 = FOREIGN_ADDRESS_2
+    valid_refund = OWNED_ADDRESS
+    valid_send_amount_1 = AMOUNT
+    valid_send_amount_2 = AMOUNT_2
+    valid_fees_1 = FEES
+    valid_fees_2 = FEES_2
+    fake_refund = FOREIGN_ADDRESS
+    fake_payout = FOREIGN_ADDRESS
+    signature_refusal_error_code = Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    partner_name = "Partner name"
+    fund_user_id = "Daft Punk"
+    fund_account_name = "Account 0"
+
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        # Never reached: the swap is refused while Exchange is still gathering the
+        # printable amount.
+        raise AssertionError("swap setup should not have completed")
+
+
 class SuiSwapWholeGasCoinTests(ExchangeTestRunner):
     currency_configuration = SUI_CURRENCY_CONFIGURATION
     valid_destination_1 = FOREIGN_ADDRESS
@@ -239,6 +283,22 @@ class TestsSui:
                                                   runner.valid_fees_1,
                                                   "")
         assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    # Negative: an out-of-range decimals byte in the Exchange-supplied coin config
+    # must be refused, not divided by. Before the fix the app panicked inside the
+    # GET_PRINTABLE_AMOUNT libcall and never returned control, so this raised
+    # TimeoutError instead of the status asserted here -- which is what makes the
+    # test discriminate.
+    def test_sui_swap_rejects_oversized_decimals(self, backend, exchange_navigation_helper):
+        runner = SuiSwapOversizedDecimalsTests(backend, exchange_navigation_helper)
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        # Exchange's "printable amount should exist": the library call came back
+        # cleanly with no amount rather than dying mid-call.
+        assert e.value.status == EXCHANGE_PRINTABLE_AMOUNT_MISSING
 
     # Positive: the unknown ticker is accepted once a matching dynamic descriptor is provided.
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)

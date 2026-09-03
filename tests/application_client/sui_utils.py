@@ -150,3 +150,8 @@ SUI_USDC_CONF = create_currency_config("USDC", "Sui", ("USDC", 6))
 # Ticker intentionally NOT present in the app's built-in KNOWN_COINS table, used to
 # exercise the swap "unknown ticker" path (resolved only via a dynamic descriptor).
 SUI_UNKNOWN_CONF = create_currency_config("TADA", "Sui", ("TADA", 6))
+# Decimals deliberately past the app's supported maximum. The Exchange app supplies
+# this byte unvalidated, and rendering an amount divides by 10^decimals, which wraps
+# in u64 and reaches zero from 10^64 -- so the app must refuse the config rather than
+# divide by it.
+SUI_OVERSIZED_DECIMALS_CONF = create_currency_config("USDC", "Sui", ("USDC", 64))

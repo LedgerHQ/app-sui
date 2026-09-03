@@ -8,14 +8,19 @@ use sui::app_main::*;
 
 use sui::{
     ctx::RunCtx,
-    swap::{lib_main, panic_handler::get_swap_panic_handler},
+    swap::{
+        lib_main,
+        panic_handler::{is_swap_panic_armed, swap_panic},
+    },
 };
 
 pub fn custom_panic(info: &PanicInfo) -> ! {
     use ledger_device_sdk::io;
-    if let Some(swap_panic_handler) = get_swap_panic_handler() {
-        // This handler is no-return
-        swap_panic_handler(info);
+    // A direct call to a compile-time-known function. The armed flag is only
+    // compared, so caller-owned shared .bss can never select the target.
+    if is_swap_panic_armed() {
+        // No return.
+        swap_panic(info);
     }
     ledger_device_sdk::log::error!("Panic happened! {:#?}", info);
     let mut comm = io::Comm::new();

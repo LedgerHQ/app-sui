@@ -1,6 +1,6 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::parser::common::{SuiAddressRaw, SUI_COIN_DECIMALS};
 use crate::swap::params::TxParams;
 use crate::ui::common::*;
 use crate::utils::*;
@@ -8,6 +8,7 @@ use crate::utils::*;
 extern crate alloc;
 use alloc::format;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 
 use crate::crypto_helpers::common::HexSlice;
 use crate::crypto_helpers::hasher::HexHash;
@@ -21,6 +22,36 @@ use super::*;
 pub struct UserInterface {
     pub main_menu: &'static RefCell<NbglHomeAndSettings>,
     pub do_refresh: &'static RefCell<bool>,
+}
+
+/// The replay domain rendered for display, kept alive by the caller so the
+/// `Field`s below can borrow it.
+fn replay_values(
+    replay: &Option<ReplayDomain>,
+) -> Option<(alloc::string::String, alloc::string::String)> {
+    replay.map(|r| {
+        let chain = match chain_name(&r.chain) {
+            Some(name) => name.to_string(),
+            None => format!("0x{}", HexSlice(&r.chain)),
+        };
+        (chain, format!("{}", r.nonce))
+    })
+}
+
+fn replay_fields(vals: &Option<(alloc::string::String, alloc::string::String)>) -> Vec<Field<'_>> {
+    match vals {
+        Some((chain, nonce)) => alloc::vec![
+            Field {
+                name: "Network",
+                value: chain.as_str(),
+            },
+            Field {
+                name: "Nonce",
+                value: nonce.as_str(),
+            },
+        ],
+        None => Vec::new(),
+    }
 }
 
 impl UserInterface {
@@ -51,6 +82,8 @@ impl UserInterface {
         &self,
         address: &SuiPubKeyAddress,
         params: &TxParams,
+        sponsored_sender: Option<SuiAddressRaw>,
+        replay: Option<ReplayDomain>,
         ctx: &RunCtx,
     ) -> Option<()> {
         self.do_refresh.replace(true);
@@ -58,6 +91,14 @@ impl UserInterface {
             name: "From",
             value: &format!("{address}"),
         };
+        // Sponsored: this device pays the gas for a transaction someone else sent,
+        // so its gas coin funds their PTB. "From" alone would read as the user's
+        // own transaction.
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Sent by",
+            value: v.as_str(),
+        });
         let to = Field {
             name: "To",
             value: &format!("0x{}", HexSlice(&params.destination_address)),
@@ -81,24 +122,39 @@ impl UserInterface {
             value: amt_val.as_str(),
         };
 
-        let do_review = |fields, ticker| {
-            let first_msg = &format!("Review transaction to transfer {ticker}");
-            let last_msg = &format!("Sign transaction to transfer {ticker}");
-            NbglReview::new()
-                .glyph(&APP_ICON)
-                .titles(first_msg, "", last_msg)
-                .show(fields)
+        let replay_vals = replay_values(&replay);
+
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
         };
-        let success = match coin_fields {
-            Left(ticker) => do_review(&[from, to, amt, gas], ticker.as_str()),
-            Right((coin_str, id_str)) => {
-                let coin = Field {
+        let (ticker, coin_field) = match &coin_fields {
+            Left(ticker) => (ticker.as_str(), None),
+            Right((coin_str, id_str)) => (
+                "coins",
+                Some(Field {
                     name: coin_str.as_str(),
                     value: id_str.as_str(),
-                };
-                do_review(&[from, to, coin, amt, gas], "coins")
-            }
+                }),
+            ),
         };
+
+        let mut fields: Vec<Field> = Vec::new();
+        fields.push(from);
+        fields.extend(sponsor);
+        fields.push(to);
+        fields.extend(coin_field);
+        fields.push(amt);
+        fields.push(gas);
+        fields.extend(replay_fields(&replay_vals));
+
+        let first_msg = &format!("Review {kind} to transfer {ticker}");
+        let last_msg = &format!("Sign {kind} to transfer {ticker}");
+        let success = NbglReview::new()
+            .glyph(&APP_ICON)
+            .titles(first_msg, "", last_msg)
+            .show(&fields);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);
@@ -112,39 +168,48 @@ impl UserInterface {
     pub fn confirm_stake_tx(
         &self,
         address: &SuiPubKeyAddress,
-        recipient: [u8; 32],
-        total_amount: u64,
-        gas_budget: u64,
-        gas_from_address_balance: bool,
-        includes_gas_coin: bool,
+        params: &StakeParams,
+        sponsored_sender: Option<SuiAddressRaw>,
+        replay: Option<ReplayDomain>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        // request_add_stake credits the resulting StakedSui to the sender, so on a
+        // sponsored stake the position belongs to that account and not to the
+        // signer paying for it. Labelled by that role rather than "Sent by" as
+        // elsewhere, because for a stake the beneficiary is the fact that matters
+        // and the two are the same address.
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Stake owner",
+            value: v.as_str(),
+        });
         let to = Field {
             name: "Validator",
-            value: if recipient == LEDGER_STAKE_ADDRESS {
+            value: if params.recipient == LEDGER_STAKE_ADDRESS {
                 "Ledger by P2P"
             } else {
-                &format!("0x{}", HexSlice(&recipient))
+                &format!("0x{}", HexSlice(&params.recipient))
             },
         };
         let gas_val = format_gas_amount(
-            gas_budget,
-            GasSource::new(gas_from_address_balance, includes_gas_coin),
+            params.gas_budget,
+            GasSource::new(params.gas_from_address_balance, params.includes_gas_coin),
         );
         let gas = Field {
             name: "Max Gas",
             value: &gas_val,
         };
 
-        let (quotient, remainder_str) = get_amount_in_decimals(total_amount, SUI_COIN_DECIMALS);
+        let (quotient, remainder_str) =
+            get_amount_in_decimals(params.total_amount, SUI_COIN_DECIMALS);
         // Staking the gas coin by value stakes at most this much: gas comes out of
         // it (B2CA-2793 follow-up finding 2).
         let amt = Field {
-            name: if includes_gas_coin {
+            name: if params.includes_gas_coin {
                 "Stake amount (max)"
             } else {
                 "Stake amount"
@@ -152,15 +217,27 @@ impl UserInterface {
             value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
         };
 
-        let do_review = |fields| {
-            let first_msg = "Review transaction to stake SUI".to_string();
-            let last_msg = "Sign transaction to stake SUI".to_string();
-            NbglReview::new()
-                .glyph(&APP_ICON)
-                .titles(&first_msg, "", &last_msg)
-                .show(fields)
+        let replay_vals = replay_values(&replay);
+
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
         };
-        let success = do_review(&[from, amt, to, gas]);
+        let mut fields: Vec<Field> = Vec::new();
+        fields.push(from);
+        fields.extend(sponsor);
+        fields.push(amt);
+        fields.push(to);
+        fields.push(gas);
+        fields.extend(replay_fields(&replay_vals));
+
+        let first_msg = format!("Review {kind} to stake SUI");
+        let last_msg = format!("Sign {kind} to stake SUI");
+        let success = NbglReview::new()
+            .glyph(&APP_ICON)
+            .titles(&first_msg, "", &last_msg)
+            .show(&fields);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);
@@ -177,12 +254,20 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
         gas_from_address_balance: bool,
+        sponsored_sender: Option<SuiAddressRaw>,
+        replay: Option<ReplayDomain>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
         let from = Field {
             name: "From",
             value: &format!("{address}"),
         };
+        // See confirm_sign_tx.
+        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
+        let sponsor = sponsor_val.as_ref().map(|v| Field {
+            name: "Sent by",
+            value: v.as_str(),
+        });
         // Unstaking never consumes the gas coin as the unstaked object, so gas is
         // always charged separately here.
         let gas_val =
@@ -198,15 +283,26 @@ impl UserInterface {
             value: &format!("SUI {}.{}", quotient, remainder_str.as_str()),
         };
 
-        let do_review = |fields| {
-            let first_msg = "Review transaction to unstake SUI".to_string();
-            let last_msg = "Sign transaction to unstake SUI".to_string();
-            NbglReview::new()
-                .glyph(&APP_ICON)
-                .titles(&first_msg, "", &last_msg)
-                .show(fields)
+        let replay_vals = replay_values(&replay);
+
+        let kind = if sponsor.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
         };
-        let success = do_review(&[from, amt, gas]);
+        let mut fields: Vec<Field> = Vec::new();
+        fields.push(from);
+        fields.extend(sponsor);
+        fields.push(amt);
+        fields.push(gas);
+        fields.extend(replay_fields(&replay_vals));
+
+        let first_msg = format!("Review {kind} to unstake SUI");
+        let last_msg = format!("Sign {kind} to unstake SUI");
+        let success = NbglReview::new()
+            .glyph(&APP_ICON)
+            .titles(&first_msg, "", &last_msg)
+            .show(&fields);
         NbglReviewStatus::new()
             .status_type(StatusType::Transaction)
             .show(success);
