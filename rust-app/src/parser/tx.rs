@@ -68,7 +68,7 @@ pub struct ChainIdentifierSchema;
 pub struct ChainIdentifierParser;
 
 impl HasOutput<ChainIdentifierSchema> for ChainIdentifierParser {
-    type Output = ();
+    type Output = SuiAddressRaw;
 }
 
 impl<BS: Clone + Readable> AsyncParser<ChainIdentifierSchema, BS> for ChainIdentifierParser {
@@ -88,7 +88,7 @@ impl<BS: Clone + Readable> AsyncParser<ChainIdentifierSchema, BS> for ChainIdent
                 )
                 .await
             } else {
-                <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await;
+                <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await
             }
         }
     }
@@ -112,7 +112,48 @@ pub type AppId = ULEB128;
 // Gas Budget + total gas coin amount (if known) + SIP-58: gas from address balance
 pub type GasData = (u64, Option<u64>, bool);
 
+/// Who the transaction says it is from, and who is paying for it.
+///
+/// Sui allows these to differ (a sponsored transaction), and the network accepts
+/// a gas-owner signature as authorization on its own, so the signing key cannot be
+/// assumed to be the sender.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TxPrincipals {
+    pub sender: SuiAddressRaw,
+    pub gas_owner: SuiAddressRaw,
+}
+
+impl TxPrincipals {
+    /// The transaction is sponsored when the account paying gas is not the one
+    /// sending it.
+    pub fn is_sponsored(&self) -> bool {
+        self.sender != self.gas_owner
+    }
+
+    /// The sender to disclose when `signer` is only sponsoring this transaction:
+    /// it pays the gas (and so `Argument::GasCoin` spends its coin) while some
+    /// other account is the sender. `None` when the signer is the sender, which
+    /// is the ordinary case and needs no extra disclosure.
+    pub fn sponsored_sender_for(&self, signer: &SuiAddressRaw) -> Option<SuiAddressRaw> {
+        if self.gas_owner == *signer && self.sender != *signer {
+            Some(self.sender)
+        } else {
+            None
+        }
+    }
+}
+
 // Tx Parsers
+
+/// SIP-58 `FundsWithdrawalArg.withdraw_from`: whose address balance is drawn on.
+///
+/// In a sponsored transaction the sponsor is a different account from the sender,
+/// so this decides whose funds a withdrawal actually spends.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum WithdrawFrom {
+    Sender,
+    Sponsor,
+}
 
 pub enum CallArg {
     RecipientAddress(SuiAddressRaw),
@@ -120,8 +161,9 @@ pub enum CallArg {
     OptionalAmount(Option<u64>),
     ObjectRef(ObjectDigest),
     SharedObject(CoinID),
-    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag + amount)
-    FundsWithdrawal(CoinType, u64),
+    /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag +
+    /// amount + whose balance is drawn on)
+    FundsWithdrawal(CoinType, u64, WithdrawFrom),
     Other,
 }
 
@@ -293,10 +335,28 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                         )
                         .await
                     };
-                    let _withdraw_from =
+                    let withdraw_from_variant =
                         <DefaultInterp as AsyncParser<ULEB128, BS>>::parse(&DefaultInterp, input)
                             .await;
-                    CallArg::FundsWithdrawal(coin_type, amount)
+                    let withdraw_from = match withdraw_from_variant {
+                        0 => WithdrawFrom::Sender,
+                        1 => WithdrawFrom::Sponsor,
+                        other => {
+                            // Reject rather than accept a variant the device does
+                            // not model.
+                            error!("Unknown SIP-58 WithdrawFrom variant: {}", other);
+                            reject_on(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
+                            .await
+                        }
+                    };
+                    // Whether Sponsor is safe depends on the sender/sponsor split,
+                    // which is not known until GasData is parsed (it follows the
+                    // programmable transaction), so retain it for the check there.
+                    CallArg::FundsWithdrawal(coin_type, amount, withdraw_from)
                 }
                 _ => {
                     info!("CallArgSchema: Unknown enum: {}", enum_variant);
@@ -613,14 +673,11 @@ pub enum ProgrammableTransaction {
         // downstream (see tx_parser below) rather than here.
         added_amount_to_gas_coin: u64,
         split_amount_from_gas_coin: u64,
-        // SIP-58 coin::send_funds change recipient (asserted == tx sender).
-        self_deposit: Option<SuiAddressRaw>,
     },
     TransferTokenTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
         amount: <DefaultInterp as HasOutput<Amount>>::Output,
         coin_type: CoinType,
-        self_deposit: Option<SuiAddressRaw>,
     },
     StakeTx {
         recipient: <DefaultInterp as HasOutput<Recipient>>::Output,
@@ -647,8 +704,29 @@ pub enum ProgrammableTransactionTypeState {
     UnstakeTx,
 }
 
+/// Facts gathered while parsing a programmable transaction that can only be judged
+/// once the sender and gas owner are known -- which is not until GasData has been
+/// parsed, after the transaction kind. Reported alongside the recognized shape
+/// rather than folded into it, so no shape can drop them: the token-transfer and
+/// unstake variants carry neither the gas deltas nor the hidden deposit, yet all of
+/// them have to be checked.
+#[derive(Copy, Clone, Default)]
+pub struct PtbFacts {
+    /// A command moved value into or out of the gas coin, which in a sponsored
+    /// transaction belongs to the sponsor rather than the sender.
+    pub touches_gas_coin: bool,
+    /// The stake principal included the gas coin, by value or inside the coin
+    /// vector of `request_add_stake_mul_coin`.
+    pub stakes_gas_coin: bool,
+    /// A SIP-58 FundsWithdrawal drew on the gas sponsor's address balance.
+    pub withdraws_from_sponsor: bool,
+    /// Recipient of a `coin::send_funds`, which moves a coin into an address balance
+    /// without appearing in the review. Must be the sender.
+    pub self_deposit: Option<SuiAddressRaw>,
+}
+
 impl<OD> HasOutput<ProgrammableTransactionSchema> for ProgrammableTransactionParser<OD> {
-    type Output = ProgrammableTransaction;
+    type Output = (ProgrammableTransaction, PtbFacts);
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTransactionSchema, BS>
@@ -663,6 +741,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
         async move {
             let mut inputs: BTreeMap<u16, InputValue> = BTreeMap::new();
             let mut command_results: BTreeMap<u16, CommandResult> = BTreeMap::new();
+            let mut flow = PtbFacts::default();
 
             // By using heap we have the flexibility to handle transactions of various sizes
             // But if we exceed the heap usage it would crash the app while parsing the transaction.
@@ -717,8 +796,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         CallArg::Other => {
                             info!("Input {}: Other - not supported", i);
                         }
-                        CallArg::FundsWithdrawal(coin_type, amt) => {
+                        CallArg::FundsWithdrawal(coin_type, amt, withdraw_from) => {
                             info!("Input {}: FundsWithdrawal: amount {}", i, amt);
+                            if withdraw_from == WithdrawFrom::Sponsor {
+                                flow.withdraws_from_sponsor = true;
+                            }
                             inputs.insert(i, InputValue::FundsWithdrawal(coin_type, amt));
                         }
                         CallArg::RecipientAddress(v) => {
@@ -940,7 +1022,13 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                 }
             };
 
-            match tx_type {
+            // The per-variant deltas below only survive on the SUI transfer and
+            // stake shapes, but the sponsorship gate in TransactionDataParser has to
+            // see this for every shape, so it is reported separately.
+            flow.touches_gas_coin =
+                added_amount_to_gas_coin != 0 || split_amount_from_gas_coin != 0;
+
+            let programmable_tx = match tx_type {
                 ProgrammableTransactionTypeState::TransferTx => {
                     let recipient = match recipient_addr {
                         Some(addr) => addr,
@@ -969,7 +1057,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             recipient,
                             amount: total_amount,
                             coin_type,
-                            self_deposit,
                         }
                     } else {
                         // Net GasCoin adjustment from any MergeCoins/SplitCoins
@@ -985,7 +1072,6 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             includes_gas_coin,
                             added_amount_to_gas_coin,
                             split_amount_from_gas_coin,
-                            self_deposit,
                         }
                     }
                 }
@@ -1009,6 +1095,11 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             .await
                         }
                     };
+
+                    // Only the stake shape reports this: transferring the gas coin
+                    // names its recipient on screen, whereas a stake never names
+                    // the account the resulting position accrues to.
+                    flow.stakes_gas_coin = includes_gas_coin;
 
                     // Net GasCoin adjustment from any MergeCoins/SplitCoins
                     // touching it before being staked (B2CA-2793 findings 3/5) is
@@ -1042,7 +1133,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     )
                     .await
                 }
-            }
+            };
+
+            flow.self_deposit = self_deposit;
+            (programmable_tx, flow)
         }
     }
 }
@@ -1264,7 +1358,23 @@ async fn handle_move_call<OD: HasObjectData>(
                 )
                 .await
             };
-            *self_deposit = Some(*addr);
+            // Only one recipient is carried, and the check below sees only that one.
+            // Overwriting would let a large hidden send to an attacker be replaced by a
+            // small one back to the sender, and pass. Repeats of the same recipient are
+            // harmless, so only a differing one is refused.
+            if let Some(existing) = *self_deposit {
+                if existing != *addr {
+                    error!("multiple coin::send_funds recipients");
+                    reject_on::<()>(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await;
+                }
+            } else {
+                *self_deposit = Some(*addr);
+            }
             return Right(CommandResult::MergedCoin((*coin_type, 0)));
         }
     }
@@ -2365,11 +2475,22 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionKin
 }
 
 /// Parsed TransactionExpiration variant. SIP-58: ValidDuring required for stateless tx (empty gas payment).
+///
+/// ValidDuring carries the replay domain: `chain` scopes the transaction to one
+/// network and `nonce` distinguishes otherwise identical transactions. Both reach
+/// the review, so two requests that differ only there are not shown as the same
+/// transaction.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum TransactionExpirationVariant {
     None,
     Epoch,
-    ValidDuring,
+    ValidDuring { chain: SuiAddressRaw, nonce: u32 },
+}
+
+impl TransactionExpirationVariant {
+    pub fn is_valid_during(&self) -> bool {
+        matches!(self, TransactionExpirationVariant::ValidDuring { .. })
+    }
 }
 
 pub struct TransactionExpirationParser;
@@ -2399,7 +2520,7 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                 }
                 2 => {
                     info!("TransactionExpiration: ValidDuring (SIP-58)");
-                    <(
+                    let valid_during = <(
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
                         SubInterp<DefaultInterp>,
@@ -2418,7 +2539,8 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
                         input,
                     )
                     .await;
-                    TransactionExpirationVariant::ValidDuring
+                    let (_min_epoch, _max_epoch, _min_ts, _max_ts, chain, nonce) = valid_during;
+                    TransactionExpirationVariant::ValidDuring { chain, nonce }
                 }
                 _ => {
                     reject_on(
@@ -2433,7 +2555,11 @@ impl<BS: Clone + Readable> AsyncParser<TransactionExpiration, BS> for Transactio
     }
 }
 
-pub type GasDataParserOutput = (ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>, u64);
+pub type GasDataParserOutput = (
+    ArrayVec<ObjectDigest, MAX_GAS_COIN_COUNT>,
+    SuiAddressRaw,
+    u64,
+);
 
 const fn gas_data_parser<BS: Clone + Readable>(
 ) -> impl AsyncParser<GasDataSchema, BS, Output = GasDataParserOutput> {
@@ -2445,13 +2571,19 @@ const fn gas_data_parser<BS: Clone + Readable>(
             DefaultInterp,
         ),
         {
-            |(coins, _sender, _gas_price, gas_budget): (_, _, u64, u64)| {
+            |(coins, owner, _gas_price, gas_budget): (_, SuiAddressRaw, u64, u64)| {
                 // Gas price is per gas amount. Gas budget is total, reflecting the amount of gas *
                 // gas price. We only care about the total, not the price or amount in isolation , so we
                 // just ignore that field.
                 //
                 // C.F. https://github.com/MystenLabs/sui/pull/8676
-                Some((coins, gas_budget))
+                //
+                // `owner` is the gas sponsor, which Sui does not require to be the
+                // transaction sender. It must survive down to the review: when this
+                // device is the owner but not the sender it is sponsoring someone
+                // else's transaction, and `Argument::GasCoin` then spends *this*
+                // device's coin on their behalf.
+                Some((coins, owner, gas_budget))
             }
         },
     )
@@ -2480,9 +2612,13 @@ const fn intent_parser<BS: Readable>() -> impl AsyncParser<Intent, BS, Output = 
     )
 }
 
-type TransactionDataV1Output<OD> = (
-    <TransactionKindParser<OD> as HasOutput<TransactionKindSchema>>::Output,
+/// The gas-coin-touched flag from the kind parser is consumed here (it gates
+/// sponsorship, see below) and so does not appear in this output.
+type TransactionDataV1Output = (
+    ProgrammableTransaction,
     GasData,
+    TxPrincipals,
+    TransactionExpirationVariant,
 );
 
 pub struct TransactionDataParser<OD> {
@@ -2490,7 +2626,7 @@ pub struct TransactionDataParser<OD> {
 }
 
 impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
-    type Output = TransactionDataV1Output<OD>;
+    type Output = TransactionDataV1Output;
 }
 
 impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDataSchema, BS>
@@ -2509,7 +2645,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    let v = (TransactionKindParser {
+                    let (v, flow) = (TransactionKindParser {
                         object_data_source: self.object_data_source.clone(),
                     })
                     .parse(input)
@@ -2526,14 +2662,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     // shown), so a hostile host could redeem the whole balance, show a small decoy
                     // transfer, and divert the remainder. Reject (routes to not-recognized; hard
                     // reject in swap) unless the change returns to the sender.
-                    let self_deposit = match &v {
-                        ProgrammableTransaction::TransferSuiTx { self_deposit, .. }
-                        | ProgrammableTransaction::TransferTokenTx { self_deposit, .. } => {
-                            *self_deposit
-                        }
-                        _ => None,
-                    };
-                    if let Some(deposit) = self_deposit {
+                    if let Some(deposit) = flow.self_deposit {
                         if deposit != sender {
                             error!("coin::send_funds change recipient is not the sender (SIP-58)");
                             reject_on::<()>(
@@ -2545,7 +2674,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         }
                     }
 
-                    let (gas_coins, gas_budget) = gas_data_parser().parse(input).await;
+                    let (gas_coins, gas_owner, gas_budget) = gas_data_parser().parse(input).await;
 
                     // SIP-58: gas_coins may be empty (gas paid from address balance). The
                     // gas coin's balance is then genuinely unknown to the device, so seed
@@ -2588,9 +2717,7 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                     let expiration = TransactionExpirationParser.parse(input).await;
 
                     // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
-                    if gas_from_address_balance
-                        && expiration != TransactionExpirationVariant::ValidDuring
-                    {
+                    if gas_from_address_balance && !expiration.is_valid_during() {
                         error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
                         reject_on::<u64>(
                             core::file!(),
@@ -2600,7 +2727,65 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
                         .await;
                     }
 
-                    (v, (gas_budget, total_gas_amount, gas_from_address_balance))
+                    // Both checks below only fire when sender and gas owner differ:
+                    // when they are the same account the two resolve to one address
+                    // and the existing checks are already correct. Rejecting here
+                    // routes to the not-recognized/blind-sign path, and is a hard
+                    // reject in swap, like other parse ambiguity.
+                    let principals = TxPrincipals { sender, gas_owner };
+
+                    // The withdrawal source is not carried through redeem_funds ->
+                    // split -> send_funds, so the change check further down compares
+                    // the deposit against the sender while the funds came from the
+                    // sponsor.
+                    if principals.is_sponsored() && flow.withdraws_from_sponsor {
+                        error!("Sponsored tx withdraws from the sponsor's balance");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    // Only aggregate amounts are tracked, not per-coin ownership, and
+                    // the gas deltas are applied only when the reviewed command itself
+                    // involves the gas coin. A split off the sponsor's gas coin that
+                    // ends up elsewhere would therefore never be displayed.
+                    if principals.is_sponsored() && flow.touches_gas_coin {
+                        error!("Sponsored tx splits or merges the gas coin");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    // request_add_stake transfers the resulting StakedSui to
+                    // tx_context::sender(). Every stake input other than the gas
+                    // coin must be owned by the sender, so this is precisely the
+                    // case where the signer supplies the principal and another
+                    // account keeps the position -- and because gas comes out of
+                    // that same coin, the amount given away is not even exactly
+                    // knowable before execution. A stake funded from the sender's
+                    // own coins stays clear-signable and names its owner.
+                    if principals.is_sponsored() && flow.stakes_gas_coin {
+                        error!("Sponsored tx stakes the sponsor's gas coin");
+                        reject_on::<()>(
+                            core::file!(),
+                            core::line!(),
+                            SyscallError::NotSupported as u16,
+                        )
+                        .await;
+                    }
+
+                    (
+                        v,
+                        (gas_budget, total_gas_amount, gas_from_address_balance),
+                        principals,
+                        expiration,
+                    )
                 }
                 _ => {
                     reject_on(
@@ -2648,9 +2833,18 @@ pub enum KnownTx {
 
 use crate::crypto_helpers::common::HexSlice;
 
+/// A recognized transaction together with the accounts it names, so the caller
+/// can tell whether the signing key is the sender or merely the gas sponsor.
+pub struct ParsedTx {
+    pub tx: KnownTx,
+    pub principals: TxPrincipals,
+    /// SIP-58 replay domain, when the transaction carries one.
+    pub expiration: TransactionExpirationVariant,
+}
+
 pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
     object_data_source: OD,
-) -> impl AsyncParser<IntentMessage, BS, Output = KnownTx> {
+) -> impl AsyncParser<IntentMessage, BS, Output = ParsedTx> {
     Action(
         (
             intent_parser(),
@@ -2660,7 +2854,9 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
             _,
             <TransactionDataParser<OD> as HasOutput<TransactionDataSchema>>::Output,
         )| {
-            match d.0 {
+            let principals = d.2;
+            let expiration = d.3;
+            let known = match d.0 {
                 ProgrammableTransaction::TransferSuiTx {
                     recipient,
                     amount,
@@ -2756,7 +2952,12 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                         gas_from_address_balance,
                     })
                 }
-            }
+            };
+            known.map(|tx| ParsedTx {
+                tx,
+                principals,
+                expiration,
+            })
         },
     )
 }

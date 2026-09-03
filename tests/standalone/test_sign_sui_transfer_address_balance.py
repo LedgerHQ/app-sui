@@ -27,21 +27,12 @@ def test_sign_tx_sui_valid_during_address_balance_gas(backend, scenario_navigato
 
     def nav_task():
         if firmware.device.startswith("nano"):
-            navigator.navigate_and_compare(
-                instructions=[
-                    NavInsID.RIGHT_CLICK,  # Transfer SUI
-                    NavInsID.RIGHT_CLICK,
-                    NavInsID.RIGHT_CLICK,  # From ...
-                    NavInsID.RIGHT_CLICK,
-                    NavInsID.RIGHT_CLICK,  # To ...
-                    NavInsID.RIGHT_CLICK,  # Amount
-                    NavInsID.RIGHT_CLICK,  # Max Gas
-                    NavInsID.BOTH_CLICK,
-                ],
-                timeout=10,
-                test_case_name=scenario_navigator.test_name,
-                path=scenario_navigator.screenshot_path,
-                screen_change_before_first_instruction=True,
+            navigator.navigate_until_text_and_compare(
+                NavInsID.RIGHT_CLICK,
+                [NavInsID.BOTH_CLICK],
+                "Sign transaction",
+                scenario_navigator.screenshot_path,
+                scenario_navigator.test_name,
                 screen_change_after_last_instruction=False,
             )
         else:
