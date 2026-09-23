@@ -56,22 +56,17 @@ def test_apdu_file_reject_tx_then_getaddress(
 
     def nav_task():
         if firmware.device.startswith("nano"):
-            navigator.navigate_and_compare(
-                instructions=[
-                    NavInsID.RIGHT_CLICK,  # Transfer SUI / first screen
-                    NavInsID.RIGHT_CLICK,
-                    NavInsID.RIGHT_CLICK,  # From ...
-                    NavInsID.RIGHT_CLICK,
-                    NavInsID.RIGHT_CLICK,  # To ...
-                    NavInsID.RIGHT_CLICK,  # Amount
-                    NavInsID.RIGHT_CLICK,  # Max Gas
-                    NavInsID.RIGHT_CLICK,  # Confirm
-                    NavInsID.BOTH_CLICK,   # Reject
-                ],
-                timeout=15,
-                test_case_name="test_apdu_file_reject_tx_then_getaddress",
-                path=scenario_navigator.screenshot_path,
-                screen_change_before_first_instruction=True,
+            # Paged by the rejection text rather than by a fixed click count: the
+            # review's length depends on which fields the transaction carries, and
+            # an address spans several screens on nano, so a hard-coded list stops
+            # short the moment a field is added and the device is left waiting on a
+            # review screen rather than rejecting.
+            navigator.navigate_until_text_and_compare(
+                NavInsID.RIGHT_CLICK,
+                [NavInsID.BOTH_CLICK],
+                "Reject",
+                scenario_navigator.screenshot_path,
+                "test_apdu_file_reject_tx_then_getaddress",
                 screen_change_after_last_instruction=False,
             )
         else:

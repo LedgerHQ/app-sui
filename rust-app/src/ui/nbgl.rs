@@ -1,6 +1,7 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
-use crate::parser::common::{SuiAddressRaw, SUI_COIN_DECIMALS};
+use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::parser::tx::TxPrincipals;
 use crate::swap::params::TxParams;
 use crate::ui::common::*;
 use crate::utils::*;
@@ -10,7 +11,7 @@ use alloc::format;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-use crate::crypto_helpers::common::HexSlice;
+use crate::crypto_helpers::common::{Address, HexSlice};
 use crate::crypto_helpers::hasher::HexHash;
 use core::cell::RefCell;
 use either::*;
@@ -36,6 +37,71 @@ fn replay_values(
         };
         (chain, format!("{}", r.nonce))
     })
+}
+
+/// The accounts a review names, rendered for display and kept alive by the
+/// caller so the `Field`s below can borrow them.
+///
+/// Every role is read off the signed transaction, never off the signing path.
+/// A Sui multisig address is derived from the multisig policy rather than from
+/// any constituent key, so this device can hold a key that authorizes the
+/// sender or the gas owner while its own address equals neither. Sponsorship
+/// therefore follows from the principals alone, and the derived address is
+/// shown as the key it is rather than standing in for an account.
+struct Principals {
+    /// `TransactionData.sender`: the account the transaction is from, and whose
+    /// effects it accrues to.
+    sender: alloc::string::String,
+    /// `GasData.owner`, shown whenever it is not the sender, i.e. exactly when
+    /// the transaction is sponsored.
+    gas_owner: Option<alloc::string::String>,
+    /// The derived address, shown when the transaction names neither principal
+    /// with it: the device is then signing *for* an account rather than *as*
+    /// one, and the address must not stand in for either role.
+    signing_key: Option<alloc::string::String>,
+}
+
+fn principal_values(principals: &TxPrincipals, address: &SuiPubKeyAddress) -> Principals {
+    Principals {
+        sender: format!("0x{}", HexSlice(&principals.sender)),
+        gas_owner: principals
+            .is_sponsored()
+            .then(|| format!("0x{}", HexSlice(&principals.gas_owner))),
+        signing_key: (!principals.names(address.get_binary_address()))
+            .then(|| format!("{address}")),
+    }
+}
+
+impl Principals {
+    /// The fields naming the accounts, in the order they are reviewed: who the
+    /// transaction is from, who pays for it, and which key is signing.
+    ///
+    /// `from` names the sender field, which some reviews label by the role the
+    /// sender plays in that particular transaction.
+    fn fields(&self, from: &'static str) -> Vec<Field<'_>> {
+        let mut fields = alloc::vec![Field {
+            name: from,
+            value: self.sender.as_str(),
+        }];
+        fields.extend(self.gas_owner.as_ref().map(|v| Field {
+            name: "Gas paid by",
+            value: v.as_str(),
+        }));
+        fields.extend(self.signing_key.as_ref().map(|v| Field {
+            name: "Signing key",
+            value: v.as_str(),
+        }));
+        fields
+    }
+
+    /// What to call the transaction in the review titles.
+    fn kind(&self) -> &'static str {
+        if self.gas_owner.is_some() {
+            "sponsored transaction"
+        } else {
+            "transaction"
+        }
+    }
 }
 
 fn replay_fields(vals: &Option<(alloc::string::String, alloc::string::String)>) -> Vec<Field<'_>> {
@@ -82,23 +148,15 @@ impl UserInterface {
         &self,
         address: &SuiPubKeyAddress,
         params: &TxParams,
-        sponsored_sender: Option<SuiAddressRaw>,
+        principals: &TxPrincipals,
         replay: Option<ReplayDomain>,
         ctx: &RunCtx,
     ) -> Option<()> {
         self.do_refresh.replace(true);
-        let from = Field {
-            name: "From",
-            value: &format!("{address}"),
-        };
-        // Sponsored: this device pays the gas for a transaction someone else sent,
-        // so its gas coin funds their PTB. "From" alone would read as the user's
-        // own transaction.
-        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
-        let sponsor = sponsor_val.as_ref().map(|v| Field {
-            name: "Sent by",
-            value: v.as_str(),
-        });
+        // Sponsored: some other account pays the gas for this transfer, and its
+        // gas coin funds the PTB. Naming only one account would read as the
+        // user's own transaction.
+        let who = principal_values(principals, address);
         let to = Field {
             name: "To",
             value: &format!("0x{}", HexSlice(&params.destination_address)),
@@ -124,11 +182,7 @@ impl UserInterface {
 
         let replay_vals = replay_values(&replay);
 
-        let kind = if sponsor.is_some() {
-            "sponsored transaction"
-        } else {
-            "transaction"
-        };
+        let kind = who.kind();
         let (ticker, coin_field) = match &coin_fields {
             Left(ticker) => (ticker.as_str(), None),
             Right((coin_str, id_str)) => (
@@ -140,9 +194,7 @@ impl UserInterface {
             ),
         };
 
-        let mut fields: Vec<Field> = Vec::new();
-        fields.push(from);
-        fields.extend(sponsor);
+        let mut fields: Vec<Field> = who.fields("From");
         fields.push(to);
         fields.extend(coin_field);
         fields.push(amt);
@@ -169,24 +221,15 @@ impl UserInterface {
         &self,
         address: &SuiPubKeyAddress,
         params: &StakeParams,
-        sponsored_sender: Option<SuiAddressRaw>,
+        principals: &TxPrincipals,
         replay: Option<ReplayDomain>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
-        let from = Field {
-            name: "From",
-            value: &format!("{address}"),
-        };
         // request_add_stake credits the resulting StakedSui to the sender, so on a
-        // sponsored stake the position belongs to that account and not to the
-        // signer paying for it. Labelled by that role rather than "Sent by" as
-        // elsewhere, because for a stake the beneficiary is the fact that matters
-        // and the two are the same address.
-        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
-        let sponsor = sponsor_val.as_ref().map(|v| Field {
-            name: "Stake owner",
-            value: v.as_str(),
-        });
+        // sponsored stake the position belongs to that account and not to whoever
+        // pays for it. The sender field is labelled by that role there, because
+        // for a stake the beneficiary is the fact that matters.
+        let who = principal_values(principals, address);
         let to = Field {
             name: "Validator",
             value: if params.recipient == LEDGER_STAKE_ADDRESS {
@@ -219,14 +262,12 @@ impl UserInterface {
 
         let replay_vals = replay_values(&replay);
 
-        let kind = if sponsor.is_some() {
-            "sponsored transaction"
+        let kind = who.kind();
+        let mut fields: Vec<Field> = who.fields(if principals.is_sponsored() {
+            "Stake owner"
         } else {
-            "transaction"
-        };
-        let mut fields: Vec<Field> = Vec::new();
-        fields.push(from);
-        fields.extend(sponsor);
+            "From"
+        });
         fields.push(amt);
         fields.push(to);
         fields.push(gas);
@@ -254,20 +295,12 @@ impl UserInterface {
         total_amount: u64,
         gas_budget: u64,
         gas_from_address_balance: bool,
-        sponsored_sender: Option<SuiAddressRaw>,
+        principals: &TxPrincipals,
         replay: Option<ReplayDomain>,
     ) -> Option<()> {
         self.do_refresh.replace(true);
-        let from = Field {
-            name: "From",
-            value: &format!("{address}"),
-        };
         // See confirm_sign_tx.
-        let sponsor_val = sponsored_sender.map(|s| format!("0x{}", HexSlice(&s)));
-        let sponsor = sponsor_val.as_ref().map(|v| Field {
-            name: "Sent by",
-            value: v.as_str(),
-        });
+        let who = principal_values(principals, address);
         // Unstaking never consumes the gas coin as the unstaked object, so gas is
         // always charged separately here.
         let gas_val =
@@ -285,14 +318,8 @@ impl UserInterface {
 
         let replay_vals = replay_values(&replay);
 
-        let kind = if sponsor.is_some() {
-            "sponsored transaction"
-        } else {
-            "transaction"
-        };
-        let mut fields: Vec<Field> = Vec::new();
-        fields.push(from);
-        fields.extend(sponsor);
+        let kind = who.kind();
+        let mut fields: Vec<Field> = who.fields("From");
         fields.push(amt);
         fields.push(gas);
         fields.extend(replay_fields(&replay_vals));
