@@ -3,9 +3,7 @@ use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_pu
 use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
-use crate::parser::common::{
-    HasObjectData, ObjectData, ObjectDigest, SuiAddressRaw, COIN_STRING_LENGTH,
-};
+use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx, TransactionExpirationVariant, TxPrincipals};
@@ -82,21 +80,6 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     io.result_final(&rv).await;
 }
 
-/// The sender to disclose in the review, or `None` for an ordinary transaction.
-///
-/// Sui accepts a gas-owner signature as authorization in its own right, so this
-/// device can be made to fund a transaction it did not send. `Argument::GasCoin`
-/// then resolves to *this* device's coin while the transaction's effects accrue
-/// to the sender, so the review has to name that sender rather than rendering
-/// "From" off the signing path.
-fn sponsored_sender(
-    address: &SuiPubKeyAddress,
-    principals: &TxPrincipals,
-) -> Option<SuiAddressRaw> {
-    let signer: SuiAddressRaw = address.get_binary_address().try_into().ok()?;
-    principals.sponsored_sender_for(&signer)
-}
-
 /// The SIP-58 replay domain to show, when the transaction carries one.
 fn replay_domain(expiration: TransactionExpirationVariant) -> Option<ReplayDomain> {
     match expiration {
@@ -116,13 +99,7 @@ async fn prompt_tx_params(
     ctx: &RunCtx,
 ) {
     if with_public_keys(path, true, |_, address: &SuiPubKeyAddress| {
-        try_option(ui.confirm_sign_tx(
-            address,
-            &tx_params,
-            sponsored_sender(address, &principals),
-            replay,
-            ctx,
-        ))
+        try_option(ui.confirm_sign_tx(address, &tx_params, &principals, replay, ctx))
     })
     .ok()
     .is_none()
@@ -267,18 +244,26 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_stake_tx(
-                    address,
-                    &StakeParams {
-                        recipient,
-                        total_amount,
-                        gas_budget,
-                        gas_from_address_balance,
-                        includes_gas_coin,
-                    },
-                    principals.and_then(|p| sponsored_sender(address, &p)),
-                    replay,
-                ))
+                // `and_then` rather than an `await`ed unwrap: every added await
+                // point grows the `sign_apdu` future, whose size is the maximum
+                // over all its branches, and that future has to fit the library
+                // slot when the app is sideloaded under Exchange on nanox.
+                // Absent principals are unreachable, since the parse yields them
+                // with every `KnownTx`, and reject the signature if they occur.
+                try_option(principals.and_then(|p| {
+                    ui.confirm_stake_tx(
+                        address,
+                        &StakeParams {
+                            recipient,
+                            total_amount,
+                            gas_budget,
+                            gas_from_address_balance,
+                            includes_gas_coin,
+                        },
+                        &p,
+                        replay,
+                    )
+                }))
             })
             .ok()
             .is_none()
@@ -302,14 +287,17 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             }
 
             if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                try_option(ui.confirm_unstake_tx(
-                    address,
-                    total_amount,
-                    gas_budget,
-                    gas_from_address_balance,
-                    principals.and_then(|p| sponsored_sender(address, &p)),
-                    replay,
-                ))
+                // See the stake review above on why this is not an awaited unwrap.
+                try_option(principals.and_then(|p| {
+                    ui.confirm_unstake_tx(
+                        address,
+                        total_amount,
+                        gas_budget,
+                        gas_from_address_balance,
+                        &p,
+                        replay,
+                    )
+                }))
             })
             .ok()
             .is_none()
