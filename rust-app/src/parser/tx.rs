@@ -130,16 +130,16 @@ impl TxPrincipals {
         self.sender != self.gas_owner
     }
 
-    /// The sender to disclose when `signer` is only sponsoring this transaction:
-    /// it pays the gas (and so `Argument::GasCoin` spends its coin) while some
-    /// other account is the sender. `None` when the signer is the sender, which
-    /// is the ordinary case and needs no extra disclosure.
-    pub fn sponsored_sender_for(&self, signer: &SuiAddressRaw) -> Option<SuiAddressRaw> {
-        if self.gas_owner == *signer && self.sender != *signer {
-            Some(self.sender)
-        } else {
-            None
-        }
+    /// Whether the transaction names `signer` as one of its two principals.
+    ///
+    /// False does not mean the signature is useless to the host: a Sui multisig
+    /// address is derived from the multisig policy, not from any constituent
+    /// key, so a share signed by this device authorizes the multisig it belongs
+    /// to without the device's own address appearing anywhere in the
+    /// transaction. Roles must therefore be read off the signed bytes, and the
+    /// derived address shown as the key it is, never as an account.
+    pub fn names(&self, signer: &[u8]) -> bool {
+        self.sender.as_slice() == signer || self.gas_owner.as_slice() == signer
     }
 }
 
