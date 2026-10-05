@@ -488,7 +488,7 @@ impl HasObjectData for WithObjectData {
                     info!("get_object_data: objects_count {}", c);
                     for _ in 0..c {
                         let length = usize::from_le_bytes(bs.read().await);
-                        let mut obj_start_bs = bs.clone();
+                        let obj_start_bs = bs.clone();
 
                         let hash = NoinlineFut(compute_object_hash(&mut bs, length)).await;
 
@@ -497,11 +497,24 @@ impl HasObjectData for WithObjectData {
                                 "get_object_data: found object with digest {}",
                                 HexSlice(digest)
                             );
-                            // Found object, now try to parse
-                            return NoinlineFut(TryFuture(
-                                object_parser().parse(&mut obj_start_bs),
-                            ))
-                            .await;
+                            // Found object, now try to parse. Only the first `length`
+                            // bytes were hashed, but the parser stops where the object's
+                            // own embedded lengths say, which the host controls. Accept
+                            // the result only if the parse consumed exactly the hashed
+                            // range, or it was fed bytes the digest never covered.
+                            let mut tracked = LengthTrack(obj_start_bs, 0);
+                            let parsed =
+                                NoinlineFut(TryFuture(object_parser().parse(&mut tracked))).await;
+                            return if tracked.index() == length {
+                                parsed
+                            } else {
+                                info!(
+                                    "get_object_data: parse consumed {} bytes, hashed length is {}",
+                                    tracked.index(),
+                                    length
+                                );
+                                None
+                            };
                         }
                     }
                     info!(
