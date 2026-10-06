@@ -1,4 +1,4 @@
-use crate::crypto_helpers::common::{try_option, Address};
+use crate::crypto_helpers::common::{try_option, Address, CryptographyError};
 use crate::crypto_helpers::eddsa::{ed25519_public_key_bytes, eddsa_sign, with_public_keys};
 use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
@@ -40,6 +40,17 @@ pub const BIP_PATH_PARSER: BipParserImplT = SubInterp(DefaultInterp);
 pub const BIP32_PREFIX: [u32; 5] =
     ledger_device_sdk::ecc::make_bip32_path(b"m/44'/784'/123'/0'/0'");
 
+/// Status word for a failure inside a key operation, distinct from a user refusal.
+fn crypto_error_sw(e: CryptographyError) -> u16 {
+    match e {
+        CryptographyError::SyscallError(e) => e as u16,
+        CryptographyError::CapacityError(_) => SyscallError::Overflow as u16,
+        CryptographyError::CxError(_) | CryptographyError::NoneError => {
+            SyscallError::Unspecified as u16
+        }
+    }
+}
+
 pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
     let input = match io.get_params::<1>() {
         Some(v) => v,
@@ -54,27 +65,36 @@ pub async fn get_address_apdu(io: HostIO, ui: UserInterface, prompt: bool) {
 
     let mut rv = ArrayVec::<u8, 220>::new();
 
-    if with_public_keys(&path, true, |key, address: &SuiPubKeyAddress| {
-        try_option(|| -> Option<()> {
-            if prompt {
-                ui.confirm_address(address)?;
+    let outcome = with_public_keys(
+        &path,
+        true,
+        |key, address: &SuiPubKeyAddress| -> Result<bool, CryptographyError> {
+            if prompt && ui.confirm_address(address).is_none() {
+                return Ok(false);
             }
 
             let key_bytes = ed25519_public_key_bytes(key);
 
-            rv.try_push(u8::try_from(key_bytes.len()).ok()?).ok()?;
-            rv.try_extend_from_slice(key_bytes).ok()?;
+            let key_len =
+                u8::try_from(key_bytes.len()).map_err(|_| CryptographyError::NoneError)?;
+            rv.try_push(key_len).map_err(|e| e.simplify())?;
+            rv.try_extend_from_slice(key_bytes)?;
 
             // And we'll send the address along;
             let binary_address = address.get_binary_address();
-            rv.try_push(u8::try_from(binary_address.len()).ok()?).ok()?;
-            rv.try_extend_from_slice(binary_address).ok()?;
-            Some(())
-        }())
-    })
-    .is_err()
-    {
-        reject::<()>(StatusWords::UserCancelled as u16).await;
+            let address_len =
+                u8::try_from(binary_address.len()).map_err(|_| CryptographyError::NoneError)?;
+            rv.try_push(address_len).map_err(|e| e.simplify())?;
+            rv.try_extend_from_slice(binary_address)?;
+            Ok(true)
+        },
+    );
+
+    // Only a refusal on the device is a cancellation; any other failure keeps its own status.
+    match outcome {
+        Ok(true) => {}
+        Ok(false) => reject::<()>(StatusWords::UserCancelled as u16).await,
+        Err(e) => reject::<()>(crypto_error_sw(e)).await,
     }
 
     io.result_final(&rv).await;

@@ -3,6 +3,7 @@ import pytest
 
 from application_client.client import Client, Errors
 from contextlib import contextmanager
+from ragger.error import ExceptionRAPDU
 from ragger.bip import calculate_public_key_and_chaincode, CurveChoice
 from ragger.navigator import NavInsID, NavIns
 from utils import ROOT_SCREENSHOT_PATH, run_apdu_and_nav_tasks_concurrently
@@ -72,3 +73,20 @@ def test_incomplete_command_does_not_panic_followed_by_next_command(
     assert address.hex() == "56b19e720f3bfa8caaef806afdd5dfaffd0d6ec9476323a14d1638ad734b2ba5"
 
     _assert_no_alamgu_async_block_errors_in_speculos_log()
+
+
+# In this test we check that refusing the address on the device is reported as a user
+# denial (0x6985), and not as some other failure of the key operation
+def test_get_public_key_confirm_rejected(backend, scenario_navigator, firmware, navigator):
+    client = Client(backend, use_block_protocol=True)
+    path = "m/44'/784'/0'"
+
+    def nav_task():
+        scenario_navigator.address_review_reject()
+
+    def apdu_task():
+        return client.get_public_key_with_confirmation(path=path)
+
+    with pytest.raises(ExceptionRAPDU) as e:
+        run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, lambda _: None)
+    assert e.value.status == Errors.SW_DENY
