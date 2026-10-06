@@ -227,12 +227,50 @@ The input is a length-prefixed TLV blob:
 
 ## Status Words
 
-| SW     | SW name                       | Description                                                |
-|--------|-------------------------------|------------------------------------------------------------|
-| 0x6808 | `SW_NOT_SUPPORTED`            | `INS` is disabled  (Blind Signing)                         |
-| 0x6982 | `SW_NOTHING_RECEIVED`         | No input was received by the app                           |
-| 0x6D00 | `SW_ERROR`                    | Error has occured due to bad input or user rejectected     |
-| 0x6E00 | `SW_CLA_OR_INS_NOT_SUPPORTED` | No command exists for the `CLA` and `INS`                  |
-| 0x6E01 | `SW_BAD_LEN`                  | Length mismatch in inputs                                  |
-| 0x6E05 | `SW_SWAP_TX_PARAM_MISMATCH`   | Swap transaction parameters check failed                   |
-| 0x9000 | `SW_OK`                       | Success, or continue if more input from client is expected |
+When a command handler rejects, the status word sent to the host is the code it was rejected with, as is. Failures of the block protocol itself are sent as `0x6800` plus a `SyscallError` value. The status words below are the ones this app can produce.
+
+### Command results
+
+| SW     | Name                  | Description                                                                                                                                     |
+|--------|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x9000 | `Ok`                  | Success, or continue if more input from the client is expected                                                                                  |
+| 0x6985 | `UserCancelled`       | The user refused on the device                                                                                                                  |
+| 0x6E01 | `BadIns`              | No command exists for the `CLA`, `INS`, `P1` and `P2`, or `VERIFY_ADDRESS` was sent during a swap                                               |
+| 0x6E05 | `SwapTxParamMismatch` | Swap transaction parameters check failed                                                                                                        |
+| 0x0002 | `InvalidParameter`    | Bad input, for example a BIP32 path that does not start with `m/44'/784'`                                                                       |
+| 0x0003 | `Overflow`            | The reply did not fit its output buffer (`VERIFY_ADDRESS`, `GET_PUBKEY`)                                                                        |
+| 0x0008 | `NotSupported`        | The transaction is not supported: it is not recognized and blind signing is disabled or a swap is active, or the parser refused it as ambiguous |
+| 0x0009 | `InvalidState`        | Internal state is inconsistent, for example a parsed transaction is missing its principals                                                      |
+| 0x000C | `Unspecified`         | A cryptographic operation failed for a reason that has no other code                                                                            |
+| 0x6850 | `ParseError`          | The transaction or object data could not be parsed                                                                                              |
+
+### `PROVIDE_TOKEN_DYNAMIC_DESCRIPTOR` errors
+
+The status word is `0x7000` plus the TLV error number.
+
+| SW     | TLV error                     | Description                                                                  |
+|--------|-------------------------------|------------------------------------------------------------------------------|
+| 0x7000 | `UnexpectedEof`               | The descriptor is truncated, longer than 1024 bytes, or a field does not fit |
+| 0x7001 | `InvalidDerLength`            | Invalid DER length                                                           |
+| 0x7002 | `LengthOverflow`              | Length overflow                                                              |
+| 0x7003 | `UnknownTag`                  | Unknown tag                                                                  |
+| 0x7004 | `HandlerFailed`               | A field handler failed                                                       |
+| 0x7005 | `DuplicateUniqueTag`          | A tag that must be unique appears more than once                             |
+| 0x7006 | `SignatureVerificationFailed` | The descriptor signature did not verify                                      |
+| 0x7007 | `MissingMandatoryTag`         | A mandatory tag is missing                                                   |
+
+### Block protocol errors
+
+| SW     | Description                                                                                            |
+|--------|--------------------------------------------------------------------------------------------------------|
+| 0x6802 | The block protocol input is malformed (`InvalidParameter`)                                             |
+| 0x6809 | The block protocol is in an invalid state, or a handler ended without sending a reply (`InvalidState`) |
+
+### Device and SDK errors
+
+| SW     | Name             | Description                                                                              |
+|--------|------------------|------------------------------------------------------------------------------------------|
+| 0x6E03 | `BadLen`         | The APDU length is invalid                                                               |
+| 0x6901 | `CmdNotAccepted` | An APDU arrived while another command was still in progress, for example during a review |
+| 0x5515 | `DeviceLocked`   | The device is locked                                                                     |
+| 0xE000 | `Panic`          | The app panicked                                                                         |
