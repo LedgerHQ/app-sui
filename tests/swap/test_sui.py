@@ -22,6 +22,10 @@ USDC_DYNAMIC_TOKEN_STRUCT = "COIN"
 # amount. Owned by app-exchange, not by this app's Errors enum.
 EXCHANGE_PRINTABLE_AMOUNT_MISSING = 0x6A8B
 
+# Status this app returns (SyscallError::NotSupported) when a swap transaction is not
+# recognized by the parser, as opposed to recognized but mismatching the quote.
+SUI_SWAP_TX_NOT_RECOGNIZED = 0x0008
+
 # ExchangeTestRunner implementation for Sui
 class GenericSuiTests(ExchangeTestRunner):
     currency_configuration = SUI_CURRENCY_CONFIGURATION
@@ -360,7 +364,8 @@ class TestsSui:
     # swap pass. The split overdraws the coin's real balance, and only a balance the
     # host smuggled in after the hashed range makes it look covered. Before the fix the
     # device signed this with no prompt (the call returned instead of raising); now the
-    # object is unusable, the transaction is not recognized, and the swap is refused.
+    # object is unusable, the transaction is not recognized, and the swap is refused
+    # with SUI_SWAP_TX_NOT_RECOGNIZED rather than a quote mismatch.
     def test_sui_swap_rejects_object_parsed_past_hashed_length(self, backend, exchange_navigation_helper):
         runner = SuiSwapObjectOverrunTests(backend, exchange_navigation_helper)
         runner.perform_valid_swap_from_custom(runner.valid_destination_1,
@@ -372,7 +377,7 @@ class TestsSui:
                                                   runner.valid_send_amount_1,
                                                   runner.valid_fees_1,
                                                   "")
-        assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH
+        assert e.value.status == SUI_SWAP_TX_NOT_RECOGNIZED
 
     # Negative: an out-of-range decimals byte in the Exchange-supplied coin config
     # must be refused, not divided by. Before the fix the app panicked inside the
