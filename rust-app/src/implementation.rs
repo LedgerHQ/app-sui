@@ -383,6 +383,14 @@ pub async fn validate_tlv(io: HostIO, ctx: &RunCtx) {
 
     let mut b_arr: ArrayVec<u8, 1024> = ArrayVec::new();
 
+    // A longer TLV does not fit, and the copy below would silently drop its tail,
+    // handing the parser a different byte string than the host declared.
+    if length as usize > b_arr.capacity() {
+        trace!("tlv too long: {}\n", length);
+        reject::<()>(TLV_ERROR_OFFSET + TlvError::UnexpectedEof as u16).await;
+        return;
+    }
+
     const CHUNK_SIZE: usize = 10;
     let (chunks, rem) = (length as usize / CHUNK_SIZE, length as usize % CHUNK_SIZE);
     for _ in 0..chunks {

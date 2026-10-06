@@ -167,7 +167,8 @@ class Client:
                               magnitude: int,
                               address: str,
                               module: str,
-                              struct: str):
+                              struct: str,
+                              trailing_padding: int = 0):
         tuid = format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_PACKAGE_ADDRESS, address)
         tuid += format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_MODULE_NAME, module)
         tuid += format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_STRUCT_NAME, struct)
@@ -182,6 +183,8 @@ class Client:
         payload += format_tlv(DynamicTokenTag.MAGNITUDE, magnitude)
         payload += format_tlv(DynamicTokenTag.TUID, tuid)
         payload += format_tlv(DynamicTokenTag.SIGNATURE, sign_data(Key.DYNAMIC_TOKEN, payload))
+        # Test-only: bytes after the signature TLV, to build an over-long descriptor.
+        payload += bytes(trailing_padding)
 
         p_len = (len(payload)).to_bytes(2, byteorder='little')
         payload = p_len + payload
