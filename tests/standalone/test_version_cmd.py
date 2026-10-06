@@ -4,13 +4,8 @@ from application_client.client import Client
 
 # In this test we check the behavior of the device when asked to provide the app version
 def test_version(backend):
-    cargo_path = Path("./rust-app/Cargo.toml")
-
-    if not cargo_path.exists():
-        cargo_path = Path("./Cargo.toml")
-
-    if not cargo_path.exists():
-        raise FileNotFoundError("Cargo.toml not found")
+    # Resolved from this file, so the test does not depend on the working directory.
+    cargo_path = Path(__file__).resolve().parents[2] / "rust-app" / "Cargo.toml"
 
     with open(cargo_path, "rb") as f:
         data = tomli.load(f)

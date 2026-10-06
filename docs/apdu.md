@@ -5,14 +5,15 @@ The messaging format of the app uses the [Block Protocol](/docs/block-protocol.m
 All commands use `CLA = 0x00`.
 The `P1` and `P2` fields are reserved for future use and must be set to `0` in all messages.
 
-| CLA | INS | COMMAND NAME    | DESCRIPTION                                             |
-|-----|-----|-----------------|---------------------------------------------------------|
-| 00  | 00  | GET_VERSION     | Gets the app version in machine readable format (bytes) |
-| 00  | 01  | VERIFY_ADDRESS  | Shows the Address on device for a BIP32 path            |
-| 00  | 02  | GET_PUBKEY      | Gets the Public Key and Address for a BIP32 path        |
-| 00  | 03  | SIGN_TX         | Sign Transaction                                        |
-| 00  | FE  | GET_VERSION_STR | Gets the app version in string                          |
-| 00  | FF  | QUIT_APP        | Quits the app                                           |
+| CLA | INS | COMMAND NAME                     | DESCRIPTION                                                       |
+|-----|-----|----------------------------------|-------------------------------------------------------------------|
+| 00  | 00  | GET_VERSION                      | Gets the app version in machine readable format (bytes)           |
+| 00  | 01  | VERIFY_ADDRESS                   | Shows the Address on device for a BIP32 path                      |
+| 00  | 02  | GET_PUBKEY                       | Gets the Public Key and Address for a BIP32 path                  |
+| 00  | 03  | SIGN_TX                          | Sign Transaction                                                  |
+| 00  | 22  | PROVIDE_TOKEN_DYNAMIC_DESCRIPTOR | Provides a signed token descriptor (ticker, magnitude, coin type) |
+| 00  | FE  | GET_VERSION_STR                  | Gets the app version in string                                    |
+| 00  | FF  | QUIT_APP                         | Quits the app                                                     |
 
 ### GET_VERSION
 
@@ -49,13 +50,13 @@ Shows the address for the given derivation path, and returns the public key and 
 
 **Input data**
 
-| Length | Name              | Description                         |
-|--------|-------------------|-------------------------------------|
-| `1`    | `n`               | Number of derivation steps          |
-| `4`    | `bip32_path[0]`   | First derivation step (big endian)  |
-| `4`    | `bip32_path[1]`   | Second derivation step (big endian) |
-|        | ...               |                                     |
-| `4`    | `bip32_path[n-1]` | `n`-th derivation step (big endian) |
+| Length | Name              | Description                            |
+|--------|-------------------|----------------------------------------|
+| `1`    | `n`               | Number of derivation steps             |
+| `4`    | `bip32_path[0]`   | First derivation step (little endian)  |
+| `4`    | `bip32_path[1]`   | Second derivation step (little endian) |
+|        | ...               |                                        |
+| `4`    | `bip32_path[n-1]` | `n`-th derivation step (little endian) |
 
 **Output data**
 
@@ -82,13 +83,13 @@ Returns the public key and the address for the given derivation path.
 
 ##### Parameter 1
 
-| Length | Name              | Description                         |
-|--------|-------------------|-------------------------------------|
-| `1`    | `n`               | Number of derivation steps          |
-| `4`    | `bip32_path[0]`   | First derivation step (big endian)  |
-| `4`    | `bip32_path[1]`   | Second derivation step (big endian) |
-|        | ...               |                                     |
-| `4`    | `bip32_path[n-1]` | `n`-th derivation step (big endian) |
+| Length | Name              | Description                            |
+|--------|-------------------|----------------------------------------|
+| `1`    | `n`               | Number of derivation steps             |
+| `4`    | `bip32_path[0]`   | First derivation step (little endian)  |
+| `4`    | `bip32_path[1]`   | Second derivation step (little endian) |
+|        | ...               |                                        |
+| `4`    | `bip32_path[n-1]` | `n`-th derivation step (little endian) |
 
 **Output data**
 
@@ -115,20 +116,20 @@ Sign a Transaction, using the key for the given derivation path
 
 ##### Parameter 1
 
-| Length    | Name      | Description         |
-|-----------|-----------|---------------------|
-| `4`       | `tx_size` | Size of transaction |
-| `tx_size` | `tx`      | Transaction         |
+| Length    | Name      | Description                         |
+|-----------|-----------|-------------------------------------|
+| `4`       | `tx_size` | Size of transaction (little endian) |
+| `tx_size` | `tx`      | Transaction                         |
 
 ##### Parameter 2
 
-| Length    | Name              | Description                         |
-|-----------|-------------------|-------------------------------------|
-| `1`       | `n`               | Number of derivation steps          |
-| `4`       | `bip32_path[0]`   | First derivation step (big endian)  |
-| `4`       | `bip32_path[1]`   | Second derivation step (big endian) |
-|           | ...               |                                     |
-| `4`       | `bip32_path[n-1]` | `n`-th derivation step (big endian) |
+| Length | Name              | Description                            |
+|--------|-------------------|----------------------------------------|
+| `1`    | `n`               | Number of derivation steps             |
+| `4`    | `bip32_path[0]`   | First derivation step (little endian)  |
+| `4`    | `bip32_path[1]`   | Second derivation step (little endian) |
+|        | ...               |                                        |
+| `4`    | `bip32_path[n-1]` | `n`-th derivation step (little endian) |
 
 ##### Parameter 3 (required only for clear signing of certain transactions)
 
@@ -139,14 +140,14 @@ In the abscence of this info the user may get a blind signing prompt.
 
 **SIP-58**: The app supports transactions with empty `gas_data.payment` (gas paid from address balance). In that case, parameter 3 may be omitted or contain only objects from "inputs". Stateless transactions (empty gas payment) **require** `TransactionExpiration::ValidDuring` for replay protection; transactions with empty payment and `None` or `Epoch` expiration will be rejected.
 
-| Length             | Name               | Description                     |
-|--------------------|--------------------|---------------------------------|
-| `4`                | `n`                | Number of objects (big endian)  |
-| `4`                | `object[0].length` | Length of object 0 (big endian) |
-| `object[0].length` | `object[0]`        | Object data                     |
-|                    | ...                |                                 |
-| `4`                | `object[n].length` | Length of object n (big endian) |
-| `object[n].length` | `object[n]`        | Object data                     |
+| Length             | Name               | Description                        |
+|--------------------|--------------------|------------------------------------|
+| `4`                | `n`                | Number of objects (little endian)  |
+| `4`                | `object[0].length` | Length of object 0 (little endian) |
+| `object[0].length` | `object[0]`        | Object data                        |
+|                    | ...                |                                    |
+| `4`                | `object[n].length` | Length of object n (little endian) |
+| `object[n].length` | `object[n]`        | Object data                        |
 
 **Output data**
 
@@ -174,7 +175,12 @@ This APDU enables the app receive tokens information dynamically; new tokens sup
 
 **Input data**
 
-The input is raw TLV data with the following structure:
+The input is a length-prefixed TLV blob:
+
+| Length     | Name       | Description                                        |
+|------------|------------|----------------------------------------------------|
+| `2`        | `tlv_size` | Size of the TLV data, at most 1024 (little endian) |
+| `tlv_size` | `tlv`      | TLV data with the following structure              |
 
 | Field          | Tag  | Length     | Type               | Description                                      |
 |----------------|------|------------|--------------------|--------------------------------------------------|
