@@ -75,6 +75,7 @@ class InsType(IntEnum):
     GET_PUBLIC_KEY                      = 0x02
     SIGN_TX                             = 0x03
     PROVIDE_TRUSTED_DYNAMIC_DESCRIPTOR  = 0x22
+    GET_VERSION_STR                     = 0xFE
 
 class Errors(IntEnum):
     SW_DENY                    = 0x6985
@@ -144,6 +145,14 @@ class Client:
         print(response)
         major, minor, patch = unpack("BBB", response[:3])
         return ((major, minor, patch), response[3:].decode("ascii"))
+
+    def get_version_str(self) -> str:
+        response = self.send_fn(cla=CLA,
+                            ins=InsType.GET_VERSION_STR,
+                            p1=P1,
+                            p2=P2,
+                            payload=[b""])
+        return response.decode("ascii")
 
     def get_public_key(self, path: str) -> Tuple[int, bytes, int, bytes]:
         return self.get_public_key_impl(InsType.GET_PUBLIC_KEY, path)

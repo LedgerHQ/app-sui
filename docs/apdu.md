@@ -36,6 +36,24 @@ Returns the version of the app currently running on the Ledger in machine readab
 | `1`          | Patch version   |
 | `<variable>` | Name of the app |
 
+### GET_VERSION_STR
+
+Returns the version of the app currently running on the Ledger as an ASCII string, for example `1.5.14`.
+
+#### Encoding
+
+**Command**
+
+| *CLA* | *INS* |
+|-------|-------|
+| 00    | FE    |
+
+**Output data**
+
+| Length       | Description                            |
+|--------------|----------------------------------------|
+| `<variable>` | Version string, `major.minor.patch`    |
+
 ### VERIFY_ADDRESS
 
 Shows the address for the given derivation path, and returns the public key and the address.

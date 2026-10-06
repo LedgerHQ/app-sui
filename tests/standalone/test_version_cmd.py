@@ -16,3 +16,14 @@ def test_version(backend):
     # Send the GET_VERSION instruction
     response = client.get_app_and_version()
     assert response == (version)
+
+
+# GET_VERSION_STR must answer with the same version as GET_VERSION, as text.
+def test_version_str(backend):
+    cargo_path = Path(__file__).resolve().parents[2] / "rust-app" / "Cargo.toml"
+
+    with open(cargo_path, "rb") as f:
+        data = tomli.load(f)
+
+    client = Client(backend, use_block_protocol=True)
+    assert client.get_version_str() == data['package']['version']
