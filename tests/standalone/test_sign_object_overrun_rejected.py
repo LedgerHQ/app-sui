@@ -28,6 +28,11 @@ from ragger.error import ExceptionRAPDU
 from ragger.navigator import NavInsID
 from utils import run_apdu_and_nav_tasks_concurrently
 
+# Status the app returns (SyscallError::NotSupported) for a transaction it does not
+# recognize while blind signing is off: the refusal must come from that path, not from
+# any other failure.
+SUI_TX_NOT_RECOGNIZED = 0x0008
+
 
 def _object_digest(obj: bytes) -> bytes:
     return hashlib.blake2b(b"Object::" + obj, digest_size=32).digest()
@@ -92,4 +97,5 @@ def test_sign_tx_object_parsed_past_hashed_length_rejected(backend, scenario_nav
     with pytest.raises(ExceptionRAPDU) as e:
         run_apdu_and_nav_tasks_concurrently(apdu_task, nav_task, check_result)
 
+    assert e.value.status == SUI_TX_NOT_RECOGNIZED
     assert len(e.value.data) == 0
