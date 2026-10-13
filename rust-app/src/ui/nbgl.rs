@@ -1,8 +1,10 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::parser::hashi::{deployment, HashiOp, HashiTx, HASHI_BTC_DECIMALS, HASHI_BTC_TICKER};
 use crate::parser::tx::TxPrincipals;
 use crate::swap::params::TxParams;
+use crate::ui::bech32::segwit_address;
 use crate::ui::common::*;
 use crate::utils::*;
 
@@ -329,6 +331,127 @@ impl UserInterface {
 
         let first_msg = format!("Review {kind} to unstake SUI");
         let last_msg = format!("Sign {kind} to unstake SUI");
+        let success = NbglReview::new()
+            .glyph(&APP_ICON)
+            .titles(&first_msg, "", &last_msg)
+            .show(&fields);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_hashi_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        tx: &HashiTx,
+        gas: HashiGas,
+        principals: &TxPrincipals,
+        replay: Option<ReplayDomain>,
+    ) -> Option<()> {
+        self.do_refresh.replace(true);
+        let dep = deployment(tx.deployment)?;
+        let who = principal_values(principals, address);
+        let kind = who.kind();
+        let btc = |amount: u64, ticker: &str| {
+            let (quotient, remainder) = get_amount_in_decimals(amount, HASHI_BTC_DECIMALS);
+            format!("{ticker} {}.{}", quotient, remainder.as_str())
+        };
+        // Hashi never pays gas out of a coin it moves.
+        let gas_val = format_gas_amount(
+            gas.gas_budget,
+            GasSource::new(gas.gas_from_address_balance, false),
+        );
+        let replay_vals = replay_values(&replay);
+
+        // Owned values the fields borrow, built before the fields themselves.
+        let mut values: Vec<(alloc::string::String, alloc::string::String)> = Vec::new();
+        let (first_msg, last_msg) = match &tx.op {
+            HashiOp::Withdraw {
+                amount,
+                change,
+                btc_address,
+            } => {
+                // The parser only admits the two shapes the encoder accepts; refuse
+                // to sign rather than show anything else.
+                let to = segwit_address(dep.btc_hrp, btc_address.version, btc_address.program())?;
+                values.push(("Amount".into(), btc(*amount, HASHI_BTC_TICKER)));
+                if *change != 0 {
+                    values.push(("Change to sender".into(), btc(*change, HASHI_BTC_TICKER)));
+                }
+                values.push(("To".into(), to.as_str().into()));
+                values.push(("Bitcoin network".into(), dep.btc_network.into()));
+                values.push(("Bitcoin fee".into(), "From the amount".into()));
+                (
+                    format!("Review {kind} to withdraw hBTC to Bitcoin"),
+                    format!("Sign {kind} to withdraw hBTC"),
+                )
+            }
+            HashiOp::Cancel { request_id, .. } => {
+                values.push(("Request ID".into(), format!("0x{}", HexSlice(request_id))));
+                // The amount lives in the pending request, not in the transaction.
+                values.push(("Refund".into(), "Full pending amount, to sender".into()));
+                (
+                    format!("Review {kind} to cancel hBTC withdrawal"),
+                    format!("Sign {kind} to cancel hBTC withdrawal"),
+                )
+            }
+            HashiOp::Deposit {
+                recipient,
+                utxos,
+                total,
+            } => {
+                values.push((
+                    "hBTC recipient".into(),
+                    format!("0x{}", HexSlice(recipient)),
+                ));
+                // Registering a deposit for someone else cannot redirect funds (the
+                // bridge recomputes the deposit address), but say so plainly.
+                if recipient.as_slice() != address.get_binary_address() {
+                    values.push(("Warning".into(), "Not your account".into()));
+                }
+                let numbered = utxos.as_slice().len() > 1;
+                for (i, utxo) in utxos.as_slice().iter().enumerate() {
+                    let n = if numbered {
+                        format!(" {}", i + 1)
+                    } else {
+                        alloc::string::String::new()
+                    };
+                    // Bitcoin shows txids in reverse of their internal byte order.
+                    let mut txid = utxo.txid;
+                    txid.reverse();
+                    values.push((
+                        format!("Bitcoin output{n}"),
+                        format!("{}:{}", HexSlice(&txid), utxo.vout),
+                    ));
+                    values.push((format!("Amount{n}"), btc(utxo.amount, "BTC")));
+                }
+                if numbered {
+                    values.push(("Total".into(), btc(*total, "BTC")));
+                }
+                (
+                    format!("Review {kind} to register a BTC deposit"),
+                    format!("Sign {kind} to register a BTC deposit"),
+                )
+            }
+        };
+        values.push(("Bridge".into(), dep.label.into()));
+
+        let mut fields: Vec<Field> = who.fields("From");
+        fields.extend(values.iter().map(|(name, value)| Field {
+            name: name.as_str(),
+            value: value.as_str(),
+        }));
+        fields.push(Field {
+            name: "Max Gas",
+            value: &gas_val,
+        });
+        fields.extend(replay_fields(&replay_vals));
+
         let success = NbglReview::new()
             .glyph(&APP_ICON)
             .titles(&first_msg, "", &last_msg)

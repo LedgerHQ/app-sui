@@ -230,3 +230,21 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
 - Whether Security accepts cancel without an amount and the deposit flag-not-reject behaviour.
 - The withdrawal and deposit minimum (30 000 sat by default, governable) is not enforced on device. The chain rejects anything below it and no funds are lost, so no screen warning is planned.
 - Re-pin the SDK version at implementation time.
+
+## Implementation notes (deviations from the plan)
+- **Pinned deployment:** testnet as targeted by `@mysten/hashi` 0.6.25 (`NETWORK_CONFIG.testnet`): Hashi object `0x22c0ce66…28f8`, type package `0xfcea10ca…4360`, call package v2 `0x8f7efd74…2c7e`. ts-sdks `main` has since moved to a new object; re-pin when the SDK release that ships it is adopted.
+- **Real PTB shapes** (confirmed from the SDK source and the generated fixtures):
+  - In the coin path, the change `coin::send_funds` always comes *before* `request_withdrawal`.
+  - `coin::destroy_zero` is never emitted for a Hashi withdrawal (its balance intent always returns change via `send_funds`), so it is not supported. That is the fail-safe direction.
+- **No-widening check:** coin types are not tracked incrementally. Instead, `finish_hashi` scans the remaining inputs and results once. Any Hashi route taken by a transaction that does not end as a complete Hashi flow rejects (`hashi.is_some()`).
+- **Deposit:** at most 4 UTXOs per transaction (`MAX_HASHI_DEPOSIT_UTXOS`), all crediting one recipient.
+- **Review labels** that wrapped mid-word on Flex were shortened: "Bitcoin fee: From the amount", "Warning: Not your account".
+- **nanox state budget:** the future state is 5560 bytes against a 5552 baseline.
+  - To get there, the Hashi output is boxed and the parse result is scoped in `sign_apdu`.
+  - Hashi calls get their own guarded match arm, and the cancel/deployment data travels in the Hashi output rather than in `PtbFacts`.
+  - Details are in the comments at those sites.
+- **Swap deps:** the Exchange/Ethereum test ELFs must be rebuilt with the current image: the Sui app is now API level 27 and the old ELFs were 26.
+- **Not done here:**
+  - the version bump to 1.6.0 (it changes the main-menu goldens on every device);
+  - the changelog;
+  - the hBTC token and swap tests (NAPPS-1503).

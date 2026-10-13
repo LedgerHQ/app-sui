@@ -1,6 +1,8 @@
 import base64
+import json
 import pytest
 from hashlib import blake2b
+from pathlib import Path
 
 from ledger_app_clients.exchange.test_runner import ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP, ExchangeTestRunner
 from ragger.error import ExceptionRAPDU
@@ -314,6 +316,24 @@ class SuiSwapWholeGasCoinTests(ExchangeTestRunner):
         verify_signature(public_key_bytes, blake2b(tx, digest_size=32).digest(), signature)
 
 
+# A Hashi withdrawal, as the pinned @mysten/hashi SDK builds it (see
+# tests/standalone/hashi_fixtures.json), signed by the swap account.
+_HASHI_WITHDRAW = json.loads(
+    (Path(__file__).parent.parent / "standalone" / "hashi_fixtures.json").read_text()
+)["withdraw_ab_p2wpkh"]
+
+# What sign_apdu answers for a transaction it refuses outright in swap mode.
+SW_NOT_SUPPORTED = 0x0008
+
+
+class SuiSwapHashiTests(SuiSwapWholeGasCoinTests):
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        client = Client(self.backend, use_block_protocol=True)
+        tx = base64.b64decode(_HASHI_WITHDRAW["tx"])
+        obj_list = [base64.b64decode(o) for o in _HASHI_WITHDRAW["objects"]]
+        client.sign_tx("m/44'/784'/12345'", tx, obj_list)
+
+
 class TestsSui:
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
     def test_sui(self, backend, exchange_navigation_helper, test_to_run):
@@ -378,6 +398,22 @@ class TestsSui:
                                                   runner.valid_fees_1,
                                                   "")
         assert e.value.status == SUI_SWAP_TX_NOT_RECOGNIZED
+
+    # Negative: a Hashi transaction is clear-signable outside swap, but it is never a
+    # swap. Signed under a valid SUI swap quote, it must be refused outright -- the
+    # swap check is not even reached -- rather than signed with no review.
+    def test_sui_swap_rejects_hashi(self, backend, exchange_navigation_helper):
+        runner = SuiSwapHashiTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == SW_NOT_SUPPORTED
 
     # Negative: an out-of-range decimals byte in the Exchange-supplied coin config
     # must be refused, not divided by. Before the fix the app panicked inside the
