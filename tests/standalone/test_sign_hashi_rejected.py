@@ -17,6 +17,7 @@ from hashi_utils import (
     fixture,
     patch_last,
     patch_once,
+    retarget_calls,
     sign_expect_not_recognized,
 )
 
@@ -30,15 +31,25 @@ def _flip_last(b):
 
 
 def _call_package_not_pinned():
-    # Every Move call of the withdrawal targets the pinned v2 package; point them all at
-    # a package that is not pinned.
-    return _withdraw().replace(CALL_PACKAGE, _flip_last(CALL_PACKAGE))
+    # Point the withdrawal's Hashi calls at a package that is not pinned; the hBTC type
+    # tags keep the pinned type package.
+    return retarget_calls(_withdraw(), _flip_last(CALL_PACKAGE))
 
 
-def _call_package_original():
-    # The original package id is the one in type tags, but calls must go to a pinned
-    # upgrade: the original's code is not what was reviewed.
-    return _withdraw().replace(CALL_PACKAGE, TYPE_PACKAGE)
+# The testnet deployment @mysten/hashi 0.6.25 targeted, retired by the 0.6.26 redeploy.
+RETIRED_CALL_PACKAGE = bytes.fromhex("8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e")
+RETIRED_TYPE_PACKAGE = bytes.fromhex("fcea10cadbb553c4874201584abf68771592678952efd957b2e82c010c7f4360")
+RETIRED_HASHI_OBJECT = bytes.fromhex("22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8")
+
+
+def _retired_deployment():
+    # A withdrawal as it was built against the retired deployment: its calls, hBTC type
+    # and Hashi object are no longer pinned.
+    tx = retarget_calls(_withdraw(), RETIRED_CALL_PACKAGE)
+    btc = b"\x03btc\x03BTC"
+    assert tx.count(TYPE_PACKAGE + btc) > 0
+    tx = tx.replace(TYPE_PACKAGE + btc, RETIRED_TYPE_PACKAGE + btc)
+    return patch_once(tx, HASHI_OBJECT, RETIRED_HASHI_OBJECT)
 
 
 def _wrong_hashi_object():
@@ -90,7 +101,7 @@ def _deposit_mixed_recipients():
 
 PATCHED = [
     pytest.param("withdraw_ab_p2wpkh", _call_package_not_pinned, id="call_package_not_pinned"),
-    pytest.param("withdraw_ab_p2wpkh", _call_package_original, id="call_package_original"),
+    pytest.param("withdraw_ab_p2wpkh", _retired_deployment, id="retired_deployment"),
     pytest.param("withdraw_ab_p2wpkh", _wrong_hashi_object, id="wrong_hashi_object"),
     pytest.param("withdraw_ab_p2wpkh", _wrong_clock, id="wrong_clock"),
     pytest.param("withdraw_ab_p2wpkh", _address_bad_prefix, id="address_bad_prefix"),

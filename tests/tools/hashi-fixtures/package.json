@@ -4,8 +4,8 @@
   "type": "module",
   "description": "Generates Hashi PTB fixtures for app-sui tests",
   "dependencies": {
-    "@mysten/hashi": "0.6.25",
-    "@mysten/sui": "2.35.0",
+    "@mysten/hashi": "0.6.26",
+    "@mysten/sui": "2.36.0",
     "@noble/hashes": "2.4.0"
   }
 }

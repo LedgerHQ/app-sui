@@ -25,8 +25,8 @@ const SUI_VERSION = pkgVersion('@mysten/sui');
 
 const SENDER = '0xd5a6dc2129672c36d318ecc28c96a25fdf640933d6ed8840b1f78171f50f9cc9'; // OWNED_ADDRESS
 const OTHER = '0x5a64eec558ee719741578942714a0b35058ced15d79f4af64da014715ada4497';  // FOREIGN_ADDRESS
-const PKG = '0xfcea10cadbb553c4874201584abf68771592678952efd957b2e82c010c7f4360';
-const HASHI_OBJ = '0x22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8';
+const PKG = '0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485';
+const HASHI_OBJ = '0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb';
 const BTC_TYPE = `${PKG}::btc::BTC`;
 
 // --- object blobs -------------------------------------------------------------------

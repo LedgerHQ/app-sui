@@ -41,16 +41,17 @@ const HASHI_BTC_STRUCT: &str = "BTC";
 /// unknown path.
 pub const MAX_HASHI_DEPOSIT_UTXOS: usize = 4;
 
-/// Testnet, as targeted by `@mysten/hashi` 0.6.25 (`NETWORK_CONFIG.testnet`), with the
-/// call package read from the object's `versioning.upgrade_cap` (enabled version 2).
+/// Testnet, as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`), with the
+/// call package read from the object's `versioning.upgrade_cap` (enabled version 1, so
+/// calls and types share the original package id).
 static HASHI_DEPLOYMENTS: [HashiDeployment; 1] = [HashiDeployment {
     label: "Hashi Testnet",
     sui_chain: SUI_TESTNET_CHAIN,
-    hashi_object: hex!("22c0ce66ce09df2dc88a31bd320d4177b766518b9b88010368cfbdcd724528f8"),
+    hashi_object: hex!("342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb"),
     call_packages: &[hex!(
-        "8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e"
+        "5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"
     )],
-    type_package: hex!("fcea10cadbb553c4874201584abf68771592678952efd957b2e82c010c7f4360"),
+    type_package: hex!("5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"),
     btc_hrp: "tb",
     btc_network: "Bitcoin Signet",
 }];

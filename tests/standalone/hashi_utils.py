@@ -20,7 +20,8 @@ OTHER = bytes.fromhex("5a64eec558ee719741578942714a0b35058ced15d79f4af64da014715
 
 HASHI_OBJECT = bytes.fromhex(_FIXTURES["_meta"]["hashiObject"][2:])
 TYPE_PACKAGE = bytes.fromhex(_FIXTURES["_meta"]["typePackage"][2:])
-CALL_PACKAGE = bytes.fromhex("8f7efd743897fde48cc35b6203cd72c7ad4248f0eb02a9ad378e4a2d39cc2c7e")
+# The deployment is at its first version, so Move calls target the type package.
+CALL_PACKAGE = TYPE_PACKAGE
 CLOCK = bytes(31) + b"\x06"
 
 # What a rejected, unrecognised transaction answers: `SyscallError::NotSupported`.
@@ -39,6 +40,17 @@ def patch_once(tx, old, new):
     assert len(old) == len(new)
     assert tx.count(old) == 1, f"expected exactly one occurrence, found {tx.count(old)}"
     return tx.replace(old, new)
+
+
+def retarget_calls(tx, package):
+    """Point every Hashi Move call at `package`, leaving the `btc::BTC` type tags alone."""
+    n = 0
+    for module in (b"withdraw", b"utxo", b"deposit"):
+        call = CALL_PACKAGE + bytes([len(module)]) + module
+        n += tx.count(call)
+        tx = tx.replace(call, package + call[32:])
+    assert n > 0, "no Hashi call to retarget"
+    return tx
 
 
 def patch_last(tx, old, new):
