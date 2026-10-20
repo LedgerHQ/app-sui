@@ -219,6 +219,12 @@ impl HashiUtxos {
     }
 }
 
+impl Default for HashiUtxos {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct HashiTx {
     pub deployment: u8,
