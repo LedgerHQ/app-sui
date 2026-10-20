@@ -47,7 +47,7 @@ A Hashi deposit is a plain Bitcoin transaction that pays a **per-user P2TR addre
 - **Testnet drift.** As of 2026-10-08, ts-sdks `NETWORK_CONFIG.testnet` points to a **new** Hashi object `0x342e9080…d1bb` (type package `0x5e0b99c3…8485`), not `0x22c0ce66…`.
   - Live keys on the new object: `mpc_public_key` = `cb7bacef…d7f800` (arkworks), Guardian = `7a708f47…7cd3`.
   - Re-read both from chain at implementation time and record object id, version and epoch for traceability.
-  - The same drift affects the app-sui plan's pinned testnet ids (follow-up below).
+  - The same drift affected the app-sui pinned testnet ids; app-sui now pins the new deployment (`@mysten/hashi` 0.6.26).
 
 ## Design
 
@@ -138,7 +138,6 @@ Finish: "Sign transaction to deposit BTC to Hashi".
 5. CI green, and the guidelines enforcer passes against the updated `ledger-app-database`.
 
 ## Follow-ups / open items
-- **app-sui plan:** update `docs/hashi-clear-signing-plan.md`. The testnet Hashi object and package have been redeployed (`0x342e9080…`, type package `0x5e0b99c3…`); re-read the call and type package ids from `NETWORK_CONFIG` when implementing.
 - **Repos.** `app-hashi` / `app-hashi-dev` need to be created by Embedded Apps.
 - **Proprietary key layout** ([integration-plan UNCERTAIN #1](https://github.com/LedgerHQ/blockchain-integration-ai/blob/b7e0584a5f2360890bb369a2efdd7146bf30ea43/integrations/hashi/integration-plan.md?plain=1#L282)), and the PSBTv2 requirement: a PSBTv0 loses the field in `PsbtV2.fromV0` ([integration-plan UNCERTAIN #3](https://github.com/LedgerHQ/blockchain-integration-ai/blob/b7e0584a5f2360890bb369a2efdd7146bf30ea43/integrations/hashi/integration-plan.md?plain=1#L284)).
 - **HMAC-SHA3 sign-off** from Security (in-app implementation). Record it in `APP_SPECIFICATION.md`.

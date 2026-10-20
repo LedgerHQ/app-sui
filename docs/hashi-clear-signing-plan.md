@@ -11,7 +11,7 @@ Hashi (MystenLabs, Sui-native BTC bridge) has users sign three Sui calls: `withd
   - Original package `0xfcea10ca…4360` (hBTC type `<orig>::btc::BTC`, 8 decimals)
   - Called package v2 `0x8f7efd74…2c7e`; the SDK retargets calls to the latest upgrade, while types keep the original id
   - HRP `tb` (mainnet `bc`); Clock `0x6`
-  - ⚠️ **Testnet was redeployed.** As of 2026-10-08, ts-sdks `NETWORK_CONFIG.testnet` points to a new Hashi object, `0x342e9080…d1bb`, with type package `0x5e0b99c3…8485`. Re-read the Hashi object, the type package and the current call package from the SDK and the chain at implementation time; don't use the values above.
+  - ⚠️ **Testnet was redeployed.** As of 2026-10-08, ts-sdks `NETWORK_CONFIG.testnet` points to a new Hashi object, `0x342e9080…d1bb`, with type package `0x5e0b99c3…8485`. The app now pins that deployment (see the implementation notes); the values above are the retired one.
 - **No mainnet deployment yet.** Adding one later is a one-line table edit.
 - **SDK PTB shapes** (`@mysten/hashi` 0.6.25):
   - **Withdraw P1:** `0x2::balance::redeem_funds<BTC>(FundsWithdrawal input)` → `request_withdrawal(hashi, clock, Result, pure vector<u8>)`
@@ -226,13 +226,17 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
 
 ## Open items (from the spec; not blocking implementation)
 - Mainnet package ids and their BTC network: add a table row when published.
-- Whether users actually sign `deposit` (MystenLabs).
-- Whether Security accepts cancel without an amount and the deposit flag-not-reject behaviour.
+- **Deposit crediting another account — to discuss with the Ledger integration team and MystenLabs.** A `deposit` whose `derivation_path` is not the signer is currently clear-signed with a "Warning: Not your account" field (`test_sign_hashi_deposit_other_recipient`). Keep this as is until the discussion concludes.
+  - **Current basis:** CUSTOM-1 requires it to be flagged, not rejected (requirements §, acceptance criterion "A recipient other than the signer is flagged"). `deposit` is permissionless and a wrong recipient cannot redirect funds, only fail validation (KB `move-calls-deposit-withdraw.md`, deposit section).
+  - **Why question it:** no document describes a real need for it. The Hashi design page ([deposit](https://mystenlabs.github.io/hashi/design/deposit/)) and the integration plan only describe users registering their own deposit. Whether the dApp has the user sign `deposit` at all, or relays it, is still UNCERTAIN in CUSTOM-1 and the KB (`blockchain-integration-ai@9f36fcb`).
+  - **To ask MystenLabs:** does the dApp have the user sign `deposit`, and for which recipient?
+  - **Possible outcome:** if no flow needs another recipient, reject it instead (a fail-safe one-line parser change; the snapshot test moves to `test_sign_hashi_rejected.py`). This needs CUSTOM-1's acceptance criterion changed first, and Ledger Security's view.
+- Whether Security accepts cancel without an amount.
 - The withdrawal and deposit minimum (30 000 sat by default, governable) is not enforced on device. The chain rejects anything below it and no funds are lost, so no screen warning is planned.
 - Re-pin the SDK version at implementation time.
 
 ## Implementation notes (deviations from the plan)
-- **Pinned deployment:** testnet as targeted by `@mysten/hashi` 0.6.25 (`NETWORK_CONFIG.testnet`): Hashi object `0x22c0ce66…28f8`, type package `0xfcea10ca…4360`, call package v2 `0x8f7efd74…2c7e`. ts-sdks `main` has since moved to a new object; re-pin when the SDK release that ships it is adopted.
+- **Pinned deployment:** testnet as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`, re-read on chain 2026-10-19, epoch 1257): Hashi object `0x342e9080…d1bb`, package `0x5e0b99c3…8485` for both calls and types (`versioning` enables version 1 only, with no upgrade yet). Move signatures are unchanged from the retired deployment (`0x22c0ce66…28f8`, call package `0x8f7efd74…2c7e`, type package `0xfcea10ca…4360`), which is no longer clear-signed; `retired_deployment` in `test_sign_hashi_rejected.py` covers it.
 - **Real PTB shapes** (confirmed from the SDK source and the generated fixtures):
   - In the coin path, the change `coin::send_funds` always comes *before* `request_withdrawal`.
   - `coin::destroy_zero` is never emitted for a Hashi withdrawal (its balance intent always returns change via `send_funds`), so it is not supported. That is the fail-safe direction.
@@ -248,3 +252,26 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
   - the version bump to 1.6.0 (it changes the main-menu goldens on every device);
   - the changelog;
   - the hBTC token and swap tests (NAPPS-1503).
+
+## Withdrawal test scenarios (as implemented)
+The five withdrawal cases in `tests/standalone/test_sign_hashi.py` all end in the same Hashi call, `withdraw::request_withdrawal(hashi, clock, Balance<BTC>, btc_address)`. They vary along three axes: **where the user's hBTC sits** (which sets the PTB shape), **the Bitcoin address type**, and **the transaction expiration**.
+
+The SDK's `requestWithdrawal` only asks for "a `Balance<BTC>` of N sat" (`tx.balance(...)`). The commands that produce that balance come from the Sui SDK's balance intent, and depend on where the hBTC is held:
+- **Address balance.** Deposits mint hBTC with `balance::send_funds`, which credits the Sui address balance, not a coin object. This is the normal case.
+- **Coin objects.** A cancelled withdrawal refunds a `Coin<BTC>` **object** (`cancel_withdrawal` → `coin::from_balance` → `TransferObjects`), so after a cancel part or all of the hBTC is held as coins.
+
+| Test | Funded from | Commands (decoded from the fixtures) | Review shows |
+|---|---|---|---|
+| `withdraw_ab_p2wpkh` | address balance | `balance::redeem_funds(FundsWithdrawal 1 234 567)` → `request_withdrawal` | Amount, To `tb1q…` (bech32, segwit v0, 20-byte program) |
+| `withdraw_ab_p2tr` | address balance | same as above | To `tb1p…` (bech32m, taproot v1, 32-byte program) |
+| `withdraw_coins_change` | two coins (700 000 + 900 000) | `MergeCoins` → `SplitCoins(1 234 567)` → `coin::into_balance` → `coin::send_funds(rest, sender)` → `request_withdrawal` | Amount, **Change 365 433** to the sender |
+| `withdraw_coins_topup` | one 500 000 coin + 734 567 from the address balance | `coin::redeem_funds(FundsWithdrawal 734 567)` → `MergeCoins` → `SplitCoins` → `into_balance` → `send_funds` → `request_withdrawal` | Amount, no Change line |
+| `withdraw_valid_during_testnet` | address balance | same as `withdraw_ab_p2wpkh` | plus **Network** and **Nonce** |
+
+What each one covers:
+- **`withdraw_ab_p2wpkh` / `withdraw_ab_p2tr`:** the common short path, once per Bitcoin address type the bridge can pay out to. The app rebuilds the `tb1…` address from the raw witness program in the transaction (`ui/bech32.rs`); these two prove both encodings, which differ in checksum constant and in program length. The addresses are the BIP-173 / BIP-350 test vectors.
+- **`withdraw_coins_change`:** the coin path. The unused part of the merged coin goes back through `coin::send_funds(coin, sender)`. The parser requires that recipient to be the sender and shows the amount as "Change"; change sent to anyone else is rejected (`change_to_other` in `test_sign_hashi_rejected.py`).
+- **`withdraw_coins_topup`:** the coins alone are not enough, so the SDK draws the missing 734 567 from the address balance with `coin::redeem_funds`, merges it in, and splits exactly. The SDK still emits `send_funds` for the now-empty coin, so the parser sees a zero change and the review omits the line (Change is shown only when it is above 0). This is the most complex withdrawal shape, combining both funding sources.
+- **`withdraw_valid_during_testnet`:** the same transaction as `withdraw_ab_p2wpkh`, with a `ValidDuring` expiration naming the Sui chain. The review adds the existing Network / Nonce replay-protection fields. The parser also requires that chain to match the deployment's; `withdraw_valid_during_mainnet` is the rejected counterpart.
+
+All five also show Bridge (`Hashi Testnet`), the Bitcoin network, "Bitcoin fee: From the amount" and Max Gas.
