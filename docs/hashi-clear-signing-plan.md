@@ -167,7 +167,7 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
 
 ### 6. Housekeeping
 - Run `rustfmt --edition 2021` on the changed files.
-- Bump the version in `rust-app/Cargo.toml` (1.5.14 → 1.6.0). Check whether develop's version is already tagged.
+- Bump the version in `rust-app/Cargo.toml` (1.5.14 → 1.6.0). **Done** in e64caac, with the changelog entry.
 - Note in `.github/copilot-instructions.md`: the Hashi section, and that the UI is NBGL on all devices.
 - The PR description records the package-trust decision and its upgrade cost.
 
@@ -248,10 +248,10 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
   - Hashi calls get their own guarded match arm, and the cancel/deployment data travels in the Hashi output rather than in `PtbFacts`.
   - Details are in the comments at those sites.
 - **Swap deps:** the Exchange/Ethereum test ELFs must be rebuilt with the current image: the Sui app is now API level 27 and the old ELFs were 26.
-- **Not done here:**
-  - the version bump to 1.6.0 (it changes the main-menu goldens on every device);
-  - the changelog;
-  - the hBTC token and swap tests (NAPPS-1503).
+- **Done after the parser change:**
+  - the version bump to 1.6.0 and the changelog entry (e64caac); the main-menu goldens changed on Flex, Stax and Apex P only, since the Nano screen does not show the version;
+  - the hBTC swap tests (8c4177d), part of NAPPS-1503.
+- **Not done here:** the hBTC token transfer tests (NAPPS-1503).
 
 ## Withdrawal test scenarios (as implemented)
 The five withdrawal cases in `tests/standalone/test_sign_hashi.py` all end in the same Hashi call, `withdraw::request_withdrawal(hashi, clock, Balance<BTC>, btc_address)`. They vary along three axes: **where the user's hBTC sits** (which sets the PTB shape), **the Bitcoin address type**, and **the transaction expiration**.
