@@ -173,6 +173,21 @@ In the abscence of this info the user may get a blind signing prompt.
 |--------------|-----------------|
 | `<variable>` | Signature bytes |
 
+#### Hashi transactions
+
+Hashi (MystenLabs' Sui-native Bitcoin bridge) transactions are signed with `SIGN_TX`; there is no dedicated APDU. The app clear-signs these transactions, as the `@mysten/hashi` SDK builds them:
+
+| Transaction          | Move call                      | Review shows                                                                                       |
+|----------------------|--------------------------------|----------------------------------------------------------------------------------------------------|
+| Withdrawal request   | `withdraw::request_withdrawal` | hBTC amount, change to sender, destination Bitcoin address (P2WPKH or P2TR), Bitcoin network      |
+| Withdrawal cancel    | `withdraw::cancel_withdrawal`  | Request id; the full pending amount is refunded to the sender (the amount is not in the transaction) |
+| Deposit registration | `deposit::deposit`             | hBTC recipient, then each Bitcoin output (txid:vout, amount, up to 4), and the total if several  |
+
+- Only the deployment pinned in the app (currently Sui testnet) is recognized. A transaction calling another package or using another `Hashi` object is handled as an unknown transaction (blind signing prompt, or `0x0008` if blind signing is disabled).
+- **Parameter 3:** a withdrawal that spends hBTC coin objects needs those objects, in addition to the gas coin. A withdrawal from the address balance, a cancel and a deposit need only the gas coin, or nothing when gas is paid from the address balance (SIP-58).
+- A deposit registered for another account than the signer is allowed, but the review flags it. A cancel whose refund goes to another account is not recognized.
+- In swap mode, Hashi transactions are refused with `0x0008`.
+
 
 ### PROVIDE_TOKEN_DYNAMIC_DESCRIPTOR
 
