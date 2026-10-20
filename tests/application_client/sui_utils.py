@@ -147,6 +147,8 @@ SUI_PACKED_DERIVATION_PATH = pack_derivation_path("m/44'/784'/12345'")
 
 SUI_CONF = create_currency_config("SUI", "Sui")
 SUI_USDC_CONF = create_currency_config("USDC", "Sui", ("USDC", 6))
+# hBTC (Hashi's bridged BTC) is not in KNOWN_COINS: it resolves via a dynamic descriptor.
+SUI_HBTC_CONF = create_currency_config("hBTC", "Sui", ("hBTC", 8))
 # Ticker intentionally NOT present in the app's built-in KNOWN_COINS table, used to
 # exercise the swap "unknown ticker" path (resolved only via a dynamic descriptor).
 SUI_UNKNOWN_CONF = create_currency_config("TADA", "Sui", ("TADA", 6))

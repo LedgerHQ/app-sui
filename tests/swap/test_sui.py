@@ -9,6 +9,7 @@ from ragger.error import ExceptionRAPDU
 from application_client.client import Client, Errors
 from cal_helper import (
     SUI_CURRENCY_CONFIGURATION,
+    SUI_HBTC_CURRENCY_CONFIGURATION,
     SUI_OVERSIZED_DECIMALS_CURRENCY_CONFIGURATION,
     SUI_USDC_CURRENCY_CONFIGURATION,
     SUI_UNKNOWN_CURRENCY_CONFIGURATION,
@@ -334,6 +335,86 @@ class SuiSwapHashiTests(SuiSwapWholeGasCoinTests):
         client.sign_tx("m/44'/784'/12345'", tx, obj_list)
 
 
+# hBTC is Coin<package::btc::BTC> from the pinned Hashi deployment. sbWBTC (in
+# KNOWN_COINS) has the same module and struct names under another package.
+HBTC_PACKAGE = json.loads(
+    (Path(__file__).parent.parent / "standalone" / "hashi_fixtures.json").read_text()
+)["_meta"]["typePackage"]
+SBWBTC_PACKAGE = "0xaafb102dd0902f5055cadecd687fb5b71ca82ef0e0285d90afde828ec58ca96b"
+
+HBTC_AMOUNT = 1234567  # 0.01234567 hBTC
+HBTC_AMOUNT_2 = 50000000  # 0.5 hBTC
+
+
+def _btc_coin(package, id_byte, balance):
+    """The USDC coin rebuilt as Coin<package::btc::BTC> holding `balance`."""
+    src = base64.b64decode(USDC_OBJECTS_BY_AMOUNT[USDC_AMOUNT]["obj"])
+    # 00 03 07 | addr[32] | vec module | vec struct | vec [] | has_public_transfer |
+    # version[8] | contents(vec: uid[32] | balance[8]) | owner, previous tx, rebate
+    p = 3 + 32
+    p += 1 + src[p]
+    p += 1 + src[p]
+    p += 1
+    has_public_transfer, version = src[p:p + 1], src[p + 1:p + 9]
+    p += 9
+    p += 1 + src[p]
+    coin_id = bytes([0xb7] * 31 + [id_byte])
+    obj = (bytes([0x00, 0x03, 0x07]) + bytes.fromhex(package[2:])
+           + b"\x03btc" + b"\x03BTC" + b"\x00" + has_public_transfer + version
+           + bytes([40]) + coin_id + balance.to_bytes(8, "little") + src[p:])
+    return {"obj": base64.b64encode(obj).decode(),
+            "object_id": "0x" + coin_id.hex(),
+            "version": int.from_bytes(version, "little")}
+
+
+def _btc_coins(package):
+    return {amount: _btc_coin(package, i, amount)
+            for i, amount in enumerate((HBTC_AMOUNT, HBTC_AMOUNT_2))}
+
+
+HBTC_COINS = _btc_coins(HBTC_PACKAGE)
+SBWBTC_COINS = _btc_coins(SBWBTC_PACKAGE)
+
+
+# hBTC is swapped as a plain token transfer; its ticker comes from a signed dynamic
+# descriptor for the Hashi package.
+class SuiSwapHbtcTests(ExchangeTestRunner):
+    currency_configuration = SUI_HBTC_CURRENCY_CONFIGURATION
+    valid_destination_1 = FOREIGN_ADDRESS
+    valid_destination_2 = FOREIGN_ADDRESS_2
+    valid_refund = OWNED_ADDRESS
+    valid_send_amount_1 = HBTC_AMOUNT
+    valid_send_amount_2 = HBTC_AMOUNT_2
+    valid_fees_1 = FEES
+    valid_fees_2 = FEES_2
+    fake_refund = FOREIGN_ADDRESS
+    fake_payout = FOREIGN_ADDRESS
+    signature_refusal_error_code = Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    partner_name = "Partner name"
+    fund_user_id = "Daft Punk"
+    fund_account_name = "Account 0"
+
+    coins = HBTC_COINS
+
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        client = Client(self.backend, use_block_protocol=True)
+
+        client.provide_dynamic_token("hBTC", 8, HBTC_PACKAGE, "btc", "BTC")
+
+        [tx, obj_list] = client.build_usdc_simple_transaction_empty_gas_payment(
+            OWNED_ADDRESS, destination, send_amount, fees, self.coins)
+        signature = client.sign_tx("m/44'/784'/12345'", tx, obj_list)
+
+        public_key_bytes = bytes.fromhex(OWNED_PUBLIC_KEY)
+        verify_signature(public_key_bytes, blake2b(tx, digest_size=32).digest(), signature)
+
+
+# Negative: an hBTC quote paid with sbWBTC, whose coin type differs only by package.
+class SuiSwapHbtcPaidWithSbwbtcTests(SuiSwapHbtcTests):
+    coins = SBWBTC_COINS
+
+
 class TestsSui:
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
     def test_sui(self, backend, exchange_navigation_helper, test_to_run):
@@ -435,3 +516,22 @@ class TestsSui:
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
     def test_sui_unknown_token_dynamic(self, backend, exchange_navigation_helper, test_to_run):
         SuiSwapUnknownTokenDynamicTests(backend, exchange_navigation_helper).run_test(test_to_run)
+
+    @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
+    def test_sui_hbtc(self, backend, exchange_navigation_helper, test_to_run):
+        SuiSwapHbtcTests(backend, exchange_navigation_helper).run_test(test_to_run)
+
+    # Negative: the coin type includes the package, so a coin with hBTC's module and
+    # struct names from another package must not satisfy an hBTC quote.
+    def test_sui_hbtc_rejects_sbwbtc(self, backend, exchange_navigation_helper):
+        runner = SuiSwapHbtcPaidWithSbwbtcTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH
