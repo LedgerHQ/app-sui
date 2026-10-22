@@ -75,6 +75,7 @@ class InsType(IntEnum):
     GET_PUBLIC_KEY                      = 0x02
     SIGN_TX                             = 0x03
     PROVIDE_TRUSTED_DYNAMIC_DESCRIPTOR  = 0x22
+    GET_VERSION_STR                     = 0xFE
 
 class Errors(IntEnum):
     SW_DENY                    = 0x6985
@@ -145,6 +146,14 @@ class Client:
         major, minor, patch = unpack("BBB", response[:3])
         return ((major, minor, patch), response[3:].decode("ascii"))
 
+    def get_version_str(self) -> str:
+        response = self.send_fn(cla=CLA,
+                            ins=InsType.GET_VERSION_STR,
+                            p1=P1,
+                            p2=P2,
+                            payload=[b""])
+        return response.decode("ascii")
+
     def get_public_key(self, path: str) -> Tuple[int, bytes, int, bytes]:
         return self.get_public_key_impl(InsType.GET_PUBLIC_KEY, path)
 
@@ -167,7 +176,8 @@ class Client:
                               magnitude: int,
                               address: str,
                               module: str,
-                              struct: str):
+                              struct: str,
+                              trailing_padding: int = 0):
         tuid = format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_PACKAGE_ADDRESS, address)
         tuid += format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_MODULE_NAME, module)
         tuid += format_tlv(DynamicTokenTag_TUID.TAG_TOKEN_STRUCT_NAME, struct)
@@ -182,6 +192,8 @@ class Client:
         payload += format_tlv(DynamicTokenTag.MAGNITUDE, magnitude)
         payload += format_tlv(DynamicTokenTag.TUID, tuid)
         payload += format_tlv(DynamicTokenTag.SIGNATURE, sign_data(Key.DYNAMIC_TOKEN, payload))
+        # Test-only: bytes after the signature TLV, to build an over-long descriptor.
+        payload += bytes(trailing_padding)
 
         p_len = (len(payload)).to_bytes(2, byteorder='little')
         payload = p_len + payload

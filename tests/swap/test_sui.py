@@ -22,6 +22,10 @@ USDC_DYNAMIC_TOKEN_STRUCT = "COIN"
 # amount. Owned by app-exchange, not by this app's Errors enum.
 EXCHANGE_PRINTABLE_AMOUNT_MISSING = 0x6A8B
 
+# Status this app returns (SyscallError::NotSupported) when a swap transaction is not
+# recognized by the parser, as opposed to recognized but mismatching the quote.
+SUI_SWAP_TX_NOT_RECOGNIZED = 0x0008
+
 # ExchangeTestRunner implementation for Sui
 class GenericSuiTests(ExchangeTestRunner):
     currency_configuration = SUI_CURRENCY_CONFIGURATION
@@ -211,6 +215,78 @@ class SuiSwapOversizedDecimalsTests(ExchangeTestRunner):
         raise AssertionError("swap setup should not have completed")
 
 
+# Security regression: an object must be parsed from exactly the bytes its digest
+# covers. The device used to hash only the first `length` bytes of an object entry but
+# parse it on an unbounded cursor, so an object whose hashed range ended early had its
+# balance read from whatever the host put next in the stream.
+#
+# Swap relies on that balance: the transaction splits the quoted amount out of a coin,
+# and a split larger than the coin's known balance is refused. Here the coin really
+# holds USDC_AMOUNT (the smaller object), but the quote and the split are
+# USDC_AMOUNT_2, which would overdraw it. The host truncates the coin object just
+# before its balance, points the transaction's digest at that range so the hash check
+# passes, and supplies the balance through the next list entry -- its 4-byte length
+# prefix and first four bytes -- so the device sees a coin that covers the split. The
+# continuation is padded so its length equals the quoted amount.
+USDC_COIN_TYPE_PREFIX = bytes([0x00, 0x03, 0x07])
+
+
+def _usdc_balance_offset(obj: bytes) -> int:
+    """Offset of the 8-byte balance in a `Coin<T>` object blob: after the type tag, the
+    has_public_transfer flag, the version, the contents length byte and the 32-byte UID."""
+    assert obj[:3] == USDC_COIN_TYPE_PREFIX, "expected Move/Coin/Struct object"
+    o = 3 + 32
+    for _ in range(2):  # module and struct names, single-byte ULEB lengths
+        assert obj[o] < 0x80
+        o += 1 + obj[o]
+    assert obj[o] == 0, "type parameters not expected"
+    o += 1 + 1 + 8  # type params count, has_public_transfer, version
+    assert obj[o] == 40, "expected a 40-byte coin contents vector"
+    return o + 1 + 32
+
+
+class SuiSwapObjectOverrunTests(ExchangeTestRunner):
+    currency_configuration = SUI_USDC_CURRENCY_CONFIGURATION
+    valid_destination_1 = FOREIGN_ADDRESS
+    valid_destination_2 = FOREIGN_ADDRESS_2
+    valid_refund = OWNED_ADDRESS
+    valid_send_amount_1 = USDC_AMOUNT_2
+    valid_send_amount_2 = USDC_AMOUNT_2
+    valid_fees_1 = FEES
+    valid_fees_2 = FEES_2
+    fake_refund = FOREIGN_ADDRESS
+    fake_payout = FOREIGN_ADDRESS
+    signature_refusal_error_code = Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    partner_name = "Partner name"
+    fund_user_id = "Daft Punk"
+    fund_account_name = "Account 0"
+
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        client = Client(self.backend, use_block_protocol=True)
+
+        [tx, obj_list] = client.build_usdc_simple_transaction_empty_gas_payment(OWNED_ADDRESS, destination, send_amount, fees)
+        tx = bytearray(tx)
+
+        # Swap in the smaller coin: it really holds USDC_AMOUNT < send_amount.
+        small_coin = base64.b64decode(USDC_OBJECTS_BY_AMOUNT[USDC_AMOUNT]["obj"])
+        offset = _usdc_balance_offset(small_coin)
+        hashed = small_coin[:offset]
+        continuation = bytes(4) + small_coin[offset + 8:]
+        # Balance = len(continuation) as the entry's length prefix, then continuation[:4].
+        continuation += bytes(send_amount - len(continuation))
+        assert len(continuation) == send_amount
+
+        def digest(obj: bytes) -> bytes:
+            return blake2b(b"Object::" + obj, digest_size=32).digest()
+
+        pos = tx.find(digest(obj_list[0]))
+        assert pos != -1, "could not locate the coin's digest in the transaction"
+        tx[pos:pos + 32] = digest(hashed)
+
+        client.sign_tx("m/44'/784'/12345'", bytes(tx), [hashed, continuation])
+
+
 class SuiSwapWholeGasCoinTests(ExchangeTestRunner):
     currency_configuration = SUI_CURRENCY_CONFIGURATION
     valid_destination_1 = FOREIGN_ADDRESS
@@ -283,6 +359,25 @@ class TestsSui:
                                                   runner.valid_fees_1,
                                                   "")
         assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    # Negative: a coin object parsed past the bytes its digest covers must not let a
+    # swap pass. The split overdraws the coin's real balance, and only a balance the
+    # host smuggled in after the hashed range makes it look covered. Before the fix the
+    # device signed this with no prompt (the call returned instead of raising); now the
+    # object is unusable, the transaction is not recognized, and the swap is refused
+    # with SUI_SWAP_TX_NOT_RECOGNIZED rather than a quote mismatch.
+    def test_sui_swap_rejects_object_parsed_past_hashed_length(self, backend, exchange_navigation_helper):
+        runner = SuiSwapObjectOverrunTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == SUI_SWAP_TX_NOT_RECOGNIZED
 
     # Negative: an out-of-range decimals byte in the Exchange-supplied coin config
     # must be refused, not divided by. Before the fix the app panicked inside the
