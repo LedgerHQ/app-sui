@@ -130,9 +130,12 @@ impl UserInterface {
 
     pub fn confirm_address(&self, address: &SuiPubKeyAddress) -> Option<()> {
         self.do_refresh.replace(true);
+        // An explicit empty list gives the C SDK a non-NULL `pairs` pointer: an
+        // all-NULL list is rejected outright by recent C SDKs.
         let success = NbglAddressReview::new()
             .glyph(&APP_ICON)
             .review_title("Provide Public Key")
+            .set_tag_value_list(&[])
             .show(&format!("{address}"));
         NbglReviewStatus::new()
             .status_type(StatusType::Address)
