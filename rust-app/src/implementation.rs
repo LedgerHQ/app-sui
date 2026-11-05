@@ -4,6 +4,7 @@ use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
 use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
+use crate::parser::hashi::HashiTx;
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx, TransactionExpirationVariant, TxPrincipals};
@@ -26,6 +27,8 @@ use ledger_parser_combinators::schema::*;
 
 use crate::crypto_helpers::common::HexSlice;
 
+extern crate alloc;
+use alloc::boxed::Box;
 use core::convert::TryFrom;
 use core::future::Future;
 
@@ -131,6 +134,32 @@ async fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx)
     if !swap::check_tx_params(expected, received, ctx) {
         reject::<()>(SW_SWAP_TX_PARAM_MISMATCH).await;
     }
+}
+
+/// The Hashi review, kept out of `sign_apdu` so that its locals do not widen the
+/// `sign_apdu` poll frame, which stays on the stack while every transaction is parsed.
+async fn review_hashi_tx(
+    mut bs: ByteStream,
+    ui: &UserInterface,
+    tx: Box<HashiTx>,
+    gas: HashiGas,
+    principals: Option<TxPrincipals>,
+    replay: Option<ReplayDomain>,
+) {
+    let path = BIP_PATH_PARSER.parse(&mut bs).await;
+    if !path.starts_with(&BIP32_PREFIX[0..2]) {
+        reject::<()>(SyscallError::InvalidParameter as u16).await;
+    }
+
+    if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
+        // See the stake review in `sign_apdu` on why this is not an awaited unwrap.
+        try_option(principals.and_then(|p| ui.confirm_hashi_tx(address, &tx, gas, &p, replay)))
+    })
+    .ok()
+    .is_none()
+    {
+        reject::<()>(StatusWords::UserCancelled as u16).await;
+    };
 }
 
 pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInterface) {
@@ -344,32 +373,19 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             gas_from_address_balance,
         }) => {
             info!("Known Hashi tx\n");
-            let mut bs = input[1].clone();
-            let path = BIP_PATH_PARSER.parse(&mut bs).await;
-            if !path.starts_with(&BIP32_PREFIX[0..2]) {
-                reject::<()>(SyscallError::InvalidParameter as u16).await;
-            }
-
-            if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
-                // See the stake review above on why this is not an awaited unwrap.
-                try_option(principals.and_then(|p| {
-                    ui.confirm_hashi_tx(
-                        address,
-                        &tx,
-                        HashiGas {
-                            gas_budget,
-                            gas_from_address_balance,
-                        },
-                        &p,
-                        replay,
-                    )
-                }))
-            })
-            .ok()
-            .is_none()
-            {
-                reject::<()>(StatusWords::UserCancelled as u16).await;
+            let gas = HashiGas {
+                gas_budget,
+                gas_from_address_balance,
             };
+            NoinlineFut(review_hashi_tx(
+                input[1].clone(),
+                &ui,
+                tx,
+                gas,
+                principals,
+                replay,
+            ))
+            .await;
         }
         None => {
             info!("Unknown tx\n");

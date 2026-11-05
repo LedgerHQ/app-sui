@@ -3255,6 +3255,202 @@ pub struct TransactionDataParser<OD> {
     object_data_source: OD,
 }
 
+/// Total balance of the gas payment coins, or `None` when it is not known: paid from
+/// the address balance, an object not supplied, a staked position, or an overflow.
+/// Out of line so that the coin lookup's state stays out of its caller's frame.
+async fn gas_coins_total<OD: HasObjectData>(
+    object_data_source: &OD,
+    gas_coins: &[ObjectDigest],
+    gas_from_address_balance: bool,
+) -> Option<u64> {
+    let mut total_gas_amount: Option<u64> = if gas_from_address_balance {
+        None
+    } else {
+        Some(0)
+    };
+    for digest in gas_coins.iter() {
+        if let Some(amt0) = total_gas_amount {
+            let object_data = object_data_source.get_object_data(digest).await;
+            match object_data {
+                // B2CA-2793 follow-up (finding 1): checked. If the
+                // gas payment balances sum past u64::MAX the total is
+                // not representable, so leave it unknown (None) --
+                // exactly like an unresolvable payment object below.
+                // A GasCoin transfer/stake then falls back to the
+                // unrecognized-tx path instead of clear-signing a
+                // wrapped, understated amount.
+                Some(ObjectData::Coin { amount, .. }) => {
+                    total_gas_amount = amt0.checked_add(amount)
+                }
+                // A StakedSui position cannot pay gas; treat the
+                // total as unknown rather than as a liquid amount.
+                Some(ObjectData::StakedSui { .. }) | None => total_gas_amount = None,
+            }
+        }
+    }
+    total_gas_amount
+}
+
+/// Everything `TransactionData` V1 parses after its `TransactionKind`: sender, gas
+/// data and expiration, and the checks that need them.
+async fn transaction_data_v1_tail<BS: Clone + Readable, OD: HasObjectData>(
+    input: &mut BS,
+    object_data_source: &OD,
+    v: ProgrammableTransaction,
+    flow: PtbFacts,
+) -> TransactionDataV1Output {
+    let sender = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await;
+
+    // SIP-58: coin::send_funds returns the redeemed change to the signer's address
+    // balance. Its recipient never reaches the display (only TransferObjects is
+    // shown), so a hostile host could redeem the whole balance, show a small decoy
+    // transfer, and divert the remainder. Reject (routes to not-recognized; hard
+    // reject in swap) unless the change returns to the sender.
+    if let Some(deposit) = flow.self_deposit {
+        if deposit != sender {
+            error!("coin::send_funds change recipient is not the sender (SIP-58)");
+            reject_on::<()>(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await;
+        }
+    }
+
+    // A Hashi cancel refunds the full pending amount as a coin; only the
+    // requester can cancel, and the refund must go back to them.
+    if let ProgrammableTransaction::Hashi(tx) = &v {
+        if let HashiOp::Cancel {
+            refund_recipient, ..
+        } = tx.op
+        {
+            if refund_recipient != sender {
+                error!("Hashi cancel refund recipient is not the sender");
+                reject_on::<()>(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await;
+            }
+        }
+    }
+
+    // Out of line: the parser copies the payment list (up to MAX_GAS_COIN_COUNT
+    // digests) on its way out, which would otherwise stay in this frame during the
+    // gas coin lookup below.
+    let (gas_coins, gas_owner, gas_budget) = NoinlineFut(gas_data_parser().parse(input)).await;
+
+    // SIP-58: gas_coins may be empty (gas paid from address balance). The
+    // gas coin's balance is then genuinely unknown to the device, so seed
+    // total_gas_amount with None (same as the "coin object not found"
+    // fallback below) rather than Some(0) -- otherwise a GasCoin
+    // transfer/stake would clear-sign a false "0 SUI" instead of falling
+    // back to the unrecognized-tx path (B2CA-2793 finding 4).
+    let gas_from_address_balance = gas_coins.is_empty();
+
+    // Try to find the total amount of all gas payment objects
+    // This value may be necessary if the transaction contains transfer of entire GasCoin
+    let total_gas_amount = NoinlineFut(gas_coins_total(
+        object_data_source,
+        &gas_coins,
+        gas_from_address_balance,
+    ))
+    .await;
+
+    let expiration = TransactionExpirationParser.parse(input).await;
+
+    // A pinned Hashi deployment lives on one Sui network; a replay
+    // domain naming another one is not that deployment.
+    if let (
+        ProgrammableTransaction::Hashi(tx),
+        TransactionExpirationVariant::ValidDuring { chain, .. },
+    ) = (&v, &expiration)
+    {
+        if deployment(tx.deployment).map(|d| d.sui_chain) != Some(*chain) {
+            error!("ValidDuring chain is not the Hashi deployment's network");
+            reject_on::<()>(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await;
+        }
+    }
+
+    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
+    if gas_from_address_balance && !expiration.is_valid_during() {
+        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
+        reject_on::<u64>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // Both checks below only fire when sender and gas owner differ:
+    // when they are the same account the two resolve to one address
+    // and the existing checks are already correct. Rejecting here
+    // routes to the not-recognized/blind-sign path, and is a hard
+    // reject in swap, like other parse ambiguity.
+    let principals = TxPrincipals { sender, gas_owner };
+
+    // The withdrawal source is not carried through redeem_funds ->
+    // split -> send_funds, so the change check further down compares
+    // the deposit against the sender while the funds came from the
+    // sponsor.
+    if principals.is_sponsored() && flow.withdraws_from_sponsor {
+        error!("Sponsored tx withdraws from the sponsor's balance");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // Only aggregate amounts are tracked, not per-coin ownership, and
+    // the gas deltas are applied only when the reviewed command itself
+    // involves the gas coin. A split off the sponsor's gas coin that
+    // ends up elsewhere would therefore never be displayed.
+    if principals.is_sponsored() && flow.touches_gas_coin {
+        error!("Sponsored tx splits or merges the gas coin");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // request_add_stake transfers the resulting StakedSui to
+    // tx_context::sender(). Every stake input other than the gas
+    // coin must be owned by the sender, so this is precisely the
+    // case where the signer supplies the principal and another
+    // account keeps the position -- and because gas comes out of
+    // that same coin, the amount given away is not even exactly
+    // knowable before execution. A stake funded from the sender's
+    // own coins stays clear-signable and names its owner.
+    if principals.is_sponsored() && flow.stakes_gas_coin {
+        error!("Sponsored tx stakes the sponsor's gas coin");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    (
+        v,
+        (gas_budget, total_gas_amount, gas_from_address_balance),
+        principals,
+        expiration,
+    )
+}
+
 impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
     type Output = TransactionDataV1Output;
 }
@@ -3275,184 +3471,23 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    let (v, flow) = (TransactionKindParser {
-                        object_data_source: self.object_data_source.clone(),
-                    })
-                    .parse(input)
+                    let (v, flow) = NoinlineFut(
+                        (TransactionKindParser {
+                            object_data_source: self.object_data_source.clone(),
+                        })
+                        .parse(input),
+                    )
                     .await;
-
-                    let sender = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(
-                        &DefaultInterp,
+                    // Out of line: the phases below are not on the deep path of the
+                    // parse, and inline they made this frame, which stays on the stack
+                    // while every command and coin object is parsed, several KB larger.
+                    NoinlineFut(transaction_data_v1_tail(
                         input,
-                    )
-                    .await;
-
-                    // SIP-58: coin::send_funds returns the redeemed change to the signer's address
-                    // balance. Its recipient never reaches the display (only TransferObjects is
-                    // shown), so a hostile host could redeem the whole balance, show a small decoy
-                    // transfer, and divert the remainder. Reject (routes to not-recognized; hard
-                    // reject in swap) unless the change returns to the sender.
-                    if let Some(deposit) = flow.self_deposit {
-                        if deposit != sender {
-                            error!("coin::send_funds change recipient is not the sender (SIP-58)");
-                            reject_on::<()>(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await;
-                        }
-                    }
-
-                    // A Hashi cancel refunds the full pending amount as a coin; only the
-                    // requester can cancel, and the refund must go back to them.
-                    if let ProgrammableTransaction::Hashi(tx) = &v {
-                        if let HashiOp::Cancel {
-                            refund_recipient, ..
-                        } = tx.op
-                        {
-                            if refund_recipient != sender {
-                                error!("Hashi cancel refund recipient is not the sender");
-                                reject_on::<()>(
-                                    core::file!(),
-                                    core::line!(),
-                                    SyscallError::NotSupported as u16,
-                                )
-                                .await;
-                            }
-                        }
-                    }
-
-                    let (gas_coins, gas_owner, gas_budget) = gas_data_parser().parse(input).await;
-
-                    // SIP-58: gas_coins may be empty (gas paid from address balance). The
-                    // gas coin's balance is then genuinely unknown to the device, so seed
-                    // total_gas_amount with None (same as the "coin object not found"
-                    // fallback below) rather than Some(0) -- otherwise a GasCoin
-                    // transfer/stake would clear-sign a false "0 SUI" instead of falling
-                    // back to the unrecognized-tx path (B2CA-2793 finding 4).
-                    let gas_from_address_balance = gas_coins.is_empty();
-
-                    // Try to find the total amount of all gas payment objects
-                    // This value may be necessary if the transaction contains transfer of entire GasCoin
-                    let mut total_gas_amount: Option<u64> = if gas_from_address_balance {
-                        None
-                    } else {
-                        Some(0)
-                    };
-                    for digest in gas_coins.iter() {
-                        if let Some(amt0) = total_gas_amount {
-                            let object_data = self.object_data_source.get_object_data(digest).await;
-                            match object_data {
-                                // B2CA-2793 follow-up (finding 1): checked. If the
-                                // gas payment balances sum past u64::MAX the total is
-                                // not representable, so leave it unknown (None) --
-                                // exactly like an unresolvable payment object below.
-                                // A GasCoin transfer/stake then falls back to the
-                                // unrecognized-tx path instead of clear-signing a
-                                // wrapped, understated amount.
-                                Some(ObjectData::Coin { amount, .. }) => {
-                                    total_gas_amount = amt0.checked_add(amount)
-                                }
-                                // A StakedSui position cannot pay gas; treat the
-                                // total as unknown rather than as a liquid amount.
-                                Some(ObjectData::StakedSui { .. }) | None => {
-                                    total_gas_amount = None
-                                }
-                            }
-                        }
-                    }
-
-                    let expiration = TransactionExpirationParser.parse(input).await;
-
-                    // A pinned Hashi deployment lives on one Sui network; a replay
-                    // domain naming another one is not that deployment.
-                    if let (
-                        ProgrammableTransaction::Hashi(tx),
-                        TransactionExpirationVariant::ValidDuring { chain, .. },
-                    ) = (&v, &expiration)
-                    {
-                        if deployment(tx.deployment).map(|d| d.sui_chain) != Some(*chain) {
-                            error!("ValidDuring chain is not the Hashi deployment's network");
-                            reject_on::<()>(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await;
-                        }
-                    }
-
-                    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
-                    if gas_from_address_balance && !expiration.is_valid_during() {
-                        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
-                        reject_on::<u64>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // Both checks below only fire when sender and gas owner differ:
-                    // when they are the same account the two resolve to one address
-                    // and the existing checks are already correct. Rejecting here
-                    // routes to the not-recognized/blind-sign path, and is a hard
-                    // reject in swap, like other parse ambiguity.
-                    let principals = TxPrincipals { sender, gas_owner };
-
-                    // The withdrawal source is not carried through redeem_funds ->
-                    // split -> send_funds, so the change check further down compares
-                    // the deposit against the sender while the funds came from the
-                    // sponsor.
-                    if principals.is_sponsored() && flow.withdraws_from_sponsor {
-                        error!("Sponsored tx withdraws from the sponsor's balance");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // Only aggregate amounts are tracked, not per-coin ownership, and
-                    // the gas deltas are applied only when the reviewed command itself
-                    // involves the gas coin. A split off the sponsor's gas coin that
-                    // ends up elsewhere would therefore never be displayed.
-                    if principals.is_sponsored() && flow.touches_gas_coin {
-                        error!("Sponsored tx splits or merges the gas coin");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // request_add_stake transfers the resulting StakedSui to
-                    // tx_context::sender(). Every stake input other than the gas
-                    // coin must be owned by the sender, so this is precisely the
-                    // case where the signer supplies the principal and another
-                    // account keeps the position -- and because gas comes out of
-                    // that same coin, the amount given away is not even exactly
-                    // knowable before execution. A stake funded from the sender's
-                    // own coins stays clear-signable and names its owner.
-                    if principals.is_sponsored() && flow.stakes_gas_coin {
-                        error!("Sponsored tx stakes the sponsor's gas coin");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    (
+                        &self.object_data_source,
                         v,
-                        (gas_budget, total_gas_amount, gas_from_address_balance),
-                        principals,
-                        expiration,
-                    )
+                        flow,
+                    ))
+                    .await
                 }
                 _ => {
                     reject_on(
