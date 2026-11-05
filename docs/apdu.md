@@ -181,7 +181,7 @@ Hashi (MystenLabs' Sui-native Bitcoin bridge) transactions are signed with `SIGN
 |----------------------|--------------------------------|----------------------------------------------------------------------------------------------------|
 | Withdrawal request   | `withdraw::request_withdrawal` | hBTC amount, change to sender, destination Bitcoin address (P2WPKH or P2TR), Bitcoin network      |
 | Withdrawal cancel    | `withdraw::cancel_withdrawal`  | Request id; the full pending amount is refunded to the sender (the amount is not in the transaction) |
-| Deposit registration | `deposit::deposit`             | hBTC recipient, then each Bitcoin output (txid:vout, amount, up to 4), and the total if several  |
+| Deposit registration | `deposit::deposit`             | Amount (the total if several outputs), hBTC recipient, then each Bitcoin output (txid, output index, and its amount if several; up to 4) |
 
 - Only the deployment pinned in the app (currently Sui testnet) is recognized. A transaction calling another package or using another `Hashi` object is handled as an unknown transaction (blind signing prompt, or `0x0008` if blind signing is disabled).
 - **Parameter 3:** a withdrawal that spends hBTC coin objects needs those objects, in addition to the gas coin. A withdrawal from the address balance, a cancel and a deposit need only the gas coin, or nothing when gas is paid from the address balance (SIP-58).

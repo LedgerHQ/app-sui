@@ -405,17 +405,37 @@ impl UserInterface {
                 utxos,
                 total,
             } => {
-                values.push((
-                    "hBTC recipient".into(),
-                    format!("0x{}", HexSlice(recipient)),
-                ));
+                // Nano screens are narrower, so labels are shorter there and the
+                // operation gets its own screen instead of a long review title.
+                let nano = cfg!(any(target_os = "nanosplus", target_os = "nanox"));
+                let (amount_label, tx_label) = if nano {
+                    ("Bitcoin amount", "Bitcoin tx")
+                } else {
+                    ("Amount deposit", "Bitcoin transaction")
+                };
+                if nano {
+                    values.push(("Operation".into(), "Register Bitcoin deposit".into()));
+                }
+                let utxos = utxos.as_slice();
+                let numbered = utxos.len() > 1;
+                if numbered {
+                    values.push(("Total".into(), btc(*total, "BTC")));
+                } else if let Some(utxo) = utxos.first() {
+                    values.push((amount_label.into(), btc(utxo.amount, "BTC")));
+                }
                 // Registering a deposit for someone else cannot redirect funds (the
                 // bridge recomputes the deposit address), but say so plainly.
-                if recipient.as_slice() != address.get_binary_address() {
+                let ours = recipient.as_slice() == address.get_binary_address();
+                let recipient_label = if ours || nano {
+                    "hBTC recipient"
+                } else {
+                    "hBTC recipient (not your account)"
+                };
+                values.push((recipient_label.into(), format!("0x{}", HexSlice(recipient))));
+                if !ours && nano {
                     values.push(("Warning".into(), "Not your account".into()));
                 }
-                let numbered = utxos.as_slice().len() > 1;
-                for (i, utxo) in utxos.as_slice().iter().enumerate() {
+                for (i, utxo) in utxos.iter().enumerate() {
                     let n = if numbered {
                         format!(" {}", i + 1)
                     } else {
@@ -424,25 +444,40 @@ impl UserInterface {
                     // Bitcoin shows txids in reverse of their internal byte order.
                     let mut txid = utxo.txid;
                     txid.reverse();
-                    values.push((
-                        format!("Bitcoin output{n}"),
-                        format!("{}:{}", HexSlice(&txid), utxo.vout),
-                    ));
-                    values.push((format!("Amount{n}"), btc(utxo.amount, "BTC")));
-                }
-                if numbered {
-                    values.push(("Total".into(), btc(*total, "BTC")));
+                    values.push((format!("{tx_label}{n}"), format!("{}", HexSlice(&txid))));
+                    values.push((format!("Output index{n}"), format!("{}", utxo.vout)));
+                    if numbered {
+                        values.push((format!("{amount_label}{n}"), btc(utxo.amount, "BTC")));
+                    }
                 }
                 (
-                    format!("Review {kind} to register a BTC deposit"),
-                    format!("Sign {kind} to register a BTC deposit"),
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to register Bitcoin deposit")
+                    },
+                    format!("Sign {kind} to register Bitcoin deposit?"),
                 )
             }
         };
         values.push(("Bridge".into(), dep.label.into()));
 
-        let mut fields: Vec<Field> = who.fields("From");
-        fields.extend(values.iter().map(|(name, value)| Field {
+        // A deposit leads with what is registered; the accounts, which only pay
+        // the gas, come after it.
+        let principals_last = matches!(tx.op, HashiOp::Deposit { .. });
+        let mut fields: Vec<Field> = Vec::new();
+        if !principals_last {
+            fields.extend(who.fields("From"));
+        }
+        let (head, bridge) = values.split_at(values.len() - 1);
+        fields.extend(head.iter().map(|(name, value)| Field {
+            name: name.as_str(),
+            value: value.as_str(),
+        }));
+        if principals_last {
+            fields.extend(who.fields("From"));
+        }
+        fields.extend(bridge.iter().map(|(name, value)| Field {
             name: name.as_str(),
             value: value.as_str(),
         }));
