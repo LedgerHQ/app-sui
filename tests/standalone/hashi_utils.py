@@ -22,7 +22,11 @@ HASHI_OBJECT = bytes.fromhex(_FIXTURES["_meta"]["hashiObject"][2:])
 TYPE_PACKAGE = bytes.fromhex(_FIXTURES["_meta"]["typePackage"][2:])
 # The deployment is at its first version, so Move calls target the type package.
 CALL_PACKAGE = TYPE_PACKAGE
+# The same for the mainnet deployment, whose fixtures are named `mainnet_*`.
+MAINNET_HASHI_OBJECT = bytes.fromhex(_FIXTURES["_meta"]["mainnetHashiObject"][2:])
+MAINNET_PACKAGE = bytes.fromhex(_FIXTURES["_meta"]["mainnetTypePackage"][2:])
 CLOCK = bytes(31) + b"\x06"
+BTC_TYPE_TAIL = b"\x03btc\x03BTC"
 
 # What a rejected, unrecognised transaction answers: `SyscallError::NotSupported`.
 # A cancelled review answers 0x6985 instead, so checking this tells a transaction that
@@ -42,15 +46,23 @@ def patch_once(tx, old, new):
     return tx.replace(old, new)
 
 
-def retarget_calls(tx, package):
-    """Point every Hashi Move call at `package`, leaving the `btc::BTC` type tags alone."""
+def retarget_calls(tx, package, modules=(b"withdraw", b"utxo", b"deposit"), source=CALL_PACKAGE):
+    """Point the Hashi Move calls of `modules` from `source` at `package`, leaving the
+    `btc::BTC` type tags alone."""
     n = 0
-    for module in (b"withdraw", b"utxo", b"deposit"):
-        call = CALL_PACKAGE + bytes([len(module)]) + module
+    for module in modules:
+        call = source + bytes([len(module)]) + module
         n += tx.count(call)
         tx = tx.replace(call, package + call[32:])
     assert n > 0, "no Hashi call to retarget"
     return tx
+
+
+def retype_btc(tx, source, package):
+    """Replace every `source::btc::BTC` type tag with `package::btc::BTC`."""
+    old = source + BTC_TYPE_TAIL
+    assert tx.count(old) > 0, "no hBTC type tag"
+    return tx.replace(old, package + BTC_TYPE_TAIL)
 
 
 def patch_last(tx, old, new):

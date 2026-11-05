@@ -12,7 +12,7 @@ Hashi (MystenLabs, Sui-native BTC bridge) has users sign three Sui calls: `withd
   - Called package v2 `0x8f7efd74…2c7e`; the SDK retargets calls to the latest upgrade, while types keep the original id
   - HRP `tb` (mainnet `bc`); Clock `0x6`
   - ⚠️ **Testnet was redeployed.** As of 2026-10-08, ts-sdks `NETWORK_CONFIG.testnet` points to a new Hashi object, `0x342e9080…d1bb`, with type package `0x5e0b99c3…8485`. The app now pins that deployment (see the implementation notes); the values above are the retired one.
-- **No mainnet deployment yet.** Adding one later is a one-line table edit.
+- **Mainnet deployment** (given by the Hashi team on 2026-11-05, not yet in `@mysten/hashi` 0.6.29): Hashi object `0x8d110642…0e5d`, package `0xd30fb3f8…9d06` for both calls and types (`versioning` enables version 1 only). Checked on chain: the object is a shared `<package>::hashi::Hashi`, its `bitcoin_chain_id` is the Bitcoin mainnet genesis, and all 34 modules are byte-identical to the testnet package once its own address is substituted. Pinned as "Hashi", HRP `bc`.
 - **SDK PTB shapes** (`@mysten/hashi` 0.6.25):
   - **Withdraw P1:** `0x2::balance::redeem_funds<BTC>(FundsWithdrawal input)` → `request_withdrawal(hashi, clock, Result, pure vector<u8>)`
   - **Withdraw P2:** `MergeCoins(coin0,[coins…, coin::redeem_funds?])` → `SplitCoins` → `coin::into_balance` → `coin::send_funds(rest, sender)` / `destroy_zero` → `request_withdrawal`
@@ -238,7 +238,7 @@ Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It r
 - Re-pin the SDK version at implementation time.
 
 ## Implementation notes (deviations from the plan)
-- **Pinned deployment:** testnet as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`, re-read on chain 2026-10-19, epoch 1257): Hashi object `0x342e9080…d1bb`, package `0x5e0b99c3…8485` for both calls and types (`versioning` enables version 1 only, with no upgrade yet). Move signatures are unchanged from the retired deployment (`0x22c0ce66…28f8`, call package `0x8f7efd74…2c7e`, type package `0xfcea10ca…4360`), which is no longer clear-signed; `retired_deployment` in `test_sign_hashi_rejected.py` covers it.
+- **Pinned deployments:** mainnet (see Verified facts) and testnet as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`, re-read on chain 2026-10-19, epoch 1257): Hashi object `0x342e9080…d1bb`, package `0x5e0b99c3…8485` for both calls and types (`versioning` enables version 1 only, with no upgrade yet). Move signatures are unchanged from the retired deployment (`0x22c0ce66…28f8`, call package `0x8f7efd74…2c7e`, type package `0xfcea10ca…4360`), which is no longer clear-signed; `retired_deployment` in `test_sign_hashi_rejected.py` covers it.
 - **Real PTB shapes** (confirmed from the SDK source and the generated fixtures):
   - In the coin path, the change `coin::send_funds` always comes *before* `request_withdrawal`.
   - `coin::destroy_zero` is never emitted for a Hashi withdrawal (its balance intent always returns change via `send_funds`), so it is not supported. That is the fail-safe direction.

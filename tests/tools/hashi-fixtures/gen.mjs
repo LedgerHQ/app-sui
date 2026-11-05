@@ -5,8 +5,10 @@
 //   cd tests/tools/hashi-fixtures && npm install && node gen.mjs
 //
 // Balance and coin queries are stubbed (no funded account is needed); shared-object
-// versions and the call-package retarget come from the live Sui testnet, through the SDK's
-// client-side resolver so that the synthetic coin objects are never looked up on chain.
+// versions and the call-package retarget come from the live Sui network of each
+// deployment, through the SDK's client-side resolver so that the synthetic coin objects
+// are never looked up on chain. Testnet fixtures keep their plain names; mainnet ones
+// are prefixed `mainnet_`.
 // Output: ../../standalone/hashi_fixtures.json (base64 tx bytes, then the object blobs to
 // pass as `object_list`, gas coin first).
 import { SuiGraphQLClient } from '@mysten/sui/graphql';
@@ -25,8 +27,24 @@ const SUI_VERSION = pkgVersion('@mysten/sui');
 
 const SENDER = '0xd5a6dc2129672c36d318ecc28c96a25fdf640933d6ed8840b1f78171f50f9cc9'; // OWNED_ADDRESS
 const OTHER = '0x5a64eec558ee719741578942714a0b35058ced15d79f4af64da014715ada4497';  // FOREIGN_ADDRESS
-const PKG = '0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485';
-const HASHI_OBJ = '0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb';
+// The testnet ids are `NETWORK_CONFIG.testnet` of the pinned SDK; that SDK has no mainnet
+// entry, so the mainnet ids are the ones the app pins in parser/hashi.rs.
+const NETWORKS = {
+  testnet: {
+    pkg: '0x5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485',
+    obj: '0x342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb',
+    url: 'https://graphql.testnet.sui.io/graphql',
+    bitcoinNetwork: 'signet',
+  },
+  mainnet: {
+    pkg: '0xd30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06',
+    obj: '0x8d110642d9b5133bd661cda4873edf135ab6b91ff6918601015880874b950e5d',
+    url: 'https://graphql.mainnet.sui.io/graphql',
+    bitcoinNetwork: 'mainnet',
+  },
+};
+const PKG = NETWORKS.testnet.pkg;
+const HASHI_OBJ = NETWORKS.testnet.obj;
 const BTC_TYPE = `${PKG}::btc::BTC`;
 
 // --- object blobs -------------------------------------------------------------------
@@ -50,10 +68,10 @@ function gasCoin(balance) {
   return o;
 }
 
-// Rebuild the USDC coin blob as Coin<PKG::btc::BTC> with a fresh id and the given balance.
+// Rebuild the USDC coin blob as Coin<pkg::btc::BTC> with a fresh id and the given balance.
 // USDC layout: 00 03 07 | addr[32] | vec "usdc" | vec "USDC" | vec [] | has_public_transfer |
 //              version[8] | contents(vec: uid[32] | bal[8]) | owner, previous tx, storage rebate
-function btcCoin(idByte, balance) {
+function btcCoin(idByte, balance, pkg = PKG) {
   const src = USDC_OBJ;
   let p = 3 + 32;
   const modLen = src[p]; p += 1 + modLen;
@@ -66,23 +84,25 @@ function btcCoin(idByte, balance) {
   const rest = src.slice(p);
   const id = new Uint8Array(32).fill(0xb7); id[31] = idByte;
   const enc = (s) => [s.length, ...new TextEncoder().encode(s)];
-  const obj = new Uint8Array([0x00, 0x03, 0x07, ...hexBytes(PKG), ...enc('btc'), ...enc('BTC'), 0x00,
+  const obj = new Uint8Array([0x00, 0x03, 0x07, ...hexBytes(pkg), ...enc('btc'), ...enc('BTC'), 0x00,
     hasPublicTransfer, ...version, 40, ...id, ...u64le(balance), ...rest]);
   return { obj, objectId: '0x' + toHex(id), version: String(new DataView(version.buffer, version.byteOffset).getBigUint64(0, true)), digest: digest(obj) };
 }
 
 // --- client with stubbed balances -----------------------------------------------------
-function makeClient({ addressBalance = 0n, coins = [] }) {
-  const base = new SuiGraphQLClient({ network: 'testnet', url: 'https://graphql.testnet.sui.io/graphql' });
+function makeClient({ addressBalance = 0n, coins = [], network = 'testnet' }) {
+  const net = NETWORKS[network];
+  const btcType = `${net.pkg}::btc::BTC`;
+  const base = new SuiGraphQLClient({ network, url: net.url });
   const core = base.core;
   core.resolveTransactionPlugin = () => coreClientResolveTransactionPlugin;
   const coinBalance = coins.reduce((s, c) => s + c.balance, 0n);
   core.getBalance = async () => ({ balance: {
-    coinType: BTC_TYPE, balance: String(addressBalance + coinBalance),
+    coinType: btcType, balance: String(addressBalance + coinBalance),
     coinBalance: String(coinBalance), addressBalance: String(addressBalance) } });
   core.listCoins = async () => ({ hasNextPage: false, cursor: null, objects: coins.map((c) => ({
-    objectId: c.objectId, version: c.version, digest: c.digest, balance: String(c.balance), type: BTC_TYPE, owner: { $kind: 'AddressOwner', AddressOwner: SENDER } })) });
-  return base.$extend(hashi({ hashiObjectId: HASHI_OBJ, packageId: PKG, bitcoinNetwork: 'signet' }));
+    objectId: c.objectId, version: c.version, digest: c.digest, balance: String(c.balance), type: btcType, owner: { $kind: 'AddressOwner', AddressOwner: SENDER } })) });
+  return base.$extend(hashi({ hashiObjectId: net.obj, packageId: net.pkg, bitcoinNetwork: net.bitcoinNetwork }));
 }
 
 const GAS_BALANCE = 1_000_000_000n;
@@ -99,7 +119,8 @@ async function build(client, tx, expiration = { None: true }) {
 
 const P2WPKH = hexBytes('751e76e8199196d454941c45d1b3a323f1433bd6');                            // BIP-173 vector
 const P2TR = hexBytes('a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c');        // BIP-350 vector
-const fixtures = { _meta: { '@mysten/hashi': HASHI_VERSION, '@mysten/sui': SUI_VERSION, sender: SENDER, hashiObject: HASHI_OBJ, typePackage: PKG, gasCoinBalance: String(GAS_BALANCE) } };
+const fixtures = { _meta: { '@mysten/hashi': HASHI_VERSION, '@mysten/sui': SUI_VERSION, sender: SENDER, hashiObject: HASHI_OBJ, typePackage: PKG,
+  mainnetHashiObject: NETWORKS.mainnet.obj, mainnetTypePackage: NETWORKS.mainnet.pkg, gasCoinBalance: String(GAS_BALANCE) } };
 // The device signs the intent message: intent (version 0, scope TransactionData, app Sui)
 // followed by the TransactionData bytes `build()` returns.
 const INTENT = new Uint8Array([0, 0, 0]);
@@ -233,6 +254,32 @@ const USDC_TYPE = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f
   const bal = tx.moveCall({ target: '0x2::balance::redeem_funds', typeArguments: [BTC_TYPE], arguments: [tx.withdrawal({ amount: 5000, type: BTC_TYPE })] });
   tx.moveCall({ target: '0x2::balance::send_funds', typeArguments: [BTC_TYPE], arguments: [bal, tx.pure.address(OTHER)] });
   out('nonhashi_btc_redeem_input_send', await build(c, tx));
+}
+
+// ---- mainnet deployment ---------------------------------------------------------------
+// The same flows against the mainnet ids: Bitcoin mainnet addresses (bc1q…, bc1p…).
+for (const [name, addr] of [['mainnet_withdraw_ab_p2wpkh', P2WPKH], ['mainnet_withdraw_ab_p2tr', P2TR]]) {
+  const c = makeClient({ addressBalance: 10_000_000n, network: 'mainnet' });
+  out(name, await build(c, c.hashi.tx.requestWithdrawal({ amount: 1_234_567n, bitcoinAddress: addr })));
+}
+{
+  const main = NETWORKS.mainnet.pkg;
+  const coins = [btcCoin(5, 700_000n, main), btcCoin(6, 900_000n, main)].map((c, i) => ({ ...c, balance: [700_000n, 900_000n][i] }));
+  const c = makeClient({ coins, network: 'mainnet' });
+  out('mainnet_withdraw_coins_change', await build(c, c.hashi.tx.requestWithdrawal({ amount: 1_234_567n, bitcoinAddress: P2WPKH })), coins);
+}
+// ValidDuring on Sui mainnet is accepted; naming Sui testnet on the mainnet deployment is not.
+for (const [name, chain] of [['mainnet_withdraw_valid_during_mainnet', SUI_MAINNET_CHAIN], ['mainnet_withdraw_valid_during_testnet', SUI_TESTNET_CHAIN]]) {
+  const c = makeClient({ addressBalance: 10_000_000n, network: 'mainnet' });
+  out(name, await build(c, c.hashi.tx.requestWithdrawal({ amount: 1_234_567n, bitcoinAddress: P2WPKH }), validDuring(chain)));
+}
+{
+  const c = makeClient({ network: 'mainnet' });
+  out('mainnet_cancel', await build(c, c.hashi.tx.cancelWithdrawal({ requestId: '0x' + '11'.repeat(32), recipient: SENDER })));
+}
+{
+  const c = makeClient({ network: 'mainnet' });
+  out('mainnet_deposit_1', await build(c, c.hashi.tx.deposit({ txid: TXID, utxos: [{ vout: 0, amountSats: 50_000n }], recipient: SENDER })));
 }
 
 writeFileSync(new URL('../../standalone/hashi_fixtures.json', import.meta.url), JSON.stringify(fixtures, null, 2) + '\n');

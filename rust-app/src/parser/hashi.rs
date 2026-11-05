@@ -41,20 +41,38 @@ const HASHI_BTC_STRUCT: &str = "BTC";
 /// unknown path.
 pub const MAX_HASHI_DEPOSIT_UTXOS: usize = 4;
 
-/// Testnet, as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`), with the
-/// call package read from the object's `versioning.upgrade_cap` (enabled version 1, so
-/// calls and types share the original package id).
-static HASHI_DEPLOYMENTS: [HashiDeployment; 1] = [HashiDeployment {
-    label: "Hashi Testnet",
-    sui_chain: SUI_TESTNET_CHAIN,
-    hashi_object: hex!("342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb"),
-    call_packages: &[hex!(
-        "5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"
-    )],
-    type_package: hex!("5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"),
-    btc_hrp: "tb",
-    btc_network: "Bitcoin Signet",
-}];
+/// For each deployment, the call package is read from the object's
+/// `versioning.upgrade_cap`: both are at enabled version 1, so calls and types share the
+/// original package id.
+static HASHI_DEPLOYMENTS: [HashiDeployment; 2] = [
+    // Mainnet, as given by the Hashi team. On chain, the object is a shared
+    // `<package>::hashi::Hashi` whose `bitcoin_chain_id` is the Bitcoin mainnet genesis,
+    // and every module of the package is byte-identical to the testnet one below once
+    // the package's own address is substituted.
+    HashiDeployment {
+        label: "Hashi",
+        sui_chain: SUI_MAINNET_CHAIN,
+        hashi_object: hex!("8d110642d9b5133bd661cda4873edf135ab6b91ff6918601015880874b950e5d"),
+        call_packages: &[hex!(
+            "d30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06"
+        )],
+        type_package: hex!("d30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06"),
+        btc_hrp: "bc",
+        btc_network: "Bitcoin",
+    },
+    // Testnet, as targeted by `@mysten/hashi` 0.6.26 (`NETWORK_CONFIG.testnet`).
+    HashiDeployment {
+        label: "Hashi Testnet",
+        sui_chain: SUI_TESTNET_CHAIN,
+        hashi_object: hex!("342e908043db6090558ed7766df95bfc3609881b2eac7edb5343dd5bb3ddd1bb"),
+        call_packages: &[hex!(
+            "5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"
+        )],
+        type_package: hex!("5e0b99c31f691742acea5de4ca1bf53c398d5639fed6503a51ffe8035dc68485"),
+        btc_hrp: "tb",
+        btc_network: "Bitcoin Signet",
+    },
+];
 
 pub fn deployment(ix: u8) -> Option<&'static HashiDeployment> {
     HASHI_DEPLOYMENTS.get(ix as usize)

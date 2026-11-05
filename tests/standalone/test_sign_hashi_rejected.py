@@ -11,6 +11,8 @@ from hashi_utils import (
     CALL_PACKAGE,
     CLOCK,
     HASHI_OBJECT,
+    MAINNET_HASHI_OBJECT,
+    MAINNET_PACKAGE,
     OTHER,
     SENDER,
     TYPE_PACKAGE,
@@ -18,6 +20,7 @@ from hashi_utils import (
     patch_last,
     patch_once,
     retarget_calls,
+    retype_btc,
     sign_expect_not_recognized,
 )
 
@@ -46,9 +49,7 @@ def _retired_deployment():
     # A withdrawal as it was built against the retired deployment: its calls, hBTC type
     # and Hashi object are no longer pinned.
     tx = retarget_calls(_withdraw(), RETIRED_CALL_PACKAGE)
-    btc = b"\x03btc\x03BTC"
-    assert tx.count(TYPE_PACKAGE + btc) > 0
-    tx = tx.replace(TYPE_PACKAGE + btc, RETIRED_TYPE_PACKAGE + btc)
+    tx = retype_btc(tx, TYPE_PACKAGE, RETIRED_TYPE_PACKAGE)
     return patch_once(tx, HASHI_OBJECT, RETIRED_HASHI_OBJECT)
 
 
@@ -99,6 +100,34 @@ def _deposit_mixed_recipients():
     return patch_last(tx, b"\x00\x21\x01" + SENDER, b"\x00\x21\x01" + OTHER)
 
 
+# Both networks are pinned: a transaction must use one deployment's ids throughout.
+def _mainnet_withdraw():
+    return fixture("mainnet_withdraw_ab_p2wpkh")[0]
+
+
+def _mainnet_with_testnet_object():
+    return patch_once(_mainnet_withdraw(), MAINNET_HASHI_OBJECT, HASHI_OBJECT)
+
+
+def _testnet_with_mainnet_object():
+    return patch_once(_withdraw(), HASHI_OBJECT, MAINNET_HASHI_OBJECT)
+
+
+def _mainnet_with_testnet_btc():
+    # Mainnet calls locking testnet hBTC from the address balance.
+    return retype_btc(_mainnet_withdraw(), MAINNET_PACKAGE, TYPE_PACKAGE)
+
+
+def _testnet_with_mainnet_btc():
+    return retype_btc(_withdraw(), TYPE_PACKAGE, MAINNET_PACKAGE)
+
+
+def _deposit_mixed_deployments():
+    # The UTXO is built by the testnet package and registered with the mainnet one.
+    tx = fixture("mainnet_deposit_1")[0]
+    return retarget_calls(tx, CALL_PACKAGE, modules=(b"utxo",), source=MAINNET_PACKAGE)
+
+
 PATCHED = [
     pytest.param("withdraw_ab_p2wpkh", _call_package_not_pinned, id="call_package_not_pinned"),
     pytest.param("withdraw_ab_p2wpkh", _retired_deployment, id="retired_deployment"),
@@ -110,6 +139,11 @@ PATCHED = [
     pytest.param("deposit_1", _deposit_none_path, id="deposit_none_path"),
     pytest.param("deposit_1", _deposit_zero_amount, id="deposit_zero_amount"),
     pytest.param("deposit_4", _deposit_mixed_recipients, id="deposit_mixed_recipients"),
+    pytest.param("mainnet_withdraw_ab_p2wpkh", _mainnet_with_testnet_object, id="mainnet_with_testnet_object"),
+    pytest.param("withdraw_ab_p2wpkh", _testnet_with_mainnet_object, id="testnet_with_mainnet_object"),
+    pytest.param("mainnet_withdraw_ab_p2wpkh", _mainnet_with_testnet_btc, id="mainnet_with_testnet_btc"),
+    pytest.param("withdraw_ab_p2wpkh", _testnet_with_mainnet_btc, id="testnet_with_mainnet_btc"),
+    pytest.param("mainnet_deposit_1", _deposit_mixed_deployments, id="deposit_mixed_deployments"),
 ]
 
 
@@ -132,8 +166,9 @@ BUILT = [
     pytest.param("double_withdraw", id="double_withdraw"),
     # A withdrawal locking a USDC balance instead of hBTC.
     pytest.param("withdraw_usdc_balance", id="withdraw_usdc_balance"),
-    # A ValidDuring naming Sui mainnet on the testnet deployment.
+    # A ValidDuring naming the other Sui network than the deployment's.
     pytest.param("withdraw_valid_during_mainnet", id="withdraw_valid_during_mainnet"),
+    pytest.param("mainnet_withdraw_valid_during_testnet", id="mainnet_withdraw_valid_during_testnet"),
     # Non-Hashi transactions using the 0x2 calls Hashi support admits. All were
     # unrecognised before; none may become clear-signable.
     pytest.param("nonhashi_usdc_send_funds_input", id="nonhashi_usdc_send_funds_input"),

@@ -36,6 +36,14 @@ CASES = [
     # Registering a deposit for another account is allowed (it cannot redirect funds),
     # but the review flags it.
     pytest.param("deposit_other_recipient", id="deposit_other_recipient"),
+    # The mainnet deployment: Bitcoin mainnet addresses (bc1q…/bc1p…), network
+    # "Bitcoin", bridge "Hashi".
+    pytest.param("mainnet_withdraw_ab_p2wpkh", id="mainnet_withdraw_ab_p2wpkh"),
+    pytest.param("mainnet_withdraw_ab_p2tr", id="mainnet_withdraw_ab_p2tr"),
+    pytest.param("mainnet_withdraw_coins_change", id="mainnet_withdraw_coins_change"),
+    pytest.param("mainnet_withdraw_valid_during_mainnet", id="mainnet_withdraw_valid_during_mainnet"),
+    pytest.param("mainnet_cancel", id="mainnet_cancel"),
+    pytest.param("mainnet_deposit_1", id="mainnet_deposit_1"),
 ]
 
 

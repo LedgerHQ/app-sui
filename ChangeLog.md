@@ -1,7 +1,7 @@
 # Change Log
 
 ## 1.6.0
-* Clear-sign Hashi (Sui-native Bitcoin bridge) transactions on testnet: hBTC withdrawal to a Bitcoin address (P2WPKH or P2TR), withdrawal cancel and deposit registration
+* Clear-sign Hashi (Sui-native Bitcoin bridge) transactions on mainnet and testnet: hBTC withdrawal to a Bitcoin address (P2WPKH or P2TR), withdrawal cancel and deposit registration
 * Refuse Hashi transactions in swap mode
 
 ## 1.5.9
