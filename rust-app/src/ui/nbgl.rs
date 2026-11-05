@@ -368,8 +368,14 @@ impl UserInterface {
         );
         let replay_vals = replay_values(&replay);
 
-        // Owned values the fields borrow, built before the fields themselves.
+        // Nano screens are narrower, so labels are shorter there and the operation
+        // gets its own screen instead of a long review title.
+        let nano = cfg!(any(target_os = "nanosplus", target_os = "nanox"));
+
+        // Owned values the fields borrow, built before the fields themselves:
+        // `values` before the accounts, `after` between them and the gas.
         let mut values: Vec<(alloc::string::String, alloc::string::String)> = Vec::new();
+        let mut after: Vec<(alloc::string::String, alloc::string::String)> = Vec::new();
         let (first_msg, last_msg) = match &tx.op {
             HashiOp::Withdraw {
                 amount,
@@ -379,16 +385,28 @@ impl UserInterface {
                 // The parser only admits the two shapes the encoder accepts; refuse
                 // to sign rather than show anything else.
                 let to = segwit_address(dep.btc_hrp, btc_address.version, btc_address.program())?;
-                values.push(("Amount".into(), btc(*amount, HASHI_BTC_TICKER)));
+                if nano {
+                    values.push(("Operation".into(), "Withdraw to Bitcoin".into()));
+                }
+                values.push(("Withdraw".into(), btc(*amount, HASHI_BTC_TICKER)));
                 if *change != 0 {
                     values.push(("Change to sender".into(), btc(*change, HASHI_BTC_TICKER)));
                 }
-                values.push(("To".into(), to.as_str().into()));
+                values.push(("To (Bitcoin)".into(), to.as_str().into()));
                 values.push(("Bitcoin network".into(), dep.btc_network.into()));
-                values.push(("Bitcoin fee".into(), "From the amount".into()));
+                let fee_label = if nano {
+                    "Network fee"
+                } else {
+                    "Bitcoin network fee"
+                };
+                after.push((fee_label.into(), "Deducted from amount".into()));
                 (
-                    format!("Review {kind} to withdraw hBTC to Bitcoin"),
-                    format!("Sign {kind} to withdraw hBTC"),
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to withdraw hBTC from Hashi")
+                    },
+                    format!("Sign {kind} to withdraw hBTC?"),
                 )
             }
             HashiOp::Cancel { request_id, .. } => {
@@ -405,9 +423,6 @@ impl UserInterface {
                 utxos,
                 total,
             } => {
-                // Nano screens are narrower, so labels are shorter there and the
-                // operation gets its own screen instead of a long review title.
-                let nano = cfg!(any(target_os = "nanosplus", target_os = "nanox"));
                 let (amount_label, tx_label) = if nano {
                     ("Bitcoin amount", "Bitcoin tx")
                 } else {
@@ -460,27 +475,26 @@ impl UserInterface {
                 )
             }
         };
-        values.push(("Bridge".into(), dep.label.into()));
+        after.push(("Bridge".into(), dep.label.into()));
 
-        // A deposit leads with what is registered; the accounts, which only pay
-        // the gas, come after it.
-        let principals_last = matches!(tx.op, HashiOp::Deposit { .. });
+        // A withdrawal or deposit leads with what moves where; the accounts come
+        // after it.
+        let principals_last = !matches!(tx.op, HashiOp::Cancel { .. });
+        fn as_field((name, value): &(alloc::string::String, alloc::string::String)) -> Field<'_> {
+            Field {
+                name: name.as_str(),
+                value: value.as_str(),
+            }
+        }
         let mut fields: Vec<Field> = Vec::new();
         if !principals_last {
             fields.extend(who.fields("From"));
         }
-        let (head, bridge) = values.split_at(values.len() - 1);
-        fields.extend(head.iter().map(|(name, value)| Field {
-            name: name.as_str(),
-            value: value.as_str(),
-        }));
+        fields.extend(values.iter().map(as_field));
         if principals_last {
             fields.extend(who.fields("From"));
         }
-        fields.extend(bridge.iter().map(|(name, value)| Field {
-            name: name.as_str(),
-            value: value.as_str(),
-        }));
+        fields.extend(after.iter().map(as_field));
         fields.push(Field {
             name: "Max Gas",
             value: &gas_val,

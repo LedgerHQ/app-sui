@@ -179,7 +179,7 @@ Hashi (MystenLabs' Sui-native Bitcoin bridge) transactions are signed with `SIGN
 
 | Transaction          | Move call                      | Review shows                                                                                       |
 |----------------------|--------------------------------|----------------------------------------------------------------------------------------------------|
-| Withdrawal request   | `withdraw::request_withdrawal` | hBTC amount, change to sender, destination Bitcoin address (P2WPKH or P2TR), Bitcoin network      |
+| Withdrawal request   | `withdraw::request_withdrawal` | hBTC amount, change to sender, destination Bitcoin address (P2WPKH or P2TR), Bitcoin network; the Bitcoin fee is deducted from the amount |
 | Withdrawal cancel    | `withdraw::cancel_withdrawal`  | Request id; the full pending amount is refunded to the sender (the amount is not in the transaction) |
 | Deposit registration | `deposit::deposit`             | Amount (the total if several outputs), hBTC recipient, then each Bitcoin output (txid, output index, and its amount if several; up to 4) |
 
