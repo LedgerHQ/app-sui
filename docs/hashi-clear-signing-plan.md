@@ -129,6 +129,8 @@ On success it returns `ProgrammableTransaction::Hashi(Box<HashiTx>)`.
 ### 4. `rust-app/src/ui/nbgl.rs`
 Add `confirm_hashi_tx(address, &HashiTx, HashiGas, &TxPrincipals, replay)`. It reuses `principal_values`/`fields("From")`, `format_gas_amount` (388-424), `replay_fields` and `get_amount_in_decimals`.
 
+> The screens below are the initial design. They were later aligned with the Figma user flows (deposit in 0acae37, withdrawal in 39ed4ca, then cancel): each review now leads with what moves where, the accounts come after it, and Nano gets a short title plus an Operation screen. `nbgl.rs` and the snapshots are the reference.
+
 **Withdraw** — "Review {kind} to withdraw hBTC to Bitcoin":
 - From
 - Amount `hBTC x`

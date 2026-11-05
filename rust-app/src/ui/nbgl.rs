@@ -409,13 +409,31 @@ impl UserInterface {
                     format!("Sign {kind} to withdraw hBTC?"),
                 )
             }
-            HashiOp::Cancel { request_id, .. } => {
-                values.push(("Request ID".into(), format!("0x{}", HexSlice(request_id))));
-                // The amount lives in the pending request, not in the transaction.
-                values.push(("Refund".into(), "Full pending amount, to sender".into()));
+            HashiOp::Cancel {
+                request_id,
+                refund_recipient,
+            } => {
+                // The sender is shown as "Refund to"; the parser only admits a
+                // refund to the sender, so refuse anything else here too.
+                if *refund_recipient != principals.sender {
+                    return None;
+                }
+                if nano {
+                    values.push(("Operation".into(), "Cancel Hashi withdrawal".into()));
+                }
+                let request_label = if nano {
+                    "Request"
+                } else {
+                    "Withdrawal request"
+                };
+                values.push((request_label.into(), format!("0x{}", HexSlice(request_id))));
                 (
-                    format!("Review {kind} to cancel hBTC withdrawal"),
-                    format!("Sign {kind} to cancel hBTC withdrawal"),
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to cancel Bitcoin withdrawal")
+                    },
+                    format!("Sign {kind} to cancel withdrawal?"),
                 )
             }
             HashiOp::Deposit {
@@ -477,23 +495,20 @@ impl UserInterface {
         };
         after.push(("Bridge".into(), dep.label.into()));
 
-        // A withdrawal or deposit leads with what moves where; the accounts come
-        // after it.
-        let principals_last = !matches!(tx.op, HashiOp::Cancel { .. });
+        // Each review leads with what moves where; the accounts come after it.
+        let from_label = if matches!(tx.op, HashiOp::Cancel { .. }) {
+            "Refund to"
+        } else {
+            "From"
+        };
         fn as_field((name, value): &(alloc::string::String, alloc::string::String)) -> Field<'_> {
             Field {
                 name: name.as_str(),
                 value: value.as_str(),
             }
         }
-        let mut fields: Vec<Field> = Vec::new();
-        if !principals_last {
-            fields.extend(who.fields("From"));
-        }
-        fields.extend(values.iter().map(as_field));
-        if principals_last {
-            fields.extend(who.fields("From"));
-        }
+        let mut fields: Vec<Field> = values.iter().map(as_field).collect();
+        fields.extend(who.fields(from_label));
         fields.extend(after.iter().map(as_field));
         fields.push(Field {
             name: "Max Gas",
