@@ -183,7 +183,7 @@ struct KnownCoin<'a> {
     ticker: &'a str,
 }
 
-const KNOWN_COINS: [KnownCoin; 50] = [
+const KNOWN_COINS: [KnownCoin; 51] = [
     KnownCoin {
         coin_id: hex!("a8816d3a6e3136e86bc2873b1f94a15cadc8af2703c075f2d546c2ae367f4df9"),
         module: "ocean",
@@ -533,5 +533,14 @@ const KNOWN_COINS: [KnownCoin; 50] = [
         function: "WAL",
         divisor: 9,
         ticker: "WAL",
+    },
+    // hBTC of the Hashi mainnet deployment (parser/hashi.rs); the testnet one is
+    // resolved through a dynamic descriptor.
+    KnownCoin {
+        coin_id: hex!("d30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06"),
+        module: "btc",
+        function: "BTC",
+        divisor: 8,
+        ticker: "hBTC",
     },
 ];

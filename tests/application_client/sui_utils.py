@@ -93,6 +93,41 @@ USDC_OBJECTS_BY_AMOUNT = {
     }
 }
 
+# hBTC is Coin<package::btc::BTC> from a Hashi deployment: the mainnet package is in
+# KNOWN_COINS, the testnet one (hashi_fixtures.json `_meta.typePackage`) needs a
+# dynamic descriptor.
+HBTC_MAINNET_PACKAGE = "0xd30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06"
+HBTC_AMOUNT = 1234567  # 0.01234567 hBTC
+HBTC_AMOUNT_2 = 50000000  # 0.5 hBTC
+
+
+def btc_coin_object(package, id_byte, balance):
+    """The USDC coin rebuilt as Coin<package::btc::BTC> holding `balance`."""
+    src = base64.b64decode(USDC_OBJECTS_BY_AMOUNT[USDC_AMOUNT]["obj"])
+    # 00 03 07 | addr[32] | vec module | vec struct | vec [] | has_public_transfer |
+    # version[8] | contents(vec: uid[32] | balance[8]) | owner, previous tx, rebate
+    p = 3 + 32
+    p += 1 + src[p]
+    p += 1 + src[p]
+    p += 1
+    has_public_transfer, version = src[p:p + 1], src[p + 1:p + 9]
+    p += 9
+    p += 1 + src[p]
+    coin_id = bytes([0xb7] * 31 + [id_byte])
+    obj = (bytes([0x00, 0x03, 0x07]) + bytes.fromhex(package[2:])
+           + b"\x03btc" + b"\x03BTC" + b"\x00" + has_public_transfer + version
+           + bytes([40]) + coin_id + balance.to_bytes(8, "little") + src[p:])
+    return {"obj": base64.b64encode(obj).decode(),
+            "object_id": "0x" + coin_id.hex(),
+            "version": int.from_bytes(version, "little")}
+
+
+def btc_coins_by_amount(package):
+    """One BTC coin of `package` per hBTC test amount, keyed by amount."""
+    return {amount: btc_coin_object(package, i, amount)
+            for i, amount in enumerate((HBTC_AMOUNT, HBTC_AMOUNT_2))}
+
+
 FEES            = sui_to_mist(0.00000564)
 FEES_BYTES      = mist_to_bytes(FEES)
 
