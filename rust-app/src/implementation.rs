@@ -4,13 +4,14 @@ use crate::crypto_helpers::hasher::HexHash;
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::interface::*;
 use crate::parser::common::{HasObjectData, ObjectData, ObjectDigest, COIN_STRING_LENGTH};
+use crate::parser::hashi::HashiTx;
 use crate::parser::object::{compute_object_hash, object_parser};
 use crate::parser::tuid::{parse_tuid, Tuid};
 use crate::parser::tx::{tx_parser, KnownTx, TransactionExpirationVariant, TxPrincipals};
 use crate::settings::*;
 use crate::swap;
 use crate::swap::params::TxParams;
-use crate::ui::common::{ReplayDomain, StakeParams};
+use crate::ui::common::{HashiGas, ReplayDomain, StakeParams};
 use crate::ui::*;
 use crate::utils::*;
 use alamgu_async_block::*;
@@ -26,6 +27,8 @@ use ledger_parser_combinators::schema::*;
 
 use crate::crypto_helpers::common::HexSlice;
 
+extern crate alloc;
+use alloc::boxed::Box;
 use core::convert::TryFrom;
 use core::future::Future;
 
@@ -133,6 +136,32 @@ async fn check_tx_params(expected: &TxParams, received: &TxParams, ctx: &RunCtx)
     }
 }
 
+/// The Hashi review, kept out of `sign_apdu` so that its locals do not widen the
+/// `sign_apdu` poll frame, which stays on the stack while every transaction is parsed.
+async fn review_hashi_tx(
+    mut bs: ByteStream,
+    ui: &UserInterface,
+    tx: Box<HashiTx>,
+    gas: HashiGas,
+    principals: Option<TxPrincipals>,
+    replay: Option<ReplayDomain>,
+) {
+    let path = BIP_PATH_PARSER.parse(&mut bs).await;
+    if !path.starts_with(&BIP32_PREFIX[0..2]) {
+        reject::<()>(SyscallError::InvalidParameter as u16).await;
+    }
+
+    if with_public_keys(&path, true, |_, address: &SuiPubKeyAddress| {
+        // See the stake review in `sign_apdu` on why this is not an awaited unwrap.
+        try_option(principals.and_then(|p| ui.confirm_hashi_tx(address, &tx, gas, &p, replay)))
+    })
+    .ok()
+    .is_none()
+    {
+        reject::<()>(StatusWords::UserCancelled as u16).await;
+    };
+}
+
 pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInterface) {
     let _on_failure = defer::defer(|| {
         // In case of a swap, we need to communicate that signing failed
@@ -153,45 +182,58 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
 
     info!("apdu sign tx length: {}\n", length);
 
-    let mut txn = LengthTrack(input[0].clone(), 0);
-    let parsed = {
-        let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
-        let txn = &mut txn;
-        NoinlineFut(async move {
-            info!("Beginning tx_parse");
-            TryFuture(tx_parser(object_data_source).parse(txn)).await
-        })
-        .await
+    // Scoped so that the parse result, which owns heap data (a Hashi transaction is
+    // boxed), stops occupying the `sign_apdu` future before the review awaits below:
+    // a local with drop glue otherwise stays in every later coroutine state.
+    let (is_unknown_txn, principals, replay, known_txn) = {
+        let mut txn = LengthTrack(input[0].clone(), 0);
+        let parsed = {
+            let object_data_source = input.get(2).map(|bs| WithObjectData { bs: bs.clone() });
+            let txn = &mut txn;
+            NoinlineFut(async move {
+                info!("Beginning tx_parse");
+                TryFuture(tx_parser(object_data_source).parse(txn)).await
+            })
+            .await
+        };
+        // The reviewed parse must consume exactly the host-declared signed byte range,
+        // or the display and the signed bytes can disagree (B2CA-2793 finding 2).
+        // Treat any mismatch as an unrecognized tx, the same fail-safe already used
+        // for parse ambiguity elsewhere. This check is deliberately kept outside the
+        // async block above: folding it into that block's tail expression (rather
+        // than leaving `TryFuture(...).await` itself as the tail) changes the
+        // generated state machine's drop timing for the (heap-backed) parser state
+        // nested within it, which was observed to trip embedded-alloc's reentrancy
+        // guard ("RefCell already borrowed") specifically on nanox.
+        let known_txn = if txn.index() == length {
+            parsed
+        } else {
+            info!(
+                "sign_apdu: reviewed parse consumed {} bytes, signed length is {}",
+                txn.index(),
+                length
+            );
+            None
+        };
+
+        info!("End of tx_parse");
+
+        let is_unknown_txn = known_txn.is_none();
+
+        // Kept alongside the recognized tx so every review branch can disclose a
+        // sponsorship, and so swap can refuse one outright.
+        let principals = known_txn.as_ref().map(|p| p.principals);
+        let replay = known_txn.as_ref().and_then(|p| replay_domain(p.expiration));
+        let known_txn = known_txn.map(|p| p.tx);
+
+        // A Hashi transaction is never a swap. Routing it to the unknown arm, which
+        // rejects in swap mode, keeps the Hashi arm free of another await point.
+        let known_txn = match known_txn {
+            Some(KnownTx::Hashi { .. }) if ctx.is_swap() => None,
+            k => k,
+        };
+        (is_unknown_txn, principals, replay, known_txn)
     };
-    // The reviewed parse must consume exactly the host-declared signed byte range,
-    // or the display and the signed bytes can disagree (B2CA-2793 finding 2).
-    // Treat any mismatch as an unrecognized tx, the same fail-safe already used
-    // for parse ambiguity elsewhere. This check is deliberately kept outside the
-    // async block above: folding it into that block's tail expression (rather
-    // than leaving `TryFuture(...).await` itself as the tail) changes the
-    // generated state machine's drop timing for the (heap-backed) parser state
-    // nested within it, which was observed to trip embedded-alloc's reentrancy
-    // guard ("RefCell already borrowed") specifically on nanox.
-    let known_txn = if txn.index() == length {
-        parsed
-    } else {
-        info!(
-            "sign_apdu: reviewed parse consumed {} bytes, signed length is {}",
-            txn.index(),
-            length
-        );
-        None
-    };
-
-    info!("End of tx_parse");
-
-    let is_unknown_txn = known_txn.is_none();
-
-    // Kept alongside the recognized tx so every review branch can disclose a
-    // sponsorship, and so swap can refuse one outright.
-    let principals = known_txn.as_ref().map(|p| p.principals);
-    let replay = known_txn.as_ref().and_then(|p| replay_domain(p.expiration));
-    let known_txn = known_txn.map(|p| p.tx);
 
     match known_txn {
         Some(KnownTx::TransferTx {
@@ -324,6 +366,26 @@ pub async fn sign_apdu(io: HostIO, ctx: &RunCtx, settings: Settings, ui: UserInt
             {
                 reject::<()>(StatusWords::UserCancelled as u16).await;
             };
+        }
+        Some(KnownTx::Hashi {
+            tx,
+            gas_budget,
+            gas_from_address_balance,
+        }) => {
+            info!("Known Hashi tx\n");
+            let gas = HashiGas {
+                gas_budget,
+                gas_from_address_balance,
+            };
+            NoinlineFut(review_hashi_tx(
+                input[1].clone(),
+                &ui,
+                tx,
+                gas,
+                principals,
+                replay,
+            ))
+            .await;
         }
         None => {
             info!("Unknown tx\n");

@@ -29,3 +29,7 @@ tmp/
 # Claude Code transient files
 .claude/worktrees/
 .claude/.cc-writes/
+
+# Hashi fixture generator dependencies
+tests/tools/hashi-fixtures/node_modules/
+tests/tools/hashi-fixtures/package-lock.json

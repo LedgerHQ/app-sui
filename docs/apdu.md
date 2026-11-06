@@ -173,6 +173,21 @@ In the abscence of this info the user may get a blind signing prompt.
 |--------------|-----------------|
 | `<variable>` | Signature bytes |
 
+#### Hashi transactions
+
+Hashi (MystenLabs' Sui-native Bitcoin bridge) transactions are signed with `SIGN_TX`; there is no dedicated APDU. The app clear-signs these transactions, as the `@mysten/hashi` SDK builds them:
+
+| Transaction          | Move call                      | Review shows                                                                                       |
+|----------------------|--------------------------------|----------------------------------------------------------------------------------------------------|
+| Withdrawal request   | `withdraw::request_withdrawal` | hBTC amount, change to sender, destination Bitcoin address (P2WPKH or P2TR), Bitcoin network; the Bitcoin fee is deducted from the amount |
+| Withdrawal cancel    | `withdraw::cancel_withdrawal`  | Withdrawal request id and the refund account (always the sender); the refund amount is stored in the request, not in the transaction, so it is not shown |
+| Deposit registration | `deposit::deposit`             | Amount (the total if several outputs), hBTC recipient, then each Bitcoin output (txid, output index, and its amount if several; up to 4) |
+
+- Only the deployments pinned in the app (Sui mainnet, shown as "Hashi", and Sui testnet, shown as "Hashi Testnet") are recognized. A transaction must use one deployment's package, `Hashi` object, hBTC type and Sui network throughout. A transaction calling another package, using another `Hashi` object or mixing the two deployments is handled as an unknown transaction (blind signing prompt, or `0x0008` if blind signing is disabled).
+- **Parameter 3:** a withdrawal that spends hBTC coin objects needs those objects, in addition to the gas coin. A withdrawal from the address balance, a cancel and a deposit need only the gas coin, or nothing when gas is paid from the address balance (SIP-58).
+- A deposit registered for another account than the signer is allowed, but the review flags it. A cancel whose refund goes to another account is not recognized.
+- In swap mode, Hashi transactions are refused with `0x0008`.
+
 
 ### PROVIDE_TOKEN_DYNAMIC_DESCRIPTOR
 

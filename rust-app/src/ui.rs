@@ -15,4 +15,5 @@ pub const APP_ICON: NbglGlyph = NbglGlyph::from_include(include_gif!("sui_64x64.
 
 pub mod nbgl;
 pub use nbgl::*;
+pub mod bech32;
 pub mod common;

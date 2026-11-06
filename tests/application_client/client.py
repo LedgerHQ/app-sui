@@ -341,10 +341,12 @@ class Client:
         sender_addr: str,
         destination: str,
         send_amount: int,
-        fees: int) -> Tuple[bytes, List[bytes]]:
+        fees: int,
+        objects_by_amount: Dict[int, dict] = USDC_OBJECTS_BY_AMOUNT) -> Tuple[bytes, List[bytes]]:
         """
         Build a TransferToken transaction with empty gas_data.payment (SIP-58).
         Gas is paid from address balance. Uses Input(0) for the coin, not GasCoin.
+        `objects_by_amount` supplies the coin object (USDC by default).
         Returns (transaction_bytes, object_list).
         """
         gas_budget = fees
@@ -355,7 +357,7 @@ class Client:
         amount_bytes = list(send_amount.to_bytes(8, byteorder="little"))
         recepient_addr = list(bytes.fromhex(destination[2:]))
 
-        obj_info = USDC_OBJECTS_BY_AMOUNT[send_amount]
+        obj_info = objects_by_amount[send_amount]
         object_list = [base64.b64decode(obj_info["obj"])]
 
         tx_data_v1 = TransactionDataV1(
@@ -370,7 +372,7 @@ class Client:
                                 ObjectReference(
                                     ObjectID=Address.from_str(obj_info["object_id"]),
                                     SequenceNumber=obj_info["version"],
-                                    ObjectDigest=Digest.from_str(obj_info["digest"]),
+                                    ObjectDigest=Digest.from_bytes(object_digest(object_list[0])),
                                 ),
                             ),
                         ),

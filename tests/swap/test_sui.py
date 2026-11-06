@@ -1,12 +1,15 @@
 import base64
+import json
 import pytest
 from hashlib import blake2b
+from pathlib import Path
 
 from ledger_app_clients.exchange.test_runner import ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP, ExchangeTestRunner
 from ragger.error import ExceptionRAPDU
 from application_client.client import Client, Errors
 from cal_helper import (
     SUI_CURRENCY_CONFIGURATION,
+    SUI_HBTC_CURRENCY_CONFIGURATION,
     SUI_OVERSIZED_DECIMALS_CURRENCY_CONFIGURATION,
     SUI_USDC_CURRENCY_CONFIGURATION,
     SUI_UNKNOWN_CURRENCY_CONFIGURATION,
@@ -314,6 +317,89 @@ class SuiSwapWholeGasCoinTests(ExchangeTestRunner):
         verify_signature(public_key_bytes, blake2b(tx, digest_size=32).digest(), signature)
 
 
+# A Hashi withdrawal, as the pinned @mysten/hashi SDK builds it (see
+# tests/standalone/hashi_fixtures.json), signed by the swap account.
+_HASHI_WITHDRAW = json.loads(
+    (Path(__file__).parent.parent / "standalone" / "hashi_fixtures.json").read_text()
+)["withdraw_ab_p2wpkh"]
+
+# What sign_apdu answers for a transaction it refuses outright in swap mode.
+SW_NOT_SUPPORTED = 0x0008
+
+
+class SuiSwapHashiTests(SuiSwapWholeGasCoinTests):
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        client = Client(self.backend, use_block_protocol=True)
+        tx = base64.b64decode(_HASHI_WITHDRAW["tx"])
+        obj_list = [base64.b64decode(o) for o in _HASHI_WITHDRAW["objects"]]
+        client.sign_tx("m/44'/784'/12345'", tx, obj_list)
+
+
+# hBTC is Coin<package::btc::BTC> from the pinned Hashi deployment. sbWBTC (in
+# KNOWN_COINS) has the same module and struct names under another package.
+HBTC_PACKAGE = json.loads(
+    (Path(__file__).parent.parent / "standalone" / "hashi_fixtures.json").read_text()
+)["_meta"]["typePackage"]
+SBWBTC_PACKAGE = "0xaafb102dd0902f5055cadecd687fb5b71ca82ef0e0285d90afde828ec58ca96b"
+
+HBTC_COINS = btc_coins_by_amount(HBTC_PACKAGE)
+SBWBTC_COINS = btc_coins_by_amount(SBWBTC_PACKAGE)
+HBTC_MAINNET_COINS = btc_coins_by_amount(HBTC_MAINNET_PACKAGE)
+
+
+# hBTC is swapped as a plain token transfer. Testnet hBTC gets its ticker from a
+# signed dynamic descriptor for the Hashi package.
+class SuiSwapHbtcTests(ExchangeTestRunner):
+    currency_configuration = SUI_HBTC_CURRENCY_CONFIGURATION
+    valid_destination_1 = FOREIGN_ADDRESS
+    valid_destination_2 = FOREIGN_ADDRESS_2
+    valid_refund = OWNED_ADDRESS
+    valid_send_amount_1 = HBTC_AMOUNT
+    valid_send_amount_2 = HBTC_AMOUNT_2
+    valid_fees_1 = FEES
+    valid_fees_2 = FEES_2
+    fake_refund = FOREIGN_ADDRESS
+    fake_payout = FOREIGN_ADDRESS
+    signature_refusal_error_code = Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    partner_name = "Partner name"
+    fund_user_id = "Daft Punk"
+    fund_account_name = "Account 0"
+
+    coins = HBTC_COINS
+    descriptor_package = HBTC_PACKAGE
+
+    def perform_final_tx(self, destination, send_amount, fees, _memo):
+        client = Client(self.backend, use_block_protocol=True)
+
+        if self.descriptor_package:
+            client.provide_dynamic_token("hBTC", 8, self.descriptor_package, "btc", "BTC")
+
+        [tx, obj_list] = client.build_usdc_simple_transaction_empty_gas_payment(
+            OWNED_ADDRESS, destination, send_amount, fees, self.coins)
+        signature = client.sign_tx("m/44'/784'/12345'", tx, obj_list)
+
+        public_key_bytes = bytes.fromhex(OWNED_PUBLIC_KEY)
+        verify_signature(public_key_bytes, blake2b(tx, digest_size=32).digest(), signature)
+
+
+# Negative: an hBTC quote paid with sbWBTC, whose coin type differs only by package.
+class SuiSwapHbtcPaidWithSbwbtcTests(SuiSwapHbtcTests):
+    coins = SBWBTC_COINS
+
+
+# Mainnet hBTC is in KNOWN_COINS: the "hBTC" ticker resolves with no descriptor.
+class SuiSwapHbtcMainnetTests(SuiSwapHbtcTests):
+    coins = HBTC_MAINNET_COINS
+    descriptor_package = None
+
+
+# Negative: with no descriptor, "hBTC" means mainnet hBTC only, so testnet hBTC must
+# not satisfy the quote.
+class SuiSwapHbtcMainnetPaidWithTestnetTests(SuiSwapHbtcMainnetTests):
+    coins = HBTC_COINS
+
+
 class TestsSui:
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
     def test_sui(self, backend, exchange_navigation_helper, test_to_run):
@@ -379,6 +465,22 @@ class TestsSui:
                                                   "")
         assert e.value.status == SUI_SWAP_TX_NOT_RECOGNIZED
 
+    # Negative: a Hashi transaction is clear-signable outside swap, but it is never a
+    # swap. Signed under a valid SUI swap quote, it must be refused outright -- the
+    # swap check is not even reached -- rather than signed with no review.
+    def test_sui_swap_rejects_hashi(self, backend, exchange_navigation_helper):
+        runner = SuiSwapHashiTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == SW_NOT_SUPPORTED
+
     # Negative: an out-of-range decimals byte in the Exchange-supplied coin config
     # must be refused, not divided by. Before the fix the app panicked inside the
     # GET_PRINTABLE_AMOUNT libcall and never returned control, so this raised
@@ -399,3 +501,39 @@ class TestsSui:
     @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
     def test_sui_unknown_token_dynamic(self, backend, exchange_navigation_helper, test_to_run):
         SuiSwapUnknownTokenDynamicTests(backend, exchange_navigation_helper).run_test(test_to_run)
+
+    @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
+    def test_sui_hbtc(self, backend, exchange_navigation_helper, test_to_run):
+        SuiSwapHbtcTests(backend, exchange_navigation_helper).run_test(test_to_run)
+
+    # Negative: the coin type includes the package, so a coin with hBTC's module and
+    # struct names from another package must not satisfy an hBTC quote.
+    def test_sui_hbtc_rejects_sbwbtc(self, backend, exchange_navigation_helper):
+        runner = SuiSwapHbtcPaidWithSbwbtcTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH
+
+    @pytest.mark.parametrize('test_to_run', ALL_TESTS_EXCEPT_MEMO_AND_THORSWAP)
+    def test_sui_hbtc_mainnet(self, backend, exchange_navigation_helper, test_to_run):
+        SuiSwapHbtcMainnetTests(backend, exchange_navigation_helper).run_test(test_to_run)
+
+    def test_sui_hbtc_mainnet_rejects_testnet(self, backend, exchange_navigation_helper):
+        runner = SuiSwapHbtcMainnetPaidWithTestnetTests(backend, exchange_navigation_helper)
+        runner.perform_valid_swap_from_custom(runner.valid_destination_1,
+                                              runner.valid_send_amount_1,
+                                              runner.valid_fees_1,
+                                              "")
+        with pytest.raises(ExceptionRAPDU) as e:
+            runner.perform_coin_specific_final_tx(runner.valid_destination_1,
+                                                  runner.valid_send_amount_1,
+                                                  runner.valid_fees_1,
+                                                  "")
+        assert e.value.status == Errors.SUI_SWAP_TX_PARAM_MISMATCH

@@ -1,7 +1,7 @@
 use crate::ctx::{RunCtx, TICKER_LENGTH};
 use crate::parser::common::{
     coin_name_trimmed, coin_type_from_short_str, CoinType, SuiAddressRaw, SUI_COIN_DECIMALS,
-    SUI_COIN_TYPE, UNKNOWN_COIN_TYPE,
+    SUI_COIN_TYPE, SUI_MAINNET_CHAIN, SUI_TESTNET_CHAIN, UNKNOWN_COIN_TYPE,
 };
 use crate::utils::*;
 
@@ -14,14 +14,6 @@ use either::*;
 use hex_literal::hex;
 
 use ledger_device_sdk::log::trace;
-
-/// SIP-58 `ValidDuring.chain` is the network's genesis checkpoint digest. The short
-/// chain identifiers Sui publishes are its first four bytes: 35834a8a for mainnet,
-/// 4c78adac for testnet. Verified against each network's genesis checkpoint.
-const SUI_MAINNET_CHAIN: SuiAddressRaw =
-    hex!("35834a8ac17ca48fb14ac8f99c17c98747e95dd07294ae41a46b382246a4499b");
-const SUI_TESTNET_CHAIN: SuiAddressRaw =
-    hex!("4c78adacf2a2f5ad80f27ed7d54aa69d3a78f1ca67fdef9ecf5754f5b8bb77b0");
 
 /// The network a `ValidDuring.chain` names, when it is one this app knows. Devnet
 /// and local networks are regenerated and so have no fixed digest; those fall back
@@ -57,6 +49,13 @@ pub struct StakeParams {
 pub struct ReplayDomain {
     pub chain: SuiAddressRaw,
     pub nonce: u32,
+}
+
+/// Gas of a Hashi transaction, grouped to keep the review's argument count sane.
+#[derive(Copy, Clone)]
+pub struct HashiGas {
+    pub gas_budget: u64,
+    pub gas_from_address_balance: bool,
 }
 
 pub const LEDGER_STAKE_ADDRESS: [u8; 32] =
@@ -184,7 +183,7 @@ struct KnownCoin<'a> {
     ticker: &'a str,
 }
 
-const KNOWN_COINS: [KnownCoin; 50] = [
+const KNOWN_COINS: [KnownCoin; 51] = [
     KnownCoin {
         coin_id: hex!("a8816d3a6e3136e86bc2873b1f94a15cadc8af2703c075f2d546c2ae367f4df9"),
         module: "ocean",
@@ -534,5 +533,14 @@ const KNOWN_COINS: [KnownCoin; 50] = [
         function: "WAL",
         divisor: 9,
         ticker: "WAL",
+    },
+    // hBTC of the Hashi mainnet deployment (parser/hashi.rs); the testnet one is
+    // resolved through a dynamic descriptor.
+    KnownCoin {
+        coin_id: hex!("d30fb3f8914efdbeb7b8e85fae1d65dc584b44a1281f66737b92bb9f03a59d06"),
+        module: "btc",
+        function: "BTC",
+        divisor: 8,
+        ticker: "hBTC",
     },
 ];
