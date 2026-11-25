@@ -103,6 +103,14 @@ pub const UNKNOWN_COIN_TYPE: CoinType = (
 
 pub const SUI_COIN_DECIMALS: u8 = 9;
 
+/// SIP-58 `ValidDuring.chain` is the network's genesis checkpoint digest. The short
+/// chain identifiers Sui publishes are its first four bytes: 35834a8a for mainnet,
+/// 4c78adac for testnet. Verified against each network's genesis checkpoint.
+pub const SUI_MAINNET_CHAIN: SuiAddressRaw =
+    hex_literal::hex!("35834a8ac17ca48fb14ac8f99c17c98747e95dd07294ae41a46b382246a4499b");
+pub const SUI_TESTNET_CHAIN: SuiAddressRaw =
+    hex_literal::hex!("4c78adacf2a2f5ad80f27ed7d54aa69d3a78f1ca67fdef9ecf5754f5b8bb77b0");
+
 // Parsed on-ledger object data. The coin-vs-stake distinction must be preserved
 // here: a StakedSui object is NOT liquid SUI, so it must never be classified as a
 // plain coin by downstream transfer/split/merge validation.

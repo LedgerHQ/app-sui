@@ -1,8 +1,10 @@
 use crate::parser::common::*;
+use crate::parser::hashi::*;
 use crate::parser::object::{struct_tag_parser, TypeTag};
 use crate::utils::{estimate_btree_map_usage, NoinlineFut};
 
 extern crate alloc;
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use arrayvec::ArrayVec;
 use core::convert::TryFrom;
@@ -164,6 +166,8 @@ pub enum CallArg {
     /// SIP-58: withdraw from address balance (`FundsWithdrawalArg`: type tag +
     /// amount + whose balance is drawn on)
     FundsWithdrawal(CoinType, u64, WithdrawFrom),
+    /// Pure value kept undecoded for a Hashi call (see `is_raw_pure_len`).
+    RawPure(RawPure),
     Other,
 }
 
@@ -177,7 +181,14 @@ pub enum InputValue {
     Object(CoinData),
     /// SIP-58: FundsWithdrawal input (coin type from type tag + reservation amount)
     FundsWithdrawal(CoinType, u64),
+    /// Decoded only by Hashi handlers, against the Move type they expect; every other
+    /// consumer rejects it, exactly as when these lengths were not stored at all.
+    RawPure(RawPure),
 }
+
+// Keeping raw Pure values must not grow the per-entry size the heap budget
+// (`check_heap_use`) is estimated from.
+const _: () = assert!(core::mem::size_of::<RawPure>() <= core::mem::size_of::<CoinData>());
 
 impl HasOutput<CallArgSchema> for DefaultInterp {
     type Output = CallArg;
@@ -251,6 +262,24 @@ impl<BS: Clone + Readable> AsyncParser<CallArgSchema, BS> for DefaultInterp {
                             )
                             .await,
                         ),
+                        len if is_raw_pure_len(len) => {
+                            let mut buf = [0u8; RAW_PURE_MAX];
+                            for b in buf.iter_mut().take(len as usize) {
+                                let [v]: [u8; 1] = input.read().await;
+                                *b = v;
+                            }
+                            match RawPure::new(buf.get(..len as usize).unwrap_or(&[])) {
+                                Some(v) => CallArg::RawPure(v),
+                                None => {
+                                    reject_on(
+                                        core::file!(),
+                                        core::line!(),
+                                        SyscallError::NotSupported as u16,
+                                    )
+                                    .await
+                                }
+                            }
+                        }
                         _ => {
                             for _ in 0..length {
                                 let _: [u8; 1] = input.read().await;
@@ -479,7 +508,30 @@ pub enum CommandResult {
     FundsWithdrawalSplit(TotalCoinAmount),
     /// SIP-58: result of balance::redeem_funds
     BalanceRedeemFunds(TotalCoinAmount),
+    // Hashi intermediates. Only Hashi handlers consume these (removing them as they
+    // do), every other handler rejects them, and a transaction that still holds one
+    // at the end is rejected (see `finish_hashi`).
+    /// A `Balance<BTC>` and its amount, from `0x2::balance::redeem_funds` applied to a
+    /// FundsWithdrawal input or from `0x2::coin::into_balance`.
+    HashiBtcBalance(CoinData),
+    /// `withdraw::cancel_withdrawal`'s `Balance<BTC>`: the amount is not in the tx.
+    HashiCancelBalance,
+    /// `0x2::coin::from_balance` applied to `HashiCancelBalance`.
+    HashiCancelCoin,
+    /// `utxo::utxo_id(txid, vout)`.
+    HashiUtxoId(SuiAddressRaw, u32),
+    /// `utxo::utxo(id, amount, Some(recipient))`.
+    HashiUtxo(HashiUtxo, SuiAddressRaw),
+    /// A UTXO registered by `deposit::deposit`, kept for the review.
+    HashiDeposited(HashiUtxo),
 }
+
+// The Hashi variants must not grow the per-entry size the heap budget
+// (`check_heap_use`) is estimated from.
+const _: () = assert!(
+    core::mem::size_of::<(HashiUtxo, SuiAddressRaw)>()
+        <= core::mem::size_of::<(CoinType, ArrayVec<u64, SPLIT_COIN_ARRAY_LENGTH>)>()
+);
 
 impl HasOutput<CommandSchema> for DefaultInterp {
     type Output = Command;
@@ -689,6 +741,9 @@ pub enum ProgrammableTransaction {
     UnstakeTx {
         total_amount: u64,
     },
+    /// Boxed: the parse output is held across every await of the transaction-data
+    /// parser, so a deposit's UTXO list must not widen it.
+    Hashi(Box<HashiTx>),
 }
 
 // As we parse each Command we need to keep track of what kind of a transaction are we parsing
@@ -702,6 +757,22 @@ pub enum ProgrammableTransactionTypeState {
     TransferTx,
     StakeTx,
     UnstakeTx,
+    /// Hashi states are entered only from a pinned Hashi package call; each admits
+    /// just the commands of its own flow (see `handle_hashi_call`).
+    HashiWithdrawTx,
+    HashiCancelTx,
+    HashiDepositTx,
+}
+
+impl ProgrammableTransactionTypeState {
+    fn is_hashi(&self) -> bool {
+        matches!(
+            self,
+            ProgrammableTransactionTypeState::HashiWithdrawTx
+                | ProgrammableTransactionTypeState::HashiCancelTx
+                | ProgrammableTransactionTypeState::HashiDepositTx
+        )
+    }
 }
 
 /// Facts gathered while parsing a programmable transaction that can only be judged
@@ -823,6 +894,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                             info!("Input {}: SharedObject", i);
                             inputs.insert(i, InputValue::SharedObject(v));
                         }
+                        CallArg::RawPure(v) => {
+                            info!("Input {}: RawPure", i);
+                            inputs.insert(i, InputValue::RawPure(v));
+                        }
                     }
                 }
             }
@@ -856,6 +931,8 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
 
             let mut self_deposit: Option<SuiAddressRaw> = None;
 
+            let mut hashi: Option<Box<HashiAccum>> = None;
+
             // Parse commands
             {
                 let length_u32 =
@@ -880,6 +957,27 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     ))
                     .await;
                     match c {
+                        // A separate arm, so the generic MoveCall arm below keeps the
+                        // coroutine layout it had: rebinding the call there grows every
+                        // parser state, and with it the `sign_apdu` future (nanox).
+                        Command::MoveCall(package, module, function, args)
+                            if classify_hashi_call(&package, &module, &function, &args)
+                                .is_some() =>
+                        {
+                            let route = classify_hashi_call(&package, &module, &function, &args);
+                            NoinlineFut(handle_hashi_call(
+                                route,
+                                args,
+                                command_ix,
+                                &mut inputs,
+                                &mut command_results,
+                                self.object_data_source.clone(),
+                                &mut tx_type,
+                                &mut hashi,
+                                &mut self_deposit,
+                            ))
+                            .await;
+                        }
                         call @ Command::MoveCall(..) => {
                             match tx_type {
                                 ProgrammableTransactionTypeState::UnknownTx => {}
@@ -952,6 +1050,17 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                     tx_type = ProgrammableTransactionTypeState::TransferTx;
                                 }
                                 ProgrammableTransactionTypeState::TransferTx => {}
+                                ProgrammableTransactionTypeState::HashiCancelTx => {
+                                    NoinlineFut(handle_hashi_cancel_transfer(
+                                        coins,
+                                        recipient_input,
+                                        &inputs,
+                                        &mut command_results,
+                                        &mut hashi,
+                                    ))
+                                    .await;
+                                    continue;
+                                }
                                 _ => {
                                     reject_on(
                                         core::file!(),
@@ -970,6 +1079,19 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                                 self.object_data_source.clone(),
                                 &command_results,
                             ))
+                            .await;
+                        }
+                        // A Hashi call ends its flow's coin handling.
+                        Command::SplitCoins(..)
+                        | Command::MergeCoins(..)
+                        | Command::MakeMoveVec(..)
+                            if tx_type.is_hashi() =>
+                        {
+                            reject_on::<()>(
+                                core::file!(),
+                                core::line!(),
+                                SyscallError::NotSupported as u16,
+                            )
                             .await;
                         }
                         Command::SplitCoins(coin, amounts) => {
@@ -1007,6 +1129,40 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                         }
                     }
                 }
+            }
+
+            if tx_type.is_hashi() {
+                // A Hashi flow never touches the gas coin, and nothing in it is a
+                // transfer or stake.
+                let finished = if added_amount_to_gas_coin != 0
+                    || split_amount_from_gas_coin != 0
+                    || total_coin_amount.is_some()
+                    || recipient_addr.is_some()
+                {
+                    None
+                } else {
+                    finish_hashi(&tx_type, hashi, &inputs, &command_results)
+                };
+                let Some(tx) = finished else {
+                    reject_on(
+                        core::file!(),
+                        core::line!(),
+                        SyscallError::NotSupported as u16,
+                    )
+                    .await
+                };
+                flow.self_deposit = self_deposit;
+                return (ProgrammableTransaction::Hashi(tx), flow);
+            }
+            // A Hashi route taken outside a complete Hashi flow: before Hashi support
+            // it was rejected, so it still is.
+            if hashi.is_some() {
+                reject_on::<()>(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await;
             }
 
             // We must have the coin_type info by now, irrespective of the tx type
@@ -1125,7 +1281,10 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<ProgrammableTr
                     }
                     ProgrammableTransaction::UnstakeTx { total_amount }
                 }
-                ProgrammableTransactionTypeState::UnknownTx => {
+                ProgrammableTransactionTypeState::UnknownTx
+                | ProgrammableTransactionTypeState::HashiWithdrawTx
+                | ProgrammableTransactionTypeState::HashiCancelTx
+                | ProgrammableTransactionTypeState::HashiDepositTx => {
                     reject_on(
                         core::file!(),
                         core::line!(),
@@ -1358,22 +1517,14 @@ async fn handle_move_call<OD: HasObjectData>(
                 )
                 .await
             };
-            // Only one recipient is carried, and the check below sees only that one.
-            // Overwriting would let a large hidden send to an attacker be replaced by a
-            // small one back to the sender, and pass. Repeats of the same recipient are
-            // harmless, so only a differing one is refused.
-            if let Some(existing) = *self_deposit {
-                if existing != *addr {
-                    error!("multiple coin::send_funds recipients");
-                    reject_on::<()>(
-                        core::file!(),
-                        core::line!(),
-                        SyscallError::NotSupported as u16,
-                    )
-                    .await;
-                }
-            } else {
-                *self_deposit = Some(*addr);
+            if !record_self_deposit(self_deposit, addr) {
+                error!("multiple coin::send_funds recipients");
+                reject_on::<()>(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await;
             }
             return Right(CommandResult::MergedCoin((*coin_type, 0)));
         }
@@ -1634,6 +1785,468 @@ async fn handle_move_call<OD: HasObjectData>(
 }
 
 // Obtain the recipient address and total value of coins being transferred
+// ---------------------------------------------------------------------------------
+// Hashi (see `parser::hashi`)
+//
+// Every route below was rejected before Hashi support: calls to a non-0x2/0x3 package,
+// `coin::into_balance` / `coin::from_balance`, and `balance::redeem_funds` /
+// `coin::send_funds` applied to an input. A transaction that takes any of them must
+// end in a complete Hashi flow, or it is rejected, so nothing new is accepted for
+// other transactions.
+
+/// Hashi bookkeeping, allocated on the first Hashi route so that other transactions'
+/// parser futures only carry an empty pointer.
+#[derive(Default)]
+struct HashiAccum {
+    deployment: Option<u8>,
+    withdraw: Option<(u64, BtcAddress)>,
+    change: u64,
+    cancel_request_id: Option<SuiAddressRaw>,
+    refund_recipient: Option<SuiAddressRaw>,
+    deposit_recipient: Option<SuiAddressRaw>,
+    deposits: u8,
+}
+
+impl HashiAccum {
+    /// All Hashi calls of one transaction must target the same deployment.
+    fn bind(&mut self, deployment: u8) -> bool {
+        *self.deployment.get_or_insert(deployment) == deployment
+    }
+}
+
+#[derive(Clone, Copy)]
+enum HashiCall {
+    RequestWithdrawal,
+    CancelWithdrawal,
+    UtxoId,
+    Utxo,
+    Deposit,
+}
+
+#[derive(Clone, Copy)]
+enum HashiRoute {
+    Package(u8, HashiCall),
+    CoinIntoBalance,
+    CoinFromBalance,
+    BalanceRedeemInput,
+    CoinSendFundsInput,
+}
+
+fn classify_hashi_call(
+    package: &CoinID,
+    module: &[u8],
+    function: &[u8],
+    args: &[Argument],
+) -> Option<HashiRoute> {
+    let module = core::str::from_utf8(module).ok()?;
+    let function = core::str::from_utf8(function).ok()?;
+    if let Some(deployment) = deployment_for_call_package(package) {
+        let call = match (module, function) {
+            ("withdraw", "request_withdrawal") => HashiCall::RequestWithdrawal,
+            ("withdraw", "cancel_withdrawal") => HashiCall::CancelWithdrawal,
+            ("utxo", "utxo_id") => HashiCall::UtxoId,
+            ("utxo", "utxo") => HashiCall::Utxo,
+            ("deposit", "deposit") => HashiCall::Deposit,
+            // Anything else on a Hashi package stays unknown.
+            _ => return None,
+        };
+        return Some(HashiRoute::Package(deployment, call));
+    }
+    if *package != SUI_COIN_ID {
+        return None;
+    }
+    match (module, function, args.first()) {
+        ("coin", "into_balance", _) => Some(HashiRoute::CoinIntoBalance),
+        ("coin", "from_balance", _) => Some(HashiRoute::CoinFromBalance),
+        ("balance", "redeem_funds", Some(Argument::Input(_))) => {
+            Some(HashiRoute::BalanceRedeemInput)
+        }
+        ("coin", "send_funds", Some(Argument::Input(_))) => Some(HashiRoute::CoinSendFundsInput),
+        _ => None,
+    }
+}
+
+fn hashi_input<'a>(
+    inputs: &'a BTreeMap<u16, InputValue>,
+    arg: Option<&Argument>,
+) -> Option<&'a InputValue> {
+    match arg? {
+        Argument::Input(ix) => inputs.get(ix),
+        _ => None,
+    }
+}
+
+fn is_shared_object(
+    inputs: &BTreeMap<u16, InputValue>,
+    arg: Option<&Argument>,
+    id: &CoinID,
+) -> bool {
+    matches!(hashi_input(inputs, arg), Some(InputValue::SharedObject(v)) if v == id)
+}
+
+/// Consumes a single-value command result, referenced as `Result(ix)` or
+/// `NestedResult(ix, 0)`, so it cannot be used twice.
+fn take_result(
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    arg: Option<&Argument>,
+) -> Option<CommandResult> {
+    match arg? {
+        Argument::Result(ix) | Argument::NestedResult(ix, 0) => command_results.remove(ix),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_hashi_call<OD: HasObjectData>(
+    route: Option<HashiRoute>,
+    args: ArrayVec<Argument, MOVE_CALL_ARGS_ARRAY_LENGTH>,
+    command_ix: u16,
+    inputs: &mut BTreeMap<u16, InputValue>,
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    object_data_source: OD,
+    tx_type: &mut ProgrammableTransactionTypeState,
+    hashi: &mut Option<Box<HashiAccum>>,
+    self_deposit: &mut Option<SuiAddressRaw>,
+) {
+    let acc = hashi.get_or_insert_with(Default::default);
+    let coin = match (route, args.first()) {
+        (Some(HashiRoute::CoinIntoBalance | HashiRoute::CoinSendFundsInput), Some(arg)) => Some(
+            NoinlineFut(get_coin_arg_amount(
+                arg,
+                inputs,
+                &object_data_source,
+                command_results,
+            ))
+            .await,
+        ),
+        _ => None,
+    };
+    let applied = route.and_then(|route| {
+        apply_hashi_call(
+            route,
+            &args,
+            coin,
+            command_ix,
+            inputs,
+            command_results,
+            tx_type,
+            acc,
+            self_deposit,
+        )
+    });
+    if applied.is_none() {
+        info!("Hashi call rejected");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_hashi_call(
+    route: HashiRoute,
+    args: &[Argument],
+    coin: Option<CommandArgumentAmount>,
+    command_ix: u16,
+    inputs: &mut BTreeMap<u16, InputValue>,
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    tx_type: &mut ProgrammableTransactionTypeState,
+    acc: &mut HashiAccum,
+    self_deposit: &mut Option<SuiAddressRaw>,
+) -> Option<()> {
+    use ProgrammableTransactionTypeState as S;
+    match route {
+        HashiRoute::Package(dep_ix, call) => {
+            let dep = deployment(dep_ix)?;
+            if !acc.bind(dep_ix) {
+                return None;
+            }
+            match call {
+                HashiCall::RequestWithdrawal => {
+                    // (hashi: &mut Hashi, clock: &Clock, btc: Balance<BTC>, bitcoin_address: vector<u8>)
+                    // Terminal and single: nothing but change handling may precede it.
+                    if *tx_type != S::UnknownTx
+                        || args.len() != 4
+                        || !is_shared_object(inputs, args.first(), &dep.hashi_object)
+                        || !is_shared_object(inputs, args.get(1), &SUI_CLOCK_ID)
+                    {
+                        return None;
+                    }
+                    let Some(InputValue::RawPure(address)) = hashi_input(inputs, args.get(3))
+                    else {
+                        return None;
+                    };
+                    let btc_address = address.as_witness_program()?;
+                    let CommandResult::HashiBtcBalance((coin_type, amount)) =
+                        take_result(command_results, args.get(2))?
+                    else {
+                        return None;
+                    };
+                    if coin_type != btc_coin_type(dep) || amount == 0 {
+                        return None;
+                    }
+                    acc.withdraw = Some((amount, btc_address));
+                    *tx_type = S::HashiWithdrawTx;
+                }
+                HashiCall::CancelWithdrawal => {
+                    // (hashi: &mut Hashi, request_id: address, clock: &Clock): Balance<BTC>
+                    if *tx_type != S::UnknownTx
+                        || args.len() != 3
+                        || !is_shared_object(inputs, args.first(), &dep.hashi_object)
+                        || !is_shared_object(inputs, args.get(2), &SUI_CLOCK_ID)
+                    {
+                        return None;
+                    }
+                    let Some(InputValue::RecipientAddress(request_id)) =
+                        hashi_input(inputs, args.get(1))
+                    else {
+                        return None;
+                    };
+                    acc.cancel_request_id = Some(*request_id);
+                    command_results.insert(command_ix, CommandResult::HashiCancelBalance);
+                    *tx_type = S::HashiCancelTx;
+                }
+                HashiCall::UtxoId => {
+                    // (txid: address, vout: u32): UtxoId
+                    if !matches!(*tx_type, S::UnknownTx | S::HashiDepositTx) || args.len() != 2 {
+                        return None;
+                    }
+                    let Some(InputValue::RecipientAddress(txid)) =
+                        hashi_input(inputs, args.first())
+                    else {
+                        return None;
+                    };
+                    let Some(InputValue::RawPure(vout)) = hashi_input(inputs, args.get(1)) else {
+                        return None;
+                    };
+                    let result = CommandResult::HashiUtxoId(*txid, vout.as_u32()?);
+                    command_results.insert(command_ix, result);
+                    *tx_type = S::HashiDepositTx;
+                }
+                HashiCall::Utxo => {
+                    // (utxo_id: UtxoId, amount: u64, derivation_path: Option<address>): Utxo
+                    if *tx_type != S::HashiDepositTx || args.len() != 3 {
+                        return None;
+                    }
+                    let Some(InputValue::Amount(amount)) = hashi_input(inputs, args.get(1)) else {
+                        return None;
+                    };
+                    let amount = *amount;
+                    // `None` mints nothing and is not a deposit anyone should sign.
+                    let Some(InputValue::RawPure(path)) = hashi_input(inputs, args.get(2)) else {
+                        return None;
+                    };
+                    let recipient = path.as_some_address()?;
+                    let CommandResult::HashiUtxoId(txid, vout) =
+                        take_result(command_results, args.first())?
+                    else {
+                        return None;
+                    };
+                    if amount == 0 {
+                        return None;
+                    }
+                    let utxo = HashiUtxo { txid, vout, amount };
+                    command_results.insert(command_ix, CommandResult::HashiUtxo(utxo, recipient));
+                }
+                HashiCall::Deposit => {
+                    // (hashi: &mut Hashi, utxo: Utxo, clock: &Clock)
+                    if *tx_type != S::HashiDepositTx
+                        || args.len() != 3
+                        || !is_shared_object(inputs, args.first(), &dep.hashi_object)
+                        || !is_shared_object(inputs, args.get(2), &SUI_CLOCK_ID)
+                    {
+                        return None;
+                    }
+                    let CommandResult::HashiUtxo(utxo, recipient) =
+                        take_result(command_results, args.get(1))?
+                    else {
+                        return None;
+                    };
+                    // The review shows one recipient, so every UTXO must credit it.
+                    if *acc.deposit_recipient.get_or_insert(recipient) != recipient
+                        || acc.deposits as usize >= MAX_HASHI_DEPOSIT_UTXOS
+                    {
+                        return None;
+                    }
+                    acc.deposits += 1;
+                    command_results.insert(command_ix, CommandResult::HashiDeposited(utxo));
+                }
+            }
+        }
+        HashiRoute::CoinIntoBalance => {
+            // 0x2::coin::into_balance<BTC>(coin): the balance a withdrawal locks.
+            let Some(CommandArgumentAmount::Coin { coin_type, amount }) = coin else {
+                return None;
+            };
+            if *tx_type != S::UnknownTx || args.len() != 1 || !is_btc_coin_type(&coin_type) {
+                return None;
+            }
+            let result = CommandResult::HashiBtcBalance((coin_type, amount));
+            command_results.insert(command_ix, result);
+        }
+        HashiRoute::BalanceRedeemInput => {
+            // 0x2::balance::redeem_funds<BTC>(withdrawal): the whole reservation.
+            let Some(InputValue::FundsWithdrawal(coin_type, amount)) =
+                hashi_input(inputs, args.first())
+            else {
+                return None;
+            };
+            if *tx_type != S::UnknownTx || args.len() != 1 || !is_btc_coin_type(coin_type) {
+                return None;
+            }
+            let result = CommandResult::HashiBtcBalance((*coin_type, *amount));
+            command_results.insert(command_ix, result);
+        }
+        HashiRoute::CoinSendFundsInput => {
+            // 0x2::coin::send_funds<BTC>(coin, recipient): what is left of the coins a
+            // withdrawal split its amount from returns to an address balance. It is
+            // the withdrawal's change, so it must go back to the sender.
+            let Some(CommandArgumentAmount::Coin { coin_type, amount }) = coin else {
+                return None;
+            };
+            let Some(InputValue::RecipientAddress(recipient)) = hashi_input(inputs, args.get(1))
+            else {
+                return None;
+            };
+            if *tx_type != S::UnknownTx
+                || args.len() != 2
+                || !is_btc_coin_type(&coin_type)
+                || !record_self_deposit(self_deposit, recipient)
+            {
+                return None;
+            }
+            acc.change = acc.change.checked_add(amount)?;
+            // The coin is consumed: a later reference sees nothing left in it.
+            let Some(Argument::Input(ix)) = args.first() else {
+                return None;
+            };
+            inputs.insert(*ix, InputValue::Object((coin_type, 0)));
+        }
+        HashiRoute::CoinFromBalance => {
+            // 0x2::coin::from_balance<BTC>(balance): the cancel refund, as a coin.
+            if *tx_type != S::HashiCancelTx || args.len() != 1 {
+                return None;
+            }
+            let CommandResult::HashiCancelBalance = take_result(command_results, args.first())?
+            else {
+                return None;
+            };
+            command_results.insert(command_ix, CommandResult::HashiCancelCoin);
+        }
+    }
+    Some(())
+}
+
+/// The `TransferObjects` that hands a cancel's refunded coin to its recipient, which
+/// `TransactionDataParser` checks against the sender.
+async fn handle_hashi_cancel_transfer(
+    coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
+    recipient: Argument,
+    inputs: &BTreeMap<u16, InputValue>,
+    command_results: &mut BTreeMap<u16, CommandResult>,
+    hashi: &mut Option<Box<HashiAccum>>,
+) {
+    let mut apply = || -> Option<()> {
+        let acc = hashi.as_mut()?;
+        let [coin] = coins.as_slice() else {
+            return None;
+        };
+        let CommandResult::HashiCancelCoin = take_result(command_results, Some(coin))? else {
+            return None;
+        };
+        let Some(InputValue::RecipientAddress(addr)) = hashi_input(inputs, Some(&recipient)) else {
+            return None;
+        };
+        if acc.refund_recipient.is_some() {
+            return None;
+        }
+        acc.refund_recipient = Some(*addr);
+        Some(())
+    };
+    if apply().is_none() {
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+}
+
+/// Completes a Hashi flow. Besides the flow's own calls, a withdrawal may merge, split
+/// and return change of its deployment's BTC; a cancel or deposit moves no coin at all.
+/// Anything else left over -- another coin type, an unconsumed Hashi value, any other
+/// intermediate -- rejects.
+fn finish_hashi(
+    tx_type: &ProgrammableTransactionTypeState,
+    acc: Option<Box<HashiAccum>>,
+    inputs: &BTreeMap<u16, InputValue>,
+    command_results: &BTreeMap<u16, CommandResult>,
+) -> Option<Box<HashiTx>> {
+    use ProgrammableTransactionTypeState as S;
+    let acc = acc?;
+    let dep_ix = acc.deployment?;
+    let btc = btc_coin_type(deployment(dep_ix)?);
+    let withdraw = *tx_type == S::HashiWithdrawTx;
+
+    for v in inputs.values() {
+        let allowed = match v {
+            InputValue::Object((coin_type, _)) | InputValue::FundsWithdrawal(coin_type, _) => {
+                withdraw && *coin_type == btc
+            }
+            // Merge sources stay unresolved refs; their type matched the destination's.
+            InputValue::ObjectRef(_) => withdraw,
+            _ => true,
+        };
+        if !allowed {
+            return None;
+        }
+    }
+
+    let mut utxos = HashiUtxos::new();
+    let mut total: u64 = 0;
+    for r in command_results.values() {
+        match r {
+            CommandResult::SplitCoinAmounts(coin_type, _)
+            | CommandResult::MergedCoin((coin_type, _))
+                if withdraw && *coin_type == btc => {}
+            CommandResult::HashiDeposited(utxo) if *tx_type == S::HashiDepositTx => {
+                utxos.push(*utxo)?;
+                total = total.checked_add(utxo.amount)?;
+            }
+            _ => return None,
+        }
+    }
+
+    let op = match tx_type {
+        S::HashiWithdrawTx => {
+            let (amount, btc_address) = acc.withdraw?;
+            HashiOp::Withdraw {
+                amount,
+                change: acc.change,
+                btc_address,
+            }
+        }
+        S::HashiCancelTx => HashiOp::Cancel {
+            request_id: acc.cancel_request_id?,
+            refund_recipient: acc.refund_recipient?,
+        },
+        S::HashiDepositTx if !utxos.as_slice().is_empty() => HashiOp::Deposit {
+            recipient: acc.deposit_recipient?,
+            utxos,
+            total,
+        },
+        _ => return None,
+    };
+    Some(Box::new(HashiTx {
+        deployment: dep_ix,
+        op,
+    }))
+}
+
 async fn handle_transfer_object<OD: HasObjectData>(
     coins: ArrayVec<Argument, TRANSFER_OBJECT_ARRAY_LENGTH>,
     recipient_input: Argument,
@@ -2139,9 +2752,25 @@ async fn handle_split_coins<OD: HasObjectData>(
     CommandResult::SplitCoinAmounts(coin_type, coin_amounts)
 }
 
+// Records the recipient of a change-returning `send_funds`; TransactionDataParser later
+// asserts it equals the sender. Only one recipient is carried, and that check sees only
+// that one. Overwriting would let a large hidden send to an attacker be replaced by a
+// small one back to the sender, and pass. Repeats of the same recipient are harmless,
+// so only a differing one is refused: returns false, and the caller must reject.
+fn record_self_deposit(self_deposit: &mut Option<SuiAddressRaw>, addr: &SuiAddressRaw) -> bool {
+    match self_deposit {
+        Some(existing) => existing == addr,
+        None => {
+            *self_deposit = Some(*addr);
+            true
+        }
+    }
+}
+
 // The array of 'coins' are merged into the 'dest_coin'
 // The value of the 'dest_coin' will be modified in place
 // 'dest_coin' can be a GasCoin, input object, or a result of a previous command
+// Returns the coin type of the merged coin.
 async fn handle_merge_coins<OD: HasObjectData>(
     dest_coin: Argument,
     coins: ArrayVec<Argument, MERGE_COIN_ARRAY_LENGTH>,
@@ -2149,7 +2778,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
     object_data_source: OD,
     command_results: &mut BTreeMap<u16, CommandResult>,
     added_amount_to_gas_coin: &mut u64,
-) {
+) -> CoinType {
     // B2CA-2793 follow-up (finding 1): accumulate the merged balance with checked
     // arithmetic. `overflow-checks` is off in both profiles, so a plain `+=` wraps
     // modulo 2^64 and would hand the UI (and the no-UI swap comparison) an amount
@@ -2405,6 +3034,7 @@ async fn handle_merge_coins<OD: HasObjectData>(
             };
         }
     }
+    coin_type
 }
 
 // Obtains the total amount of all coins which are part of the resultant vector and the coin type
@@ -2625,6 +3255,202 @@ pub struct TransactionDataParser<OD> {
     object_data_source: OD,
 }
 
+/// Total balance of the gas payment coins, or `None` when it is not known: paid from
+/// the address balance, an object not supplied, a staked position, or an overflow.
+/// Out of line so that the coin lookup's state stays out of its caller's frame.
+async fn gas_coins_total<OD: HasObjectData>(
+    object_data_source: &OD,
+    gas_coins: &[ObjectDigest],
+    gas_from_address_balance: bool,
+) -> Option<u64> {
+    let mut total_gas_amount: Option<u64> = if gas_from_address_balance {
+        None
+    } else {
+        Some(0)
+    };
+    for digest in gas_coins.iter() {
+        if let Some(amt0) = total_gas_amount {
+            let object_data = object_data_source.get_object_data(digest).await;
+            match object_data {
+                // B2CA-2793 follow-up (finding 1): checked. If the
+                // gas payment balances sum past u64::MAX the total is
+                // not representable, so leave it unknown (None) --
+                // exactly like an unresolvable payment object below.
+                // A GasCoin transfer/stake then falls back to the
+                // unrecognized-tx path instead of clear-signing a
+                // wrapped, understated amount.
+                Some(ObjectData::Coin { amount, .. }) => {
+                    total_gas_amount = amt0.checked_add(amount)
+                }
+                // A StakedSui position cannot pay gas; treat the
+                // total as unknown rather than as a liquid amount.
+                Some(ObjectData::StakedSui { .. }) | None => total_gas_amount = None,
+            }
+        }
+    }
+    total_gas_amount
+}
+
+/// Everything `TransactionData` V1 parses after its `TransactionKind`: sender, gas
+/// data and expiration, and the checks that need them.
+async fn transaction_data_v1_tail<BS: Clone + Readable, OD: HasObjectData>(
+    input: &mut BS,
+    object_data_source: &OD,
+    v: ProgrammableTransaction,
+    flow: PtbFacts,
+) -> TransactionDataV1Output {
+    let sender = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(&DefaultInterp, input).await;
+
+    // SIP-58: coin::send_funds returns the redeemed change to the signer's address
+    // balance. Its recipient never reaches the display (only TransferObjects is
+    // shown), so a hostile host could redeem the whole balance, show a small decoy
+    // transfer, and divert the remainder. Reject (routes to not-recognized; hard
+    // reject in swap) unless the change returns to the sender.
+    if let Some(deposit) = flow.self_deposit {
+        if deposit != sender {
+            error!("coin::send_funds change recipient is not the sender (SIP-58)");
+            reject_on::<()>(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await;
+        }
+    }
+
+    // A Hashi cancel refunds the full pending amount as a coin; only the
+    // requester can cancel, and the refund must go back to them.
+    if let ProgrammableTransaction::Hashi(tx) = &v {
+        if let HashiOp::Cancel {
+            refund_recipient, ..
+        } = tx.op
+        {
+            if refund_recipient != sender {
+                error!("Hashi cancel refund recipient is not the sender");
+                reject_on::<()>(
+                    core::file!(),
+                    core::line!(),
+                    SyscallError::NotSupported as u16,
+                )
+                .await;
+            }
+        }
+    }
+
+    // Out of line: the parser copies the payment list (up to MAX_GAS_COIN_COUNT
+    // digests) on its way out, which would otherwise stay in this frame during the
+    // gas coin lookup below.
+    let (gas_coins, gas_owner, gas_budget) = NoinlineFut(gas_data_parser().parse(input)).await;
+
+    // SIP-58: gas_coins may be empty (gas paid from address balance). The
+    // gas coin's balance is then genuinely unknown to the device, so seed
+    // total_gas_amount with None (same as the "coin object not found"
+    // fallback below) rather than Some(0) -- otherwise a GasCoin
+    // transfer/stake would clear-sign a false "0 SUI" instead of falling
+    // back to the unrecognized-tx path (B2CA-2793 finding 4).
+    let gas_from_address_balance = gas_coins.is_empty();
+
+    // Try to find the total amount of all gas payment objects
+    // This value may be necessary if the transaction contains transfer of entire GasCoin
+    let total_gas_amount = NoinlineFut(gas_coins_total(
+        object_data_source,
+        &gas_coins,
+        gas_from_address_balance,
+    ))
+    .await;
+
+    let expiration = TransactionExpirationParser.parse(input).await;
+
+    // A pinned Hashi deployment lives on one Sui network; a replay
+    // domain naming another one is not that deployment.
+    if let (
+        ProgrammableTransaction::Hashi(tx),
+        TransactionExpirationVariant::ValidDuring { chain, .. },
+    ) = (&v, &expiration)
+    {
+        if deployment(tx.deployment).map(|d| d.sui_chain) != Some(*chain) {
+            error!("ValidDuring chain is not the Hashi deployment's network");
+            reject_on::<()>(
+                core::file!(),
+                core::line!(),
+                SyscallError::NotSupported as u16,
+            )
+            .await;
+        }
+    }
+
+    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
+    if gas_from_address_balance && !expiration.is_valid_during() {
+        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
+        reject_on::<u64>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // Both checks below only fire when sender and gas owner differ:
+    // when they are the same account the two resolve to one address
+    // and the existing checks are already correct. Rejecting here
+    // routes to the not-recognized/blind-sign path, and is a hard
+    // reject in swap, like other parse ambiguity.
+    let principals = TxPrincipals { sender, gas_owner };
+
+    // The withdrawal source is not carried through redeem_funds ->
+    // split -> send_funds, so the change check further down compares
+    // the deposit against the sender while the funds came from the
+    // sponsor.
+    if principals.is_sponsored() && flow.withdraws_from_sponsor {
+        error!("Sponsored tx withdraws from the sponsor's balance");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // Only aggregate amounts are tracked, not per-coin ownership, and
+    // the gas deltas are applied only when the reviewed command itself
+    // involves the gas coin. A split off the sponsor's gas coin that
+    // ends up elsewhere would therefore never be displayed.
+    if principals.is_sponsored() && flow.touches_gas_coin {
+        error!("Sponsored tx splits or merges the gas coin");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    // request_add_stake transfers the resulting StakedSui to
+    // tx_context::sender(). Every stake input other than the gas
+    // coin must be owned by the sender, so this is precisely the
+    // case where the signer supplies the principal and another
+    // account keeps the position -- and because gas comes out of
+    // that same coin, the amount given away is not even exactly
+    // knowable before execution. A stake funded from the sender's
+    // own coins stays clear-signable and names its owner.
+    if principals.is_sponsored() && flow.stakes_gas_coin {
+        error!("Sponsored tx stakes the sponsor's gas coin");
+        reject_on::<()>(
+            core::file!(),
+            core::line!(),
+            SyscallError::NotSupported as u16,
+        )
+        .await;
+    }
+
+    (
+        v,
+        (gas_budget, total_gas_amount, gas_from_address_balance),
+        principals,
+        expiration,
+    )
+}
+
 impl<OD> HasOutput<TransactionDataSchema> for TransactionDataParser<OD> {
     type Output = TransactionDataV1Output;
 }
@@ -2645,147 +3471,23 @@ impl<BS: Clone + Readable, OD: Clone + HasObjectData> AsyncParser<TransactionDat
             match enum_variant {
                 0 => {
                     info!("TransactionData: V1");
-                    let (v, flow) = (TransactionKindParser {
-                        object_data_source: self.object_data_source.clone(),
-                    })
-                    .parse(input)
+                    let (v, flow) = NoinlineFut(
+                        (TransactionKindParser {
+                            object_data_source: self.object_data_source.clone(),
+                        })
+                        .parse(input),
+                    )
                     .await;
-
-                    let sender = <DefaultInterp as AsyncParser<SuiAddress, BS>>::parse(
-                        &DefaultInterp,
+                    // Out of line: the phases below are not on the deep path of the
+                    // parse, and inline they made this frame, which stays on the stack
+                    // while every command and coin object is parsed, several KB larger.
+                    NoinlineFut(transaction_data_v1_tail(
                         input,
-                    )
-                    .await;
-
-                    // SIP-58: coin::send_funds returns the redeemed change to the signer's address
-                    // balance. Its recipient never reaches the display (only TransferObjects is
-                    // shown), so a hostile host could redeem the whole balance, show a small decoy
-                    // transfer, and divert the remainder. Reject (routes to not-recognized; hard
-                    // reject in swap) unless the change returns to the sender.
-                    if let Some(deposit) = flow.self_deposit {
-                        if deposit != sender {
-                            error!("coin::send_funds change recipient is not the sender (SIP-58)");
-                            reject_on::<()>(
-                                core::file!(),
-                                core::line!(),
-                                SyscallError::NotSupported as u16,
-                            )
-                            .await;
-                        }
-                    }
-
-                    let (gas_coins, gas_owner, gas_budget) = gas_data_parser().parse(input).await;
-
-                    // SIP-58: gas_coins may be empty (gas paid from address balance). The
-                    // gas coin's balance is then genuinely unknown to the device, so seed
-                    // total_gas_amount with None (same as the "coin object not found"
-                    // fallback below) rather than Some(0) -- otherwise a GasCoin
-                    // transfer/stake would clear-sign a false "0 SUI" instead of falling
-                    // back to the unrecognized-tx path (B2CA-2793 finding 4).
-                    let gas_from_address_balance = gas_coins.is_empty();
-
-                    // Try to find the total amount of all gas payment objects
-                    // This value may be necessary if the transaction contains transfer of entire GasCoin
-                    let mut total_gas_amount: Option<u64> = if gas_from_address_balance {
-                        None
-                    } else {
-                        Some(0)
-                    };
-                    for digest in gas_coins.iter() {
-                        if let Some(amt0) = total_gas_amount {
-                            let object_data = self.object_data_source.get_object_data(digest).await;
-                            match object_data {
-                                // B2CA-2793 follow-up (finding 1): checked. If the
-                                // gas payment balances sum past u64::MAX the total is
-                                // not representable, so leave it unknown (None) --
-                                // exactly like an unresolvable payment object below.
-                                // A GasCoin transfer/stake then falls back to the
-                                // unrecognized-tx path instead of clear-signing a
-                                // wrapped, understated amount.
-                                Some(ObjectData::Coin { amount, .. }) => {
-                                    total_gas_amount = amt0.checked_add(amount)
-                                }
-                                // A StakedSui position cannot pay gas; treat the
-                                // total as unknown rather than as a liquid amount.
-                                Some(ObjectData::StakedSui { .. }) | None => {
-                                    total_gas_amount = None
-                                }
-                            }
-                        }
-                    }
-
-                    let expiration = TransactionExpirationParser.parse(input).await;
-
-                    // SIP-58: stateless tx (empty gas payment) requires ValidDuring for replay protection
-                    if gas_from_address_balance && !expiration.is_valid_during() {
-                        error!("Empty gas payment requires ValidDuring expiration (SIP-58)");
-                        reject_on::<u64>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // Both checks below only fire when sender and gas owner differ:
-                    // when they are the same account the two resolve to one address
-                    // and the existing checks are already correct. Rejecting here
-                    // routes to the not-recognized/blind-sign path, and is a hard
-                    // reject in swap, like other parse ambiguity.
-                    let principals = TxPrincipals { sender, gas_owner };
-
-                    // The withdrawal source is not carried through redeem_funds ->
-                    // split -> send_funds, so the change check further down compares
-                    // the deposit against the sender while the funds came from the
-                    // sponsor.
-                    if principals.is_sponsored() && flow.withdraws_from_sponsor {
-                        error!("Sponsored tx withdraws from the sponsor's balance");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // Only aggregate amounts are tracked, not per-coin ownership, and
-                    // the gas deltas are applied only when the reviewed command itself
-                    // involves the gas coin. A split off the sponsor's gas coin that
-                    // ends up elsewhere would therefore never be displayed.
-                    if principals.is_sponsored() && flow.touches_gas_coin {
-                        error!("Sponsored tx splits or merges the gas coin");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    // request_add_stake transfers the resulting StakedSui to
-                    // tx_context::sender(). Every stake input other than the gas
-                    // coin must be owned by the sender, so this is precisely the
-                    // case where the signer supplies the principal and another
-                    // account keeps the position -- and because gas comes out of
-                    // that same coin, the amount given away is not even exactly
-                    // knowable before execution. A stake funded from the sender's
-                    // own coins stays clear-signable and names its owner.
-                    if principals.is_sponsored() && flow.stakes_gas_coin {
-                        error!("Sponsored tx stakes the sponsor's gas coin");
-                        reject_on::<()>(
-                            core::file!(),
-                            core::line!(),
-                            SyscallError::NotSupported as u16,
-                        )
-                        .await;
-                    }
-
-                    (
+                        &self.object_data_source,
                         v,
-                        (gas_budget, total_gas_amount, gas_from_address_balance),
-                        principals,
-                        expiration,
-                    )
+                        flow,
+                    ))
+                    .await
                 }
                 _ => {
                     reject_on(
@@ -2826,6 +3528,12 @@ pub enum KnownTx {
     },
     UnstakeTx {
         total_amount: u64,
+        gas_budget: u64,
+        gas_from_address_balance: bool,
+    },
+    /// Never signed in swap mode.
+    Hashi {
+        tx: Box<HashiTx>,
         gas_budget: u64,
         gas_from_address_balance: bool,
     },
@@ -2948,6 +3656,14 @@ pub const fn tx_parser<BS: Clone + Readable, OD: Clone + HasObjectData>(
                     let (gas_budget, _, gas_from_address_balance) = d.1;
                     Some(KnownTx::UnstakeTx {
                         total_amount,
+                        gas_budget,
+                        gas_from_address_balance,
+                    })
+                }
+                ProgrammableTransaction::Hashi(tx) => {
+                    let (gas_budget, _, gas_from_address_balance) = d.1;
+                    Some(KnownTx::Hashi {
+                        tx,
                         gas_budget,
                         gas_from_address_balance,
                     })

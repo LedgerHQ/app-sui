@@ -64,6 +64,9 @@ After changing `Cargo.lock`, run `./update-crate-hashes.sh` to refresh `crate-ha
 ### Swap is the security-critical trust boundary
 In swap mode the device signs **without the normal confirmation UI**, trusting `swap/mod.rs::check_tx_params` to match the host-supplied transaction against partner-signed swap parameters (`swap/params.rs`). Treat any parser-derived classification used here as security-relevant: a parsing ambiguity becomes a "sign the wrong thing silently" bug. The established fail-safe is to **reject (return `None` / `reject_on`) on any ambiguity**, which routes the tx to the not-recognized/blind-sign path and makes swaps reject outright.
 
+### Hashi (third-party Move calls)
+Hashi (MystenLabs' Sui-native BTC bridge) withdraw/cancel/deposit are the only non-0x2/0x3 package calls the parser clear-signs. Trust is a pinned deployment table in `parser/hashi.rs` (call package(s), original type package, `Hashi` object, Sui chain, Bitcoin HRP): an unpinned package stays unknown, so **each Hashi package upgrade needs an app release**. In `parser/tx.rs`, `hashi_route` sends a command to `handle_hashi_call` only if that command was rejected before Hashi support. Any such route outside a complete Hashi flow rejects (`hashi.is_some()` check), and `finish_hashi` rejects any leftover coin of another type or any unconsumed intermediate. Pure lengths 4/21/33 are kept as `RawPure`, which only Hashi handlers decode. `KnownTx::Hashi` is mapped to the unknown arm in swap mode. Fixtures come from the pinned `@mysten/hashi` builders: `tests/tools/hashi-fixtures` (`npm install && node gen.mjs`) writes `tests/standalone/hashi_fixtures.json`.
+
 ### Device targeting
 Heavy `cfg` use selects UI and entry points: NBGL (`ui/nbgl.rs`) for `stax`/`flex`/`apex_p`, BAGL for `nanosplus`/`nanox`; entry split as `main_stax.rs` vs `main_nanos.rs`, re-exported through `ui.rs`. `target_family = "bolos"` = any device.
 

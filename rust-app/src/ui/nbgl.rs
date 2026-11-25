@@ -1,8 +1,10 @@
 use crate::ctx::RunCtx;
 use crate::interface::*;
 use crate::parser::common::SUI_COIN_DECIMALS;
+use crate::parser::hashi::{deployment, HashiOp, HashiTx, HASHI_BTC_DECIMALS, HASHI_BTC_TICKER};
 use crate::parser::tx::TxPrincipals;
 use crate::swap::params::TxParams;
+use crate::ui::bech32::segwit_address;
 use crate::ui::common::*;
 use crate::utils::*;
 
@@ -329,6 +331,191 @@ impl UserInterface {
 
         let first_msg = format!("Review {kind} to unstake SUI");
         let last_msg = format!("Sign {kind} to unstake SUI");
+        let success = NbglReview::new()
+            .glyph(&APP_ICON)
+            .titles(&first_msg, "", &last_msg)
+            .show(&fields);
+        NbglReviewStatus::new()
+            .status_type(StatusType::Transaction)
+            .show(success);
+        if success {
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    pub fn confirm_hashi_tx(
+        &self,
+        address: &SuiPubKeyAddress,
+        tx: &HashiTx,
+        gas: HashiGas,
+        principals: &TxPrincipals,
+        replay: Option<ReplayDomain>,
+    ) -> Option<()> {
+        self.do_refresh.replace(true);
+        let dep = deployment(tx.deployment)?;
+        let who = principal_values(principals, address);
+        let kind = who.kind();
+        let btc = |amount: u64, ticker: &str| {
+            let (quotient, remainder) = get_amount_in_decimals(amount, HASHI_BTC_DECIMALS);
+            format!("{ticker} {}.{}", quotient, remainder.as_str())
+        };
+        // Hashi never pays gas out of a coin it moves.
+        let gas_val = format_gas_amount(
+            gas.gas_budget,
+            GasSource::new(gas.gas_from_address_balance, false),
+        );
+        let replay_vals = replay_values(&replay);
+
+        // Nano screens are narrower, so labels are shorter there and the operation
+        // gets its own screen instead of a long review title.
+        let nano = cfg!(any(target_os = "nanosplus", target_os = "nanox"));
+
+        // Owned values the fields borrow, built before the fields themselves:
+        // `values` before the accounts, `after` between them and the gas.
+        let mut values: Vec<(alloc::string::String, alloc::string::String)> = Vec::new();
+        let mut after: Vec<(alloc::string::String, alloc::string::String)> = Vec::new();
+        let (first_msg, last_msg) = match &tx.op {
+            HashiOp::Withdraw {
+                amount,
+                change,
+                btc_address,
+            } => {
+                // The parser only admits the two shapes the encoder accepts; refuse
+                // to sign rather than show anything else.
+                let to = segwit_address(dep.btc_hrp, btc_address.version, btc_address.program())?;
+                if nano {
+                    values.push(("Operation".into(), "Withdraw to Bitcoin".into()));
+                }
+                values.push(("Withdraw".into(), btc(*amount, HASHI_BTC_TICKER)));
+                if *change != 0 {
+                    values.push(("Change to sender".into(), btc(*change, HASHI_BTC_TICKER)));
+                }
+                values.push(("To (Bitcoin)".into(), to.as_str().into()));
+                values.push(("Bitcoin network".into(), dep.btc_network.into()));
+                let fee_label = if nano {
+                    "Network fee"
+                } else {
+                    "Bitcoin network fee"
+                };
+                after.push((fee_label.into(), "Deducted from amount".into()));
+                (
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to withdraw hBTC from Hashi")
+                    },
+                    format!("Sign {kind} to withdraw hBTC?"),
+                )
+            }
+            HashiOp::Cancel {
+                request_id,
+                refund_recipient,
+            } => {
+                // The sender is shown as "Refund to"; the parser only admits a
+                // refund to the sender, so refuse anything else here too.
+                if *refund_recipient != principals.sender {
+                    return None;
+                }
+                if nano {
+                    values.push(("Operation".into(), "Cancel Hashi withdrawal".into()));
+                }
+                let request_label = if nano {
+                    "Request"
+                } else {
+                    "Withdrawal request"
+                };
+                values.push((request_label.into(), format!("0x{}", HexSlice(request_id))));
+                (
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to cancel Bitcoin withdrawal")
+                    },
+                    format!("Sign {kind} to cancel withdrawal?"),
+                )
+            }
+            HashiOp::Deposit {
+                recipient,
+                utxos,
+                total,
+            } => {
+                let (amount_label, tx_label) = if nano {
+                    ("Bitcoin amount", "Bitcoin tx")
+                } else {
+                    ("Amount deposit", "Bitcoin transaction")
+                };
+                if nano {
+                    values.push(("Operation".into(), "Register Bitcoin deposit".into()));
+                }
+                let utxos = utxos.as_slice();
+                let numbered = utxos.len() > 1;
+                if numbered {
+                    values.push(("Total".into(), btc(*total, "BTC")));
+                } else if let Some(utxo) = utxos.first() {
+                    values.push((amount_label.into(), btc(utxo.amount, "BTC")));
+                }
+                // Registering a deposit for someone else cannot redirect funds (the
+                // bridge recomputes the deposit address), but say so plainly.
+                let ours = recipient.as_slice() == address.get_binary_address();
+                let recipient_label = if ours || nano {
+                    "hBTC recipient"
+                } else {
+                    "hBTC recipient (not your account)"
+                };
+                values.push((recipient_label.into(), format!("0x{}", HexSlice(recipient))));
+                if !ours && nano {
+                    values.push(("Warning".into(), "Not your account".into()));
+                }
+                for (i, utxo) in utxos.iter().enumerate() {
+                    let n = if numbered {
+                        format!(" {}", i + 1)
+                    } else {
+                        alloc::string::String::new()
+                    };
+                    // Bitcoin shows txids in reverse of their internal byte order.
+                    let mut txid = utxo.txid;
+                    txid.reverse();
+                    values.push((format!("{tx_label}{n}"), format!("{}", HexSlice(&txid))));
+                    values.push((format!("Output index{n}"), format!("{}", utxo.vout)));
+                    if numbered {
+                        values.push((format!("{amount_label}{n}"), btc(utxo.amount, "BTC")));
+                    }
+                }
+                (
+                    if nano {
+                        format!("Review {kind}")
+                    } else {
+                        format!("Review {kind} to register Bitcoin deposit")
+                    },
+                    format!("Sign {kind} to register Bitcoin deposit?"),
+                )
+            }
+        };
+        after.push(("Bridge".into(), dep.label.into()));
+
+        // Each review leads with what moves where; the accounts come after it.
+        let from_label = if matches!(tx.op, HashiOp::Cancel { .. }) {
+            "Refund to"
+        } else {
+            "From"
+        };
+        fn as_field((name, value): &(alloc::string::String, alloc::string::String)) -> Field<'_> {
+            Field {
+                name: name.as_str(),
+                value: value.as_str(),
+            }
+        }
+        let mut fields: Vec<Field> = values.iter().map(as_field).collect();
+        fields.extend(who.fields(from_label));
+        fields.extend(after.iter().map(as_field));
+        fields.push(Field {
+            name: "Max Gas",
+            value: &gas_val,
+        });
+        fields.extend(replay_fields(&replay_vals));
+
         let success = NbglReview::new()
             .glyph(&APP_ICON)
             .titles(&first_msg, "", &last_msg)
